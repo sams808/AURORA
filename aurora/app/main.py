@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, Q
 from aurora import APP_NAME, ORG_NAME, __version__
 from aurora.app.about import AboutDialog
 from aurora.app.check import CheckPerspective
+from aurora.app.compare import ComparePerspective
+from aurora.app.fit import FitPerspective
+from aurora.app.library import Library
 from aurora.app.home import HomePerspective
 from aurora.app.reduce import ReducePerspective
 from aurora.app.report import ReportPerspective
@@ -79,9 +82,13 @@ class MainWindow(QMainWindow):
         self.reduce = ReducePerspective(self.session)
         self.report = ReportPerspective(self.session)
         self.check = CheckPerspective(self.session)
+        self.library = Library(self)
+        self.compare = ComparePerspective(self.library)
+        self.fit = FitPerspective(self.library)
+        self.reduce.library = self.library
         self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce,
-                                          "check": self.check, "report": self.report}
-        for w in (self.home, self.survey, self.reduce, self.check, self.report):
+                                          "check": self.check, "compare": self.compare, "fit": self.fit, "report": self.report}
+        for w in (self.home, self.survey, self.reduce, self.check, self.compare, self.fit, self.report):
             self.stack.addWidget(w)
         for key, title in PERSPECTIVES[1:]:
             if key in self.pages:

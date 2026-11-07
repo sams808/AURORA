@@ -208,6 +208,12 @@ class ReducePerspective(QWidget):
         self.zone_card.body.addLayout(zr2)
         self.z_info = QLabel(""); self.z_info.setObjectName("muted"); self.z_info.setWordWrap(True)
         self.zone_card.body.addWidget(self.z_info)
+        zb2 = QHBoxLayout()
+        self.send_btn = QPushButton("Send the zone's traces to Compare")
+        self.send_btn.clicked.connect(self.send_to_compare)
+        zb2.addWidget(self.send_btn); zb2.addStretch(1)
+        self.zone_card.body.addLayout(zb2)
+        self.library = None
         self.z_label.lineEdit().editingFinished.connect(self._zone_edited)
         self.z_group.lineEdit().editingFinished.connect(self._zone_edited)
         self.z_comment.editingFinished.connect(self._zone_edited)
@@ -477,6 +483,26 @@ class ReducePerspective(QWidget):
             lab.setObjectName("muted")
             self.cards_lay.insertWidget(0, lab)
             self._placeholder = lab
+
+    def send_to_compare(self) -> int:
+        """Add the current zone's normalised sum and TEY (every included scan) to the Compare library."""
+        z = self.session.zone()
+        if z is None or self.library is None:
+            return 0
+        n = 0
+        for sid, st in z.settings.items():
+            sd = self.session.stack_loaded(sid)
+            if sd is None or not st.include:
+                continue
+            pix = members(z, sd.x, sd.y, sd.pitch)
+            good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
+            t = zone_traces(sd, pix, st, good)
+            if t is None:
+                continue
+            label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {sid[11:16]}"
+            n += len(self.library.add_traces(label, t.E, t.sum, t.tey if st.tey else None, source=f"zone {z.id} of {sid}"))
+        self.status_label.setText(f"{n} traces sent to Compare" if n else "nothing to send: load the zone's scans first")
+        return n
 
     # ------------------------------------------------------------------ preview
     def update_preview(self) -> None:

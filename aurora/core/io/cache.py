@@ -39,7 +39,10 @@ def save_npz(path: Path, **arrays) -> None:
             return
         except PermissionError:                 # a virus scanner may still hold the new file for a moment
             time.sleep(0.2 * (attempt + 1))
-    os.replace(tmp, path)
+        except FileNotFoundError:               # the temporary file vanished (seen in %TEMP% folders): write directly
+            break
+    with open(path, "wb") as f:
+        np.savez(f, **arrays)
 
 
 def _slug(label: str) -> str:
