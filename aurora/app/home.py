@@ -62,9 +62,11 @@ class HomePerspective(QWidget):
         self.tree.setHeaderLabels(COLS)
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        for i in range(1, len(COLS)):
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.tree.header().resizeSection(0, 360)
+        for i in range(1, len(COLS) - 1):
             self.tree.header().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        self.tree.header().setStretchLastSection(True)
         self.tree.currentItemChanged.connect(self._on_select)
         left.body.addWidget(self.tree, 1)
         split.addWidget(left)

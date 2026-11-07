@@ -221,7 +221,9 @@ class Project:
         log.info("project %s (raw %s): %d day folders", root, raw, len(day_dirs))
         proj = cls(root=root, raw=raw)
         cfg = proj.config_dir
-        proj.calibration = Calibration(cfg / "sdd_calibration.json")
+        # sgm_report keeps the calibration in the CLS library folder next to the project when there is one
+        lib_cal = root.parent / "SGM_Beamline_Analysis-main" / "sdd_calibration.json"
+        proj.calibration = Calibration(lib_cal if lib_cal.exists() else cfg / "sdd_calibration.json")
         proj.roi_bins = RoiBins(cfg / "roi_bins.json")
         proj.plate_layout = load_plate_layout(cfg / "plate_layout.json")
         proj.sample_elements = load_sample_elements(cfg / "sample_elements.json")
