@@ -40,10 +40,13 @@ class ComparePerspective(QWidget):
         left = Card("Library")
         ops = QHBoxLayout()
         for text, fn in (("Remove row", self._remove_rows), ("Remove sample", self._remove_sample), ("Rename", self._rename),
-                         ("Duplicate", lambda: self._row_op(self.lib.duplicate)), ("Up", lambda: self._row_op(lambda r: self.lib.move(r, -1))),
-                         ("Down", lambda: self._row_op(lambda r: self.lib.move(r, 1))), ("Show all", lambda: self.lib.set_all("show", True)),
+                         ("Duplicate", lambda: self._row_op(self.lib.duplicate)), ("▲", lambda: self._row_op(lambda r: self.lib.move(r, -1))),
+                         ("▼", lambda: self._row_op(lambda r: self.lib.move(r, 1))), ("Show all", lambda: self.lib.set_all("show", True)),
                          ("Hide all", lambda: self.lib.set_all("show", False))):
-            b = QPushButton(text); b.clicked.connect(fn); ops.addWidget(b)
+            b = QPushButton(text); b.clicked.connect(fn)
+            if len(text) == 1:
+                b.setMaximumWidth(34)
+            ops.addWidget(b)
         ops.addStretch(1)
         left.body.addLayout(ops)
         self.table = QTableWidget(0, len(COLS))
@@ -77,15 +80,18 @@ class ComparePerspective(QWidget):
         opts.addWidget(self.spacing)
         self.labels_on = QCheckBox("labels"); self.labels_on.setChecked(True); opts.addWidget(self.labels_on)
         self.signal_in_label = QCheckBox("signal in label"); opts.addWidget(self.signal_in_label)
-        opts.addWidget(QLabel("peaks: prominence"))
-        self.prominence = QDoubleSpinBox(); self.prominence.setRange(0, 100); self.prominence.setDecimals(3); self.prominence.setSingleStep(0.01); self.prominence.setValue(0.05)
-        opts.addWidget(self.prominence)
-        opts.addWidget(QLabel("distance"))
-        self.distance = QDoubleSpinBox(); self.distance.setRange(1, 500); self.distance.setDecimals(0); self.distance.setValue(5)
-        opts.addWidget(self.distance)
-        self.show_peaks = QCheckBox("mark peaks"); opts.addWidget(self.show_peaks)
         opts.addStretch(1)
         pc.body.addLayout(opts)
+        pk = QHBoxLayout()
+        self.show_peaks = QCheckBox("mark peaks"); pk.addWidget(self.show_peaks)
+        pk.addWidget(QLabel("min prominence"))
+        self.prominence = QDoubleSpinBox(); self.prominence.setRange(0, 100); self.prominence.setDecimals(3); self.prominence.setSingleStep(0.01); self.prominence.setValue(0.05)
+        pk.addWidget(self.prominence)
+        pk.addWidget(QLabel("min distance (points)"))
+        self.distance = QDoubleSpinBox(); self.distance.setRange(1, 500); self.distance.setDecimals(0); self.distance.setValue(5)
+        pk.addWidget(self.distance)
+        pk.addStretch(1)
+        pc.body.addLayout(pk)
         self.plot = pg.PlotWidget(background="w")
         self.plot.setLabel("bottom", "incident energy (eV)"); self.plot.setLabel("left", "normalised, offset")
         self.plot.getViewBox().disableAutoRange()

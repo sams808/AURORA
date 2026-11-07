@@ -69,6 +69,12 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: {t['card']}; borde
 QProgressBar {{ border: 1px solid {t['line']}; border-radius: 6px; background: {t['card']}; text-align: center; height: 14px; }}
 QProgressBar::chunk {{ background: {t['aurora']}; border-radius: 6px; }}
 QStatusBar {{ background: {t['paper']}; color: {t['muted']}; }}
+QTabWidget::pane {{ background: {t['paper']}; border: 0; top: -1px; }}
+QTabWidget > QWidget {{ background: {t['paper']}; }}
+QTabBar::tab {{ background: {t['muted_bg']}; color: {t['muted']}; padding: 6px 14px; border-top-left-radius: 8px;
+    border-top-right-radius: 8px; margin-right: 2px; }}
+QTabBar::tab:selected {{ background: {t['card']}; color: {t['ink']}; font-weight: 600; }}
+QListWidget::indicator, QTableWidget::indicator {{ width: 14px; height: 14px; }}
 QSplitter::handle {{ background: {t['paper']}; }}
 QMenuBar {{ background: {t['paper']}; }}
 QToolTip {{ background: {t['night']}; color: #F4FFF8; border: 0; padding: 4px 6px; }}
