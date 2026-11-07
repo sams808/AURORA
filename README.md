@@ -7,6 +7,7 @@ Status: Phase 0 (2026-11-06): package skeleton, raw-data readers, project discov
 ## Quick start (developers)
 
 ```
+py -3.12 -m venv .venv && .venv\Scripts\activate   # own environment: PySide6 >= 6.10 is required (6.9 paints nothing)
 python -m pip install -e ".[dev,build]"
 python -m pytest                       # synthetic data; the Nov 2026 beamtime tests run when AURORA_REAL_PROJECT exists
 aurora                                 # the application

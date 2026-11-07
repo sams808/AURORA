@@ -214,10 +214,12 @@ def shutdown_app(app: QApplication, *windows: QWidget) -> None:
     import gc
     import shiboken6
     for w in windows:
-        w.close()
+        if shiboken6.isValid(w):
+            w.close()
     for w in list(QApplication.topLevelWidgets()):
-        w.close()
-        w.deleteLater()
+        if shiboken6.isValid(w):
+            w.close()
+            w.deleteLater()
     app.processEvents()
     gc.collect()
     app.processEvents()

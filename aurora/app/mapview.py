@@ -83,7 +83,9 @@ class MapView(pg.GraphicsLayoutWidget):
         self._cmap = pg.colormap.get("viridis")
         self.image.setLookupTable(self._cmap.getLookupTable(nPts=256))
         self._overlays: list = []
-        self.vb.rect_drawn.connect(self.rect_drawn)
+        self._data_rect: QRectF | None = None
+        self.vb.disableAutoRange()          # ranges are set from the data: pyqtgraph's auto-range of an ImageItem is
+        self.vb.rect_drawn.connect(self.rect_drawn)   # garbage while the view has no geometry, and it then sticks
         self.vb.brush_at.connect(self.brush_at)
         self.vb.clicked.connect(self.clicked)
         self.scene().sigMouseMoved.connect(self._moved)
@@ -109,10 +111,13 @@ class MapView(pg.GraphicsLayoutWidget):
         self.image.setImage(img, levels=(lo, hi), autoLevels=False)
         dx = g.dx if np.isfinite(g.dx) else 0.1
         dy = g.dy if np.isfinite(g.dy) else dx
-        self.image.setRect(QRectF(float(g.xs[0]) - dx / 2, float(g.ys[0]) - dy / 2, len(g.xs) * dx, len(g.ys) * dy))
+        self._data_rect = QRectF(float(g.xs[0]) - dx / 2, float(g.ys[0]) - dy / 2, len(g.xs) * dx, len(g.ys) * dy)
+        self.image.setRect(self._data_rect)
 
     def autorange(self) -> None:
-        self.plot.autoRange()
+        """Fit the view to the image (plus a margin), from the known data rectangle."""
+        if self._data_rect is not None:
+            self.vb.setRange(self._data_rect, padding=0.04, disableAutoRange=True)
 
     # ------------------------------------------------------------------ overlays
     def clear_overlays(self) -> None:
@@ -130,7 +135,7 @@ class MapView(pg.GraphicsLayoutWidget):
         it.setPen(pen)
         it.setBrush(QBrush(QColor(fill)) if fill else QBrush(Qt.NoBrush))
         it.setZValue(z)
-        self.plot.addItem(it)
+        self.plot.addItem(it, ignoreBounds=True)          # overlays never drive the auto-range: the image does
         self._overlays.append(it)
         return it
 
@@ -138,7 +143,7 @@ class MapView(pg.GraphicsLayoutWidget):
         t = pg.TextItem(text, color=colour, anchor=anchor)
         t.setPos(x, y)
         t.setZValue(20)
-        self.plot.addItem(t)
+        self.plot.addItem(t, ignoreBounds=True)
         self._overlays.append(t)
         return t
 
