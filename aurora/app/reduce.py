@@ -222,9 +222,14 @@ class ReducePerspective(QWidget):
         self.preview.all_scans.toggled.connect(self.update_preview)
         pc.body.addWidget(self.preview, 1)
         right.addWidget(pc)
+        self.cards_area.setMinimumHeight(170)
+        pc.setMinimumHeight(260)
         right.setStretchFactor(0, 0); right.setStretchFactor(1, 2); right.setStretchFactor(2, 3)
+        right.setSizes([150, 230, 420])
         split.addWidget(right)
-        split.setStretchFactor(0, 1); split.setStretchFactor(1, 3); split.setStretchFactor(2, 3)
+        left.setMinimumWidth(250)
+        split.setStretchFactor(0, 0); split.setStretchFactor(1, 3); split.setStretchFactor(2, 3)
+        split.setSizes([270, 660, 560])
         root.addWidget(split, 1)
 
         for w in (self.map_line, self.map_sdd, self.map_mode):
