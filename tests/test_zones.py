@@ -115,7 +115,7 @@ def test_stack_survey_and_zone_traces(fake_project):
     assert np.isfinite(t.tey).all() and t.i0_used is t.i0
     st2 = ScanSettings(sdd=[True, False, False, False], fluo_norm="raw", despike=False)
     t2 = zone_traces(sd, pix, st2)
-    assert np.array_equal(t2.sum, t2.det_raw[0]) and t2.spikes == {}
+    assert np.array_equal(t2.sum, t2.det_raw[0]) and all(v == [] for v in t2.spikes.values())
     assert zone_traces(sd, [], st) is None
     sv = SurveyData.load(proj.find(testdata.SURVEY), proj.roi_bins)
     assert sv.n == 48 and sv.lines == [] and sv.channels == ["total", "TEY", "I0"] and sv.i0_usable
