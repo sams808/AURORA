@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 360" width="1400" height="360">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0A1430"/><stop offset="1" stop-color="#101E4A"/></linearGradient>
+    <linearGradient id="r1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A78BFA" stop-opacity="0.95"/><stop offset="1" stop-color="#A78BFA" stop-opacity="0"/></linearGradient>
+    <linearGradient id="r2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38E0C2" stop-opacity="0.95"/><stop offset="1" stop-color="#38E0C2" stop-opacity="0"/></linearGradient>
+    <linearGradient id="r3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8CF5A6" stop-opacity="1"/><stop offset="1" stop-color="#8CF5A6" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect width="1400" height="360" fill="#0A1430" rx="48"/>
+  <g transform="translate(40,20) scale(0.625)">
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#sky)"/>
+    <circle cx="96" cy="118" r="5" fill="#E6F0FF" opacity="0.85"/><circle cx="150" cy="86" r="3.5" fill="#E6F0FF" opacity="0.6"/><circle cx="404" cy="104" r="4.5" fill="#E6F0FF" opacity="0.8"/><circle cx="356" cy="76" r="3" fill="#E6F0FF" opacity="0.55"/>
+    <path d="M72 352 L204 352 C 226 352 236 300 250 230 C 258 190 268 170 280 178 C 294 188 300 262 318 262 C 334 262 338 232 352 232 C 372 232 384 258 440 262 L440 420 L72 420 Z" fill="url(#r1)"/>
+    <path d="M72 334 L212 334 C 232 334 240 280 254 212 C 262 172 272 150 284 158 C 298 168 304 246 322 246 C 338 246 342 214 356 214 C 376 214 388 242 440 246 L440 420 L72 420 Z" fill="url(#r2)"/>
+    <path d="M72 316 L220 316 C 238 316 246 262 260 196 C 268 156 278 132 290 140 C 304 150 308 230 326 230 C 342 230 346 198 360 198 C 380 198 392 226 440 230 L440 420 L72 420 Z" fill="url(#r3)"/>
+    <path d="M72 316 L220 316 C 238 316 246 262 260 196 C 268 156 278 132 290 140 C 304 150 308 230 326 230 C 342 230 346 198 360 198 C 380 198 392 226 440 230" fill="none" stroke="#F4FFF8" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="72" y="412" width="368" height="8" rx="4" fill="#E6F0FF" opacity="0.35"/>
+  </g>
+  <text x="420" y="205" font-family="Segoe UI, Inter, Helvetica Neue, Arial, sans-serif" font-size="168" font-weight="700" letter-spacing="14" fill="#F4FFF8">AURORA</text>
+  <text x="426" y="268" font-family="Segoe UI, Inter, Helvetica Neue, Arial, sans-serif" font-size="38" font-weight="400" letter-spacing="3" fill="#9FB4D8">Soft X-ray XAS and XRF stacks, SGM beamline (CLS)</text>
+</svg>
