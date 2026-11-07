@@ -16,6 +16,7 @@ dependencies = [
     "h5py>=3.10",
     "PySide6>=6.10",      # 6.9.1 paints no pyqtgraph curves or images at all (verified 2026-11-06); 6.12 works
     "pyqtgraph>=0.13",
+    "matplotlib>=3.8",
     "xraydb>=4.5",
     "platformdirs>=4.0",
 ]

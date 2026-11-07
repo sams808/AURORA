@@ -56,6 +56,23 @@ def cmd_scan(path: Path) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    from aurora.core.io.config import ZonesFile
+    from aurora.core.model import Project
+    from aurora.core.report import ReportBuilder
+    proj = Project.discover(args.project)
+    zpath = args.zones or (proj.root / ".aurora" / "session.json")
+    zones = ZonesFile.load(zpath)
+    out = args.out or (proj.root / "reports" / "aurora")
+    builder = ReportBuilder(proj, zones, out, title=args.title, groups=args.groups or None,
+                            appendix=not args.no_appendix, maps=not args.no_maps, png_dpi=args.dpi)
+    res = builder.build(progress=lambda i, n, m: print(f"  {i + 1}/{n} {m}", end="\r"))
+    print(f"\n{res.pdf}: {res.pages} pages, {res.entries} zone spectra, {len(res.csvs)} CSV, {len(res.figures)} figures")
+    for s in res.skipped:
+        print("  skipped:", s)
+    return 0
+
+
 def cmd_distcheck() -> int:
     """Smoke test of a frozen build: build a synthetic project, open the window offscreen, read it back."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -94,6 +111,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("path", type=Path)
     s = sub.add_parser("scan", help="describe one scan folder and read its first energy")
     s.add_argument("path", type=Path)
+    r = sub.add_parser("report", help="build the group-organised report from a zones file (headless)")
+    r.add_argument("project", type=Path)
+    r.add_argument("--zones", type=Path, help="zones_all.json (default: <project>/.aurora/session.json)")
+    r.add_argument("--out", type=Path, help="output folder (default: <project>/reports/aurora)")
+    r.add_argument("--title")
+    r.add_argument("--groups", nargs="*", help="only these sample groups")
+    r.add_argument("--no-appendix", action="store_true")
+    r.add_argument("--no-maps", action="store_true")
+    r.add_argument("--dpi", type=int, default=600, help="resolution of the figure PNGs (default 600)")
     args = p.parse_args(argv)
     _logging(args.verbose)
     if args.distcheck:
@@ -102,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_project(args.path)
     if args.cmd == "scan":
         return cmd_scan(args.path)
+    if args.cmd == "report":
+        return cmd_report(args)
     from aurora.app.main import run
     return run(getattr(args, "project", None))
 

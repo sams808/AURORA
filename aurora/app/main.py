@@ -13,6 +13,7 @@ from aurora import APP_NAME, ORG_NAME, __version__
 from aurora.app.about import AboutDialog
 from aurora.app.home import HomePerspective
 from aurora.app.reduce import ReducePerspective
+from aurora.app.report import ReportPerspective
 from aurora.app.session import Session
 from aurora.app.survey import SurveyPerspective
 from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
@@ -75,10 +76,10 @@ class MainWindow(QMainWindow):
         self.home.project_opened.connect(self._on_project)
         self.survey = SurveyPerspective(self.session)
         self.reduce = ReducePerspective(self.session)
-        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce}
-        self.stack.addWidget(self.home)
-        self.stack.addWidget(self.survey)
-        self.stack.addWidget(self.reduce)
+        self.report = ReportPerspective(self.session)
+        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce, "report": self.report}
+        for w in (self.home, self.survey, self.reduce, self.report):
+            self.stack.addWidget(w)
         for key, title in PERSPECTIVES[1:]:
             if key in self.pages:
                 continue
@@ -183,8 +184,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.home.shutdown()
-        if self.reduce._worker is not None:
-            self.reduce._worker.wait(30000)
+        for w in (self.reduce, self.report):
+            if w._worker is not None:
+                w._worker.wait(30000)
         self.session.save()
         super().closeEvent(event)
 
