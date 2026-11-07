@@ -3,6 +3,9 @@
 AURORA reads the raw folders of an SGM beamtime (ambxas endstation, Canadian Light Source) and turns them into
 quality-checked spectra, comparisons, fits, maps and a report. Nothing is ever written into `raw/`.
 
+This is the short guide. `MANUAL.md` describes every control, `TUTORIALS.md` walks through the demo beamtime
+(`aurora demo <folder>`), `INSTALL.md` covers installation.
+
 ## 1. Open a beamtime
 
 File > Open project, or drop the folder that contains `raw/` (for example `my_beamtime`). A single day folder or a
@@ -49,6 +52,10 @@ writes the same format.
 Defaults for new settings come from Settings (de-spike k, normalisations). Saturated scans start with their SDDs
 unticked (TEY only); scans with an invalid I0 start with the good-I0 source.
 
+**Propose…** adds zones as a first guess (the sgm_report summary when the day has one, else the bright pads of the
+survey). **Stitch…** (after Load all) merges overlapping tiles into one stack: halve the overlaps, check the seams,
+bake; the stitched stack is listed with the scans and works with zones, Check and Maps.
+
 ## 4. Check
 
 **Run the checks on this holder** probes seven energies of every stack:
@@ -64,6 +71,9 @@ The I0 panel scores every scan's I0 curve (level, biggest step, roughness, non-p
 compares the detectors on the selected zone and scan (each pre-edge subtracted and scaled to its own range): a
 detector differing by more than 25 % of the edge step, or with isolated spikes, is named.
 
+The **I0 explorer** reads the mcc columns of any stack, including the photodiode tests, and plots mesh, photodiode,
+their ratio and TEY normalised to their medians: a ratio that drifts with energy means the two disagree on the beam.
+
 ## 5. Compare
 
 A library of spectra from CSV files: AURORA zone CSVs, sgm_report `_xanes.csv`, John Bussey's `_full_reduced.csv` /
@@ -72,7 +82,8 @@ derivative, legacy constant pre/post, TEY pre-edge line, none), pre/post offsets
 ticks for Show, Fit and Diagnostics. The stacked plot labels every trace at its right end; peaks (prominence, distance)
 are listed; the diagnostics panel shows the raw signal with the two fitted lines and E0. First derivative (with
 smoothing) and the difference of two selected rows are one click away. Export writes a wide CSV, PNG and SVG and a
-config JSON that reloads the library.
+config JSON that reloads the library. **References…** lists the spectra of the reference folder set in Settings
+(edge guessed from the file name, filter by element) and adds the ticked ones as rows.
 
 ## 6. Fit
 
@@ -84,6 +95,8 @@ Works on the rows ticked Fit in Compare, with their shifts and normalisation.
   chosen number of components; component spectra and per-sample proportions; export.
 - **ITFA**: refine the MCR solution with some samples anchored to known component percentages (use only with
   independent chemical evidence).
+- **Peaks**: one trace decomposed into 1–8 gaussian / lorentzian / pseudo-voigt peaks on an arctan step and a
+  linear or constant background; initial centres automatic or typed; parameters table and export.
 
 ## 7. Maps
 
@@ -92,7 +105,8 @@ Explore: the map of any emission window (a fixed line or a custom window in eV, 
 energy or averaged; the ROI is the whole map, the current zone, or a drawn rectangle; the XANES of the ROI per detector.
 Elemental maps: one map per fixed line. RGB: three windows as a composite. Clusters: PCA on the per-pixel XANES and
 k-means, with the cluster map and mean spectra. PyMca exports: the XANES stack (`_PCA-CA.h5`) and the 4D file
-(`_Elemental_PyMca.h5`).
+(`_Elemental_PyMca.h5`). **deconvolve** sharpens the map (Richardson-Lucy or Wiener, PSF in µm); it is a view, the
+exports stay the measured cube.
 
 ## 8. Report
 
@@ -114,5 +128,6 @@ aurora gui <project>
 aurora project <project>      list days, holders, scans, status and flags
 aurora scan <scan folder>     one scan's metadata and first energy
 aurora report …               the report, headless
+aurora demo <folder>          a synthetic beamtime for the tutorials
 aurora --distcheck            smoke test of an installation
 ```

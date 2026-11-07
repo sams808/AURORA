@@ -73,6 +73,25 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_demo(folder: Path) -> int:
+    """A synthetic beamtime with fixed ROI bins, a sample sheet and a few zones, for the tutorials."""
+    import json
+    from aurora.core import testdata
+    root = testdata.make_fake_project(Path(folder))
+    (root / "config" / "roi_bins.json").write_text(json.dumps({
+        "_meta": {"gains": {"sdd1": 10.0, "sdd2": 10.0, "sdd3": 10.0, "sdd4": 10.0}, "n_sigma": 1.5,
+                  "help": "line -> {sdd: [first channel, last channel + 1]}; the demo uses 10 eV per channel"},
+        "F Kα": {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77], "line_ev": 676.8},
+        "O Kα": {"sdd1": [46, 58], "sdd2": [46, 58], "sdd3": [46, 58], "sdd4": [46, 58], "line_ev": 525.0}}, indent=1), encoding="utf-8")
+    from aurora.core.names import holder_from_survey
+    holder = holder_from_survey(testdata.SURVEY)       # the sheet's plate column must equal the holder name
+    (root / "demo samples.csv").write_bytes(("measured demo,,,\n"
+                                            "Paper,Final plate#,Sample group,Sample ID,Composition,F K edge,Other edges?,Notes\n"
+                                            f",{holder},Minerals,1 alpha,CaF2,y,,demo mineral\n,{holder},Simple Glass,2 beta,NaF-glass,y,,demo glass\n").encode("cp1252"))
+    print(f"demo beamtime written to {root}\n  open it with:  aurora gui \"{root}\"")
+    return 0
+
+
 def cmd_distcheck() -> int:
     """Smoke test of a frozen build: build a synthetic project, open the window offscreen, read it back."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -120,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-appendix", action="store_true")
     r.add_argument("--no-maps", action="store_true")
     r.add_argument("--dpi", type=int, default=600, help="resolution of the figure PNGs (default 600)")
+    dm = sub.add_parser("demo", help="create a small synthetic beamtime folder (the tutorials use it)")
+    dm.add_argument("folder", type=Path)
     args = p.parse_args(argv)
     _logging(args.verbose)
     if args.distcheck:
@@ -130,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_scan(args.path)
     if args.cmd == "report":
         return cmd_report(args)
+    if args.cmd == "demo":
+        return cmd_demo(args.folder)
     from aurora.app.main import run
     return run(getattr(args, "project", None))
 

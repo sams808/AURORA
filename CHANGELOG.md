@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-11-06)
+Phase 5 and the documentation.
+- Check: I0 explorer, mesh (mcc1) vs photodiode (mcc2), their ratio and TEY for any stack including the photodiode tests.
+- Compare: References… picks spectra from a reference folder (Settings), edge guessed from the file name.
+- Reduce: Propose… zones from the sgm_report summary or from the survey pads (Otsu); Stitch… tiles into one stack with automatic overlap halving, seam check and a baked stack usable everywhere.
+- Maps: Richardson-Lucy / Wiener deconvolution of the map with a Gaussian PSF in µm (view only, exports stay measured).
+- Fit: Peaks tab, decomposition into gaussian / lorentzian / pseudo-voigt peaks + arctan step + background, export.
+- `aurora demo <folder>` writes a synthetic beamtime with ROI bins and a sample sheet for the tutorials.
+- The Report perspective now passes the Settings author to the cover (it used the built-in default before).
+- Documentation: manual, tutorials, installation, developer manual, screenshots (`docs/`).
+
 ## 0.2.0 (2026-11-06)
 First complete pass over the planned perspectives.
 - Home: beamtime folder discovery (days, holders, scans, status, flags), double-click opens a scan in Reduce.

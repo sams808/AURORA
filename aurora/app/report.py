@@ -120,8 +120,11 @@ class ReportPerspective(QWidget):
         if not groups:
             self.status.setText("tick at least one group")
             return
+        from aurora.app.settings_dialog import get
+        from aurora.core.report import AUTHOR
         builder = ReportBuilder(self.session.project, self.session.zones, Path(self.out_dir.text()),
                                 title=self.title.text().strip() or None, groups=groups,
+                                author=str(get("report_author") or AUTHOR),
                                 stacks=dict(self.session._stacks), appendix=self.appendix.isChecked(), maps=self.maps.isChecked())
         self.progress.setVisible(True); self.progress.setRange(0, 0)
         self.build_btn.setEnabled(False)
