@@ -38,8 +38,10 @@ Edge and emission-line energies come from xraydb. Data acquired at the SGM beaml
 
 ```
 aurora/core/    readers (h5, raw bin/csv, sgm_report caches, config, zones), names, grid, project model, synthetic test data
-aurora/app/     PySide6 shell: theme, icons, rail, Home perspective, About
-aurora/cli.py   aurora / aurora project / aurora scan / aurora --distcheck
+aurora/core/    + stack/survey/zones (the zone tool's maths), qc (count rate, saturation, I0, SDD agreement),
+                compare (readers, normalisations, peaks), fit (LCF, PCA, MCR-ALS, ITFA), report (group-organised PDF)
+aurora/app/     PySide6 shell: theme, icons, rail; perspectives Home, Survey, Reduce, Check, Compare, Fit, Report
+aurora/cli.py   aurora / aurora project / aurora scan / aurora report / aurora --distcheck
 tests/          pytest (offscreen Qt); tests/test_real_data.py needs the beamtime folder
 packaging/      PyInstaller spec; .github/workflows/ci.yml builds on windows-latest and macos-14
 branding/       logo (SVG, PNG 16-1024, .ico), wordmark
