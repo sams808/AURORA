@@ -4,6 +4,8 @@ Soft X-ray XAS and XRF stack analysis for the SGM beamline (ambxas endstation) o
 
 Status: Phase 0 (2026-11-06): package skeleton, raw-data readers, project discovery, Qt shell with the Home perspective, headless CLI, tests, Windows + macOS builds in CI. See `docs/BRAINSTORM.md` for the feature universe, architecture and roadmap, `docs/DESIGN.md` for the design language, and `branding/` for the logo.
 
+User guide: `docs/USER_GUIDE.md` (one section per perspective). Changes: `CHANGELOG.md`.
+
 ## Quick start (developers)
 
 ```
