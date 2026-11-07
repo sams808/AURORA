@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, Q
 
 from aurora import APP_NAME, ORG_NAME, __version__
 from aurora.app.about import AboutDialog
+from aurora.app.check import CheckPerspective
 from aurora.app.home import HomePerspective
 from aurora.app.reduce import ReducePerspective
 from aurora.app.report import ReportPerspective
@@ -77,8 +78,10 @@ class MainWindow(QMainWindow):
         self.survey = SurveyPerspective(self.session)
         self.reduce = ReducePerspective(self.session)
         self.report = ReportPerspective(self.session)
-        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce, "report": self.report}
-        for w in (self.home, self.survey, self.reduce, self.report):
+        self.check = CheckPerspective(self.session)
+        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce,
+                                          "check": self.check, "report": self.report}
+        for w in (self.home, self.survey, self.reduce, self.check, self.report):
             self.stack.addWidget(w)
         for key, title in PERSPECTIVES[1:]:
             if key in self.pages:
@@ -184,7 +187,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.home.shutdown()
-        for w in (self.reduce, self.report):
+        for w in (self.reduce, self.check, self.report):
             if w._worker is not None:
                 w._worker.wait(30000)
         self.session.save()
