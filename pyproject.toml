@@ -12,6 +12,7 @@ license = {text = "MIT"}
 authors = [{name = "Sami Soudani"}]
 dependencies = [
     "numpy>=1.26",
+    "scipy>=1.11",
     "h5py>=3.10",
     "PySide6>=6.6",
     "xraydb>=4.5",
