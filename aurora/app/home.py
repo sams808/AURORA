@@ -21,6 +21,7 @@ COLS = ("Scan", "Time", "Kind", "Edge", "Status", "Energies", "Points", "Flags")
 class HomePerspective(QWidget):
     project_opened = Signal(object)
     scan_selected = Signal(object)
+    scan_activated = Signal(object)       # double-click: open in Reduce
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -68,6 +69,7 @@ class HomePerspective(QWidget):
             self.tree.header().setSectionResizeMode(i, QHeaderView.ResizeToContents)
         self.tree.header().setStretchLastSection(True)
         self.tree.currentItemChanged.connect(self._on_select)
+        self.tree.itemDoubleClicked.connect(lambda it, col: self.scan_activated.emit(it.data(0, Qt.UserRole)) if isinstance(it.data(0, Qt.UserRole), ScanInfo) else None)
         left.body.addWidget(self.tree, 1)
         split.addWidget(left)
 

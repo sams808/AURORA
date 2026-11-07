@@ -20,6 +20,8 @@ from aurora.app.home import HomePerspective
 from aurora.app.reduce import ReducePerspective
 from aurora.app.report import ReportPerspective
 from aurora.app.session import Session
+from aurora.app.settings import recent_projects
+from aurora.app.settings_dialog import SettingsDialog, get as setting
 from aurora.app.survey import SurveyPerspective
 from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
 from aurora.app.theme import TOKENS, qss
@@ -79,7 +81,9 @@ class MainWindow(QMainWindow):
         self.session.status.connect(lambda m: self.statusBar().showMessage(m, 6000))
         self.home = HomePerspective()
         self.home.project_opened.connect(self._on_project)
+        self.home.scan_activated.connect(self.open_scan_in_reduce)
         self.survey = SurveyPerspective(self.session)
+        self.survey.open_requested.connect(self.open_scan_in_reduce)
         self.reduce = ReducePerspective(self.session)
         self.report = ReportPerspective(self.session)
         self.check = CheckPerspective(self.session)
@@ -153,7 +157,7 @@ class MainWindow(QMainWindow):
         b.setIcon(two_state_icon("settings", TOKENS["rail_text"], TOKENS["night"]))
         b.setIconSize(QSize(22, 22))
         b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        b.clicked.connect(self.show_about)
+        b.clicked.connect(self.show_settings)
         lay.addWidget(b)
         return rail
 
@@ -172,6 +176,10 @@ class MainWindow(QMainWindow):
         a = QAction("&Quit", self)
         a.setShortcut(QKeySequence.Quit)
         a.triggered.connect(self.close)
+        file.addAction(a)
+        a = QAction("&Settings…", self)
+        a.setShortcut(QKeySequence.Preferences)
+        a.triggered.connect(self.show_settings)
         file.addAction(a)
         view = m.addMenu("&View")
         a = QAction("&Full screen", self)
@@ -193,6 +201,23 @@ class MainWindow(QMainWindow):
 
     def show_about(self) -> None:
         AboutDialog(self).exec()
+
+    def show_settings(self) -> None:
+        SettingsDialog(self).exec()
+
+    def open_scan_in_reduce(self, scan) -> None:
+        """Home double-click / Survey footprint click: select the scan's holder and stack, show Reduce."""
+        for key, (day, h) in self.session.holder_keys.items():
+            if scan in h.stacks or scan in h.dropped or scan is h.survey:
+                self.session.set_holder(key)
+                break
+        self.show_perspective("reduce")
+        if scan.kind == "stack" and scan.status == "complete":
+            sid = self.session.stack_id(scan)
+            for i in range(self.reduce.scan_list.count()):
+                if self.reduce.scan_list.item(i).data(Qt.UserRole) == sid:
+                    self.reduce.scan_list.setCurrentRow(i)
+                    break
 
     def closeEvent(self, event) -> None:
         self.home.shutdown()
@@ -244,6 +269,8 @@ def run(project: Path | None = None) -> int:
     app = create_app()
     win = MainWindow()
     win.show()
+    if project is None and setting("open_last_project") and recent_projects() and Path(recent_projects()[0]).is_dir():
+        project = Path(recent_projects()[0])
     if project is not None:
         win.home.open_project(Path(project))
     code = app.exec()

@@ -37,4 +37,4 @@ exe = EXE(
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="AURORA")
 if sys.platform == "darwin":
     app = BUNDLE(coll, name="AURORA.app", icon=None, bundle_identifier="edu.wsu.aurora",
-                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "0.1.0"})
+                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "0.2.0"})

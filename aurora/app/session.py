@@ -203,7 +203,8 @@ class Session(QObject):
                 z.members[sid] = pix.tolist()
                 st = z.settings.get(sid)
                 if st is None:
-                    st = ScanSettings(stack=scan.name, line=sd.main)
+                    from aurora.app.settings_dialog import get as setting
+                    st = ScanSettings(stack=scan.name, line=sd.main, k=setting("despike_k"), fluo_norm=setting("fluo_norm"), tey_norm=setting("tey_norm"))
                     sat = scan.summary.get("sdd_saturated") if scan.summary else None
                     if sat:
                         st.sdd = [d not in sat for d in ("sdd1", "sdd2", "sdd3", "sdd4")]

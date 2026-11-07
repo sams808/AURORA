@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -19,6 +19,8 @@ STATUS_COLOUR = {"complete": "#F2A65A", "aborted": "#ff5555", "in_progress": "#A
 
 
 class SurveyPerspective(QWidget):
+    open_requested = Signal(object)       # a complete stack's footprint was clicked: open it in Reduce
+
     def __init__(self, session: Session, parent: QWidget | None = None):
         super().__init__(parent)
         self.session = session
@@ -257,7 +259,7 @@ class SurveyPerspective(QWidget):
         for s in self._footprints():
             b = self._bbox(s)
             if b and b[0] <= x <= b[1] and b[2] <= y <= b[3] and s.status == "complete":
-                self.session.select_stack(self.session.stack_id(s))
+                self.open_requested.emit(s)
                 self.redraw_map()
                 return
 
