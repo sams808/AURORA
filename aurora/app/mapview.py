@@ -76,6 +76,8 @@ class MapView(pg.GraphicsLayoutWidget):
         self.plot.setAspectLocked(True)
         self.plot.setLabel("bottom", "x (mm)")
         self.plot.setLabel("left", "y (mm)")
+        for ax in ("bottom", "left"):
+            self.plot.getAxis(ax).enableAutoSIPrefix(False)      # never "x (mm) (x0.001)"
         self.plot.showGrid(False, False)
         self.image = pg.ImageItem()
         self.image.setZValue(-10)

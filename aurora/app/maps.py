@@ -144,7 +144,9 @@ class MapsPerspective(QWidget):
         b2 = QPushButton("Export PyMca XANES stack (_PCA-CA.h5)…"); b2.clicked.connect(self._export_xanes); row.addWidget(b2)
         row.addStretch(1)
         left.body.addLayout(row)
-        self.cluster_map = MapView(); self.cluster_map.set_tool("navigate"); self.cluster_map.set_colormap("CET-C7" if "CET-C7" in pg.colormap.listMaps() else "viridis")
+        self.cluster_map = MapView(); self.cluster_map.set_tool("navigate")
+        from PySide6.QtGui import QColor
+        self.cluster_map.image.setLookupTable(np.array([QColor(c).getRgb()[:3] for c in PAL], dtype=np.ubyte))   # categorical colours
         left.body.addWidget(self.cluster_map, 1)
         self.cluster_info = QLabel(""); self.cluster_info.setObjectName("muted"); self.cluster_info.setWordWrap(True); left.body.addWidget(self.cluster_info)
         w.addWidget(left)
@@ -349,7 +351,9 @@ class MapsPerspective(QWidget):
         cr = pca_kmeans(M, hc.E[hc.valid], self.n_pc.value(), self.n_k.value())
         self._cluster = cr
         lab = cr.labels.astype(float); lab[lab < 0] = np.nan
-        self.cluster_map.clear_overlays(); self.cluster_map.set_grid(to_grid(hc.x, hc.y, lab)); self.cluster_map.autorange()
+        self.cluster_map.clear_overlays(); self.cluster_map.set_grid(to_grid(hc.x, hc.y, lab))
+        self.cluster_map.image.setLevels((0, len(PAL) - 1))         # one PAL colour per cluster index
+        self.cluster_map.autorange()
         self.cluster_plot.clear(); self.cluster_plot.plotItem.legend.clear()
         for k in range(cr.centres.shape[0]):
             n = int((cr.labels == k).sum())
