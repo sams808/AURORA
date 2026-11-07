@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QProgressBar,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QProgressBar,
                                QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app.preview import PAL
@@ -81,6 +81,16 @@ class CheckPerspective(QWidget):
         self.spike_note = QLabel(""); self.spike_note.setObjectName("muted"); self.spike_note.setWordWrap(True)
         sddc.body.addWidget(self.spike_note)
         bottom.addWidget(sddc)
+        i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)")
+        xrow = QHBoxLayout()
+        self.x_scan = QComboBox(); xrow.addWidget(self.x_scan, 1)
+        xb = QPushButton("Read"); xb.clicked.connect(self.explore_i0); xrow.addWidget(xb)
+        i0x.body.addLayout(xrow)
+        self.x_plot = pg.PlotWidget(background="w"); self.x_plot.setLabel("bottom", "energy (eV)"); self.x_plot.setLabel("left", "normalised to the median")
+        self.x_plot.addLegend(offset=(10, 10)); self.x_plot.getViewBox().disableAutoRange()
+        i0x.body.addWidget(self.x_plot, 1)
+        self.x_note = QLabel(""); self.x_note.setObjectName("muted"); self.x_note.setWordWrap(True); i0x.body.addWidget(self.x_note)
+        bottom.addWidget(i0x)
         split.addWidget(bottom)
         split.setSizes([330, 520])
         root.addWidget(split, 1)
@@ -94,6 +104,42 @@ class CheckPerspective(QWidget):
         self._results.clear()
         self._fill_table()
         self._fill_i0()
+        self.x_scan.clear()
+        h = self.session.holder(key)
+        for s in (h.stacks + h.dropped) if h else []:
+            if s.kind == "stack" and s.n_energies > 1:
+                self.x_scan.addItem(f"{s.time} {s.label} · {s.status}", s.name)
+
+    def explore_i0(self) -> None:
+        name = self.x_scan.currentData()
+        scan = self.session.project.find(name) if (name and self.session.project) else None
+        if scan is None:
+            return
+        from aurora.core.qc import mcc_curves
+        c = mcc_curves(self.session.project, scan)
+        self.x_plot.clear(); self.x_plot.plotItem.legend.clear()
+        if not c.E.size:
+            self.x_note.setText("no mcc data read"); return
+
+        def med(a):
+            m = np.nanmedian(a) if np.isfinite(a).any() else 1.0
+            return m if m else 1.0
+
+        curves = [("mesh mcc1 (I0)", c.mesh / med(c.mesh), "#C8501E", Qt.SolidLine), ("photodiode mcc2", c.diode / med(c.diode), "#7f4fc9", Qt.DashLine),
+                  ("diode / mesh", c.ratio, "#2a8a4a", Qt.DotLine), ("TEY mcc4", c.tey / med(c.tey), "#444444", Qt.DashDotLine)]
+        ys = []
+        for label, y, col, st in curves:
+            self.x_plot.plot(c.E, y, pen=pg.mkPen(col, width=1.4, style=st), connect="finite", name=label); ys.append(y)
+        v = np.concatenate(ys); v = v[np.isfinite(v)]
+        if v.size:
+            self.x_plot.getViewBox().setRange(xRange=(float(c.E[0]), float(c.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
+        r = c.ratio[np.isfinite(c.ratio)]
+        if r.size:
+            self.x_note.setText(f"{scan.name}: mesh level {np.nanmedian(c.mesh):.3g}, diode level {np.nanmedian(c.diode):.3g}; diode/mesh spans "
+                                f"{r.min():.3f}-{r.max():.3f} over the scan"
+                                + (" (the mesh has its own spectral response: consider the diode or a good-I0 mean)" if r.max() - r.min() > 0.05 else ""))
+        else:
+            self.x_note.setText(f"{scan.name}: no finite ratio")
 
     def run_checks(self) -> None:
         if self.session.project is None or (self._worker is not None and self._worker.isRunning()):

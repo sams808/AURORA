@@ -32,7 +32,7 @@ class ComparePerspective(QWidget):
         sub = QLabel("normalise, shift, stack and compare reduced spectra"); sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub); head.addStretch(1)
         for text, fn in (("Add reduced folder…", self._add_folder), ("Add CSV…", self._add_csv),
-                         ("Save config…", self._save_config), ("Load config…", self._load_config), ("Export…", self._export)):
+                         ("References…", self._references), ("Save config…", self._save_config), ("Load config…", self._load_config), ("Export…", self._export)):
             b = QPushButton(text); b.clicked.connect(fn); head.addWidget(b)
         root.addLayout(head)
 
@@ -233,6 +233,19 @@ class ComparePerspective(QWidget):
                 self.status.setText(str(err))
         if n:
             self.status.setText(f"{n} traces added")
+
+    def _references(self) -> None:
+        from aurora.app.dialogs import ReferencesDialog
+        from aurora.app.settings_dialog import get as setting
+        d = ReferencesDialog(setting("reference_dir"), "", self)
+        if d.exec():
+            n = 0
+            for p, label in d.chosen():
+                try:
+                    n += len(self.lib.add_file(p, label))
+                except ValueError as err:
+                    self.status.setText(str(err))
+            self.status.setText(f"{n} reference traces added")
 
     def _save_config(self) -> None:
         p, _ = QFileDialog.getSaveFileName(self, "Save compare config", "compare_config.json", "JSON (*.json)")

@@ -13,6 +13,7 @@ DEFAULTS = {
     "open_last_project": True,
     "report_author": "Sami Soudani",
     "map_colormap": "viridis",
+    "reference_dir": "",
 }
 
 
@@ -45,6 +46,7 @@ class SettingsDialog(QDialog):
         form.addRow("map colour map", self.cmap)
         self.author = QLineEdit(get("report_author"))
         form.addRow("report author", self.author)
+        self.ref_dir = QLineEdit(get("reference_dir")); form.addRow("reference spectra folder", self.ref_dir)
         self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
         form.addRow("", self.open_last)
         lay.addLayout(form)
@@ -64,5 +66,6 @@ class SettingsDialog(QDialog):
         s.setValue("map_colormap", self.cmap.currentText())
         s.setValue("report_author", self.author.text().strip() or DEFAULTS["report_author"])
         s.setValue("open_last_project", self.open_last.isChecked())
+        s.setValue("reference_dir", self.ref_dir.text().strip())
         s.sync()
         super().accept()

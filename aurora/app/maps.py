@@ -55,6 +55,10 @@ class MapsPerspective(QWidget):
         self.w_hi = QDoubleSpinBox(); self.w_hi.setRange(0, 5000); self.w_hi.setValue(720); ctl.addWidget(self.w_hi)
         self.per_i0 = QCheckBox("/ I0"); self.per_i0.setChecked(True); ctl.addWidget(self.per_i0)
         self.log = QCheckBox("log"); ctl.addWidget(self.log)
+        self.deconv = QCheckBox("deconvolve"); ctl.addWidget(self.deconv)
+        self.deconv_method = QComboBox(); self.deconv_method.addItems(["Richardson-Lucy", "Wiener"]); ctl.addWidget(self.deconv_method)
+        self.psf_um = QDoubleSpinBox(); self.psf_um.setRange(0.5, 2000); self.psf_um.setValue(100); self.psf_um.setSuffix(" µm PSF"); ctl.addWidget(self.psf_um)
+        self.deconv_iter = QSpinBox(); self.deconv_iter.setRange(1, 500); self.deconv_iter.setValue(20); self.deconv_iter.setSuffix(" it"); ctl.addWidget(self.deconv_iter)
         ctl.addWidget(QLabel("ROI"))
         self.roi_mode = QComboBox(); self.roi_mode.addItems(["whole map", "current zone", "rectangle (draw)"]); ctl.addWidget(self.roi_mode)
         ctl.addStretch(1)
@@ -78,6 +82,8 @@ class MapsPerspective(QWidget):
         self.per_i0.toggled.connect(self.redraw); self.log.toggled.connect(self.redraw); self.avg.toggled.connect(self.redraw)
         self.energy.valueChanged.connect(self.redraw)
         self.roi_mode.currentIndexChanged.connect(self._roi_changed)
+        self.deconv.toggled.connect(self.redraw); self.deconv_method.currentIndexChanged.connect(self.redraw)
+        self.psf_um.valueChanged.connect(self.redraw); self.deconv_iter.valueChanged.connect(self.redraw)
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda z: self._roi_changed())
         session.zones_changed.connect(self._roi_changed)
@@ -260,7 +266,12 @@ class MapsPerspective(QWidget):
             with np.errstate(all="ignore"):
                 m = np.log10(np.maximum(m, 0) + 1.0)
         self.map.clear_overlays()
-        self.map.set_grid(to_grid(hc.x, hc.y, m))
+        g = to_grid(hc.x, hc.y, m)
+        if self.deconv.isChecked():
+            from aurora.core.deconv import deconvolve_grid
+            g.img = deconvolve_grid(g.img, self.psf_um.value(), float(np.mean(hc.pitch)),
+                                    "lucy" if self.deconv_method.currentIndex() == 0 else "wiener", self.deconv_iter.value())
+        self.map.set_grid(g)
         if self._roi is not None and self._roi.size:
             self.map.draw_pixels(hc.x[self._roi], hc.y[self._roi], hc.pitch, "#38E0C2")
         self.map_hint.setText(f"window ch {lo}-{hi - 1} ({self.w_lo.value():.0f}-{self.w_hi.value():.0f} eV) · "

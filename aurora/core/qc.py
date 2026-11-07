@@ -270,3 +270,54 @@ def i0_candidates(stacks: dict[str, "object"], labels: dict[str, str]) -> list[I
         out.append(I0Candidate(sid=sid, label=labels.get(sid, sid), level=s.level, max_step=s.max_step, rough=s.rough,
                                nonpos=s.nonpos, looks_good=s.looks_good(pool), E=E, curve=m))
     return out
+
+
+# ----------------------------------------------------------------------------- I0 explorer (mesh vs photodiode)
+@dataclass
+class MccCurves:
+    """Per-energy means of the scaler channels of a stack: mesh I0 (ch1), photodiode (ch2), aux (ch3), TEY (ch4)."""
+    scan: str
+    E: np.ndarray
+    mesh: np.ndarray
+    diode: np.ndarray
+    aux: np.ndarray
+    tey: np.ndarray
+
+    @property
+    def ratio(self) -> np.ndarray:
+        """diode / mesh, each normalised to its median: the mesh's own spectral response shows as a departure from 1."""
+        with np.errstate(all="ignore"):
+            m = self.mesh / np.nanmedian(self.mesh); d = self.diode / np.nanmedian(self.diode)
+            return np.where(m != 0, d / m, np.nan)
+
+
+def mcc_curves(project: Project, scan: ScanInfo) -> MccCurves:
+    """Read only the mcc csv of every energy folder (fast), cached as json under .aurora/cache."""
+    edirs = scan.energy_dirs or stack_energy_dirs(scan.path)
+    key = f"mcc:{len(edirs)}:{stack_last_mtime(edirs):.0f}"
+    cdir = project.root / ".aurora" / "cache" / scan.day / scan.name
+    p = cdir / "_mcc_curves.json"
+    try:
+        d = json.loads(p.read_text())
+        if d.get("key") == key:
+            return MccCurves(scan.name, *(np.array(d[k], float) for k in ("E", "mesh", "diode", "aux", "tey")))
+    except (OSError, ValueError):
+        pass
+    E, cols = [], []
+    for e, pdir in edirs:
+        try:
+            mcc = np.loadtxt(pdir / "mcc_flyer_0.csv", delimiter=",", ndmin=2)
+        except (OSError, ValueError):
+            continue
+        if mcc.size == 0:
+            continue
+        E.append(float(e)); cols.append(np.nanmean(mcc[:, :4], axis=0))
+    arr = np.array(cols) if cols else np.zeros((0, 4))
+    cur = MccCurves(scan.name, np.array(E), arr[:, 0], arr[:, 1], arr[:, 2], arr[:, 3])
+    try:
+        cdir.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"key": key, "E": cur.E.tolist(), "mesh": cur.mesh.tolist(), "diode": cur.diode.tolist(),
+                                 "aux": cur.aux.tolist(), "tey": cur.tey.tolist()}))
+    except OSError:
+        pass
+    return cur

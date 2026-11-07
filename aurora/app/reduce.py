@@ -21,6 +21,13 @@ NORM_LABELS = {"raw": "raw counts", "i0": "/ I0", "i0pre": "/ I0 − pre-edge li
                "area": "/ I0, area = 1", "max": "/ I0, max = 1"}
 
 
+class _VirtualScan:
+    """Minimal ScanInfo stand-in for a stitched stack."""
+
+    def __init__(self, sd):
+        self.time, self.label, self.edge_text, self.summary, self.name = "stitch", sd.name, sd.edge_text, {}, sd.name
+
+
 class ScanSettingsCard(Card):
     """Per-zone, per-scan settings (the zone tool's scan card)."""
 
@@ -149,7 +156,10 @@ class ReducePerspective(QWidget):
         zb = QHBoxLayout()
         self.new_zone_btn = QPushButton("New zone"); self.new_zone_btn.clicked.connect(lambda: self.session.new_zone())
         self.del_zone_btn = QPushButton("Delete"); self.del_zone_btn.clicked.connect(self._delete_zone)
-        zb.addWidget(self.new_zone_btn); zb.addWidget(self.del_zone_btn); zb.addStretch(1)
+        self.propose_btn = QPushButton("Propose…"); self.propose_btn.setToolTip("zones from sgm_report's summary or from the survey pads, as a proposal to edit")
+        self.propose_btn.clicked.connect(lambda: self.propose_zones())
+        self.stitch_btn = QPushButton("Stitch…"); self.stitch_btn.clicked.connect(self.stitch_tiles)
+        zb.addWidget(self.new_zone_btn); zb.addWidget(self.del_zone_btn); zb.addWidget(self.propose_btn); zb.addWidget(self.stitch_btn); zb.addStretch(1)
         zc.body.addLayout(zb)
         self.zone_list = QListWidget()
         self.zone_list.currentItemChanged.connect(self._zone_picked)
@@ -451,12 +461,62 @@ class ReducePerspective(QWidget):
         if self.session.current_zone is not None:
             self.session.delete_zone(self.session.current_zone)
 
+    def propose_zones(self, source: str | None = None) -> int:
+        """Add proposed zones: from sgm_report's summary when it exists for the holder's day, else from the survey pads."""
+        from aurora.core.propose import pads_from_survey, zones_from_pads, zones_from_summary
+        hz = self.session.holder_zones()
+        start = max((z.id for z in hz.zones), default=0) + 1
+        new = []
+        day = next((d for d in self.session.project.days if d.date == self.session.holder_day()), None) if self.session.project else None
+        h = self.session.holder()
+        if source in (None, "summary") and day is not None and day.summary and h is not None:
+            scans = [s for hh in day.summary.get("holders", []) if hh.get("holder") == h.name for s in hh.get("scans", [])]
+            pitches = {}
+            for s in h.stacks:
+                sd = self.session.stack_loaded(self.session.stack_id(s))
+                if sd is not None:
+                    pitches[s.name] = sd.pitch
+            new = zones_from_summary(scans, pitches, start)
+        if not new and source in (None, "pads"):
+            try:
+                sv = self.session.survey()
+            except Exception:
+                sv = None
+            if sv is not None:
+                new = zones_from_pads(pads_from_survey(sv), start)
+        existing = {(round(r[0], 2), round(r[2], 2)) for z in hz.zones for r in z.rects}
+        new = [z for z in new if (round(z.rects[0][0], 2), round(z.rects[0][2], 2)) not in existing]
+        hz.zones.extend(new)
+        self.session.touch()
+        self.status_label.setText(f"{len(new)} zones proposed (edit or delete them)" if new else "nothing to propose (no summary, no pads)")
+        return len(new)
+
+    def stitch_tiles(self) -> None:
+        from aurora.app.dialogs import StitchDialog
+        loaded = {self.session.stack_id(s): self.session.stack_loaded(self.session.stack_id(s)) for s in self.session.stacks_of()}
+        loaded = {k: v for k, v in loaded.items() if v is not None}
+        if len(loaded) < 2:
+            self.status_label.setText("load at least two stacks of the holder first (Load all)"); return
+        d = StitchDialog(loaded, self)
+        if d.exec() and d.result is not None:
+            self.add_virtual_stack(d.result)
+
+    def add_virtual_stack(self, sd) -> None:
+        """Register a stitched stack with the session as if it were a scan of the holder."""
+        self.session._stacks[sd.id] = sd
+        it = QListWidgetItem(f"{sd.name}  ·  stitched {sd.n_pix} px")
+        it.setData(Qt.UserRole, sd.id)
+        self.scan_list.addItem(it)
+        self.session.touch()
+        self.scan_list.setCurrentItem(it)
+        self.session.select_stack(sd.id)
+        self.status_label.setText(f"{sd.name}: {sd.n_pix} px, {sd.n_energies} energies ({sd.source})")
+
     def _zones_changed(self) -> None:
         self._fill_zone_list(); self.redraw_map()
         z = self.session.zone()
         have = [c.sid for c in self._cards]
-        want = [self.session.stack_id(s) for s in self.session.stacks_of()
-                if z is not None and self.session.stack_id(s) in z.settings and self.session.stack_loaded(self.session.stack_id(s))]
+        want = [sid for sid in (z.settings if z is not None else {}) if self.session.stack_loaded(sid) is not None]
         if have != want:
             self._rebuild_cards()
         self.update_preview()
@@ -510,12 +570,12 @@ class ReducePerspective(QWidget):
         z = self.session.zone()
         if z is None:
             return
-        for scan in self.session.stacks_of():
-            sid = self.session.stack_id(scan)
-            st = z.settings.get(sid)
+        scans = {self.session.stack_id(s): s for s in self.session.stacks_of()}
+        for sid, st in z.settings.items():
             sd = self.session.stack_loaded(sid)
-            if st is None or sd is None:
+            if sd is None:
                 continue
+            scan = scans.get(sid) or _VirtualScan(sd)
             card = ScanSettingsCard(self.session, sid, scan, st, sd.labels)
             self.cards_lay.insertWidget(self.cards_lay.count() - 1, card)
             self._cards.append(card)

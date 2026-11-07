@@ -193,8 +193,9 @@ class Session(QObject):
 
     def attach_scans(self, z: Zone) -> None:
         """Recompute the zone's member pixels for every loaded stack of the holder and create default settings."""
-        for scan in self.stacks_of():
-            sid = self.stack_id(scan)
+        pairs = [(self.stack_id(s), s) for s in self.stacks_of()]
+        pairs += [(sid, None) for sid in self._stacks if sid.startswith("stitched_")]
+        for sid, scan in pairs:
             sd = self._stacks.get(sid)
             if sd is None:
                 continue
@@ -202,7 +203,10 @@ class Session(QObject):
             if pix.size:
                 z.members[sid] = pix.tolist()
                 st = z.settings.get(sid)
-                if st is None:
+                if st is None and scan is None:
+                    st = ScanSettings(stack=sd.name, line=sd.main)
+                    z.settings[sid] = st
+                elif st is None:
                     from aurora.app.settings_dialog import get as setting
                     st = ScanSettings(stack=scan.name, line=sd.main, k=setting("despike_k"), fluo_norm=setting("fluo_norm"), tey_norm=setting("tey_norm"))
                     sat = scan.summary.get("sdd_saturated") if scan.summary else None

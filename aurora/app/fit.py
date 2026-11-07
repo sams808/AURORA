@@ -45,6 +45,7 @@ class FitPerspective(QWidget):
         self.tabs.addTab(self._lcf_tab(), "LCF")
         self.tabs.addTab(self._mcr_tab(), "PCA / MCR-ALS")
         self.tabs.addTab(self._itfa_tab(), "ITFA")
+        self.tabs.addTab(self._peaks_tab(), "Peaks")
         root.addWidget(self.tabs, 1)
         library.changed.connect(self.refresh)
 
@@ -76,6 +77,10 @@ class FitPerspective(QWidget):
             it.setCheckState(Qt.Checked if (n in checked or not checked) else Qt.Unchecked)
             self.components.addItem(it)
         self.mcr_info.setText(f"{len(names)} spectra ticked for the fits in Compare")
+        cur = self.pk_trace.currentText(); self.pk_trace.blockSignals(True); self.pk_trace.clear(); self.pk_trace.addItems(names)
+        if cur in names:
+            self.pk_trace.setCurrentText(cur)
+        self.pk_trace.blockSignals(False)
         self.itfa_sample.clear(); self.itfa_sample.addItems(names)
 
     # ------------------------------------------------------------------ LCF
@@ -338,6 +343,86 @@ class FitPerspective(QWidget):
             for c in range(k):
                 self.itfa_table.setItem(rr, c, QTableWidgetItem(f"{props[rr, c]:.1f}"))
         self.itfa_status.setText(f"ITFA: {r.n_iter} iterations, RMSE {r.rmse:.4g}, {len(fixed)} anchored sample(s)")
+
+    # ------------------------------------------------------------------ peaks
+    def _peaks_tab(self) -> QWidget:
+        w = QWidget(); lay = QHBoxLayout(w)
+        left = Card("Peak decomposition")
+        left.body.addWidget(QLabel("trace")); self.pk_trace = QComboBox(); left.body.addWidget(self.pk_trace)
+        row = QHBoxLayout(); row.addWidget(QLabel("peaks")); self.pk_n = QSpinBox(); self.pk_n.setRange(1, 8); self.pk_n.setValue(2); row.addWidget(self.pk_n)
+        row.addWidget(QLabel("shape")); self.pk_shape = QComboBox(); self.pk_shape.addItems(["gaussian", "lorentzian", "pseudo-voigt"]); row.addWidget(self.pk_shape)
+        self.pk_step = QCheckBox("edge step (arctan)"); self.pk_step.setChecked(True); row.addWidget(self.pk_step)
+        row.addWidget(QLabel("background")); self.pk_bg = QComboBox(); self.pk_bg.addItems(["linear", "constant"]); row.addWidget(self.pk_bg)
+        left.body.addLayout(row)
+        row2 = QHBoxLayout(); row2.addWidget(QLabel("range (eV)"))
+        self.pk_lo = QLineEdit(); self.pk_lo.setPlaceholderText("auto"); self.pk_hi = QLineEdit(); self.pk_hi.setPlaceholderText("auto")
+        row2.addWidget(self.pk_lo); row2.addWidget(self.pk_hi)
+        row2.addWidget(QLabel("initial centres")); self.pk_centres = QLineEdit(); self.pk_centres.setPlaceholderText("auto (comma separated eV)"); row2.addWidget(self.pk_centres, 1)
+        left.body.addLayout(row2)
+        b = QPushButton("Run the decomposition"); b.setObjectName("primary"); b.clicked.connect(self.run_peaks); left.body.addWidget(b)
+        self.pk_table = QTableWidget(0, 3); self.pk_table.setHorizontalHeaderLabels(["parameter", "value", "± (covariance)"]); left.body.addWidget(self.pk_table, 1)
+        self.pk_info = QLabel(""); self.pk_info.setObjectName("muted"); self.pk_info.setWordWrap(True); left.body.addWidget(self.pk_info)
+        eb = QPushButton("Export…"); eb.clicked.connect(self._export_peaks); left.body.addWidget(eb)
+        lay.addWidget(left, 1)
+        pc = Card("Data, fit, components and residual")
+        self.pk_plot = pg.PlotWidget(background="w"); self.pk_plot.addLegend(offset=(10, 10)); self.pk_plot.getViewBox().disableAutoRange()
+        self.pk_plot.setLabel("bottom", "energy (eV)")
+        pc.body.addWidget(self.pk_plot, 1)
+        lay.addWidget(pc, 2)
+        self.peak_result = None
+        return w
+
+    def run_peaks(self) -> None:
+        from aurora.core.fit import peak_decomposition
+        curves = {n: (E, y) for n, E, y in self.curves()}
+        name = self.pk_trace.currentText()
+        if name not in curves:
+            self.pk_info.setText("tick a trace 'Fit' in Compare first"); return
+        E, y = curves[name]
+        centres = None
+        if self.pk_centres.text().strip():
+            try:
+                centres = [float(v) for v in self.pk_centres.text().replace(";", ",").split(",") if v.strip()]
+            except ValueError:
+                self.pk_info.setText("initial centres must be numbers"); return
+        try:
+            r = peak_decomposition(E, y, self.pk_n.value(), self.pk_shape.currentText(), self.pk_step.isChecked(), self.pk_bg.currentText(),
+                                   centres, fit_range=self._range(self.pk_lo, self.pk_hi))
+        except ValueError as err:
+            self.pk_info.setText(str(err)); return
+        self.peak_result = r; self._pk_name = name
+        self.pk_table.setRowCount(len(r.params))
+        for i, (k, v) in enumerate(r.params.items()):
+            self.pk_table.setItem(i, 0, QTableWidgetItem(k)); self.pk_table.setItem(i, 1, QTableWidgetItem(f"{v:.4g}"))
+            self.pk_table.setItem(i, 2, QTableWidgetItem(f"{r.errors[k]:.2g}" if np.isfinite(r.errors[k]) else "-"))
+        self.pk_table.resizeColumnsToContents()
+        self.pk_info.setText(f"{'converged' if r.converged else 'NOT converged: ' + r.message} · RMSE {r.rmse:.4g} · {len(r.E)} points")
+        self.pk_plot.clear(); self.pk_plot.plotItem.legend.clear()
+        self.pk_plot.plot(r.E, r.y, pen=pg.mkPen("#15213B", width=1.6), name=name)
+        self.pk_plot.plot(r.E, r.fit, pen=pg.mkPen("#D55E00", width=1.6, style=Qt.DashLine), name="fit")
+        for i, (k, c) in enumerate(r.components.items()):
+            self.pk_plot.plot(r.E, c, pen=pg.mkPen(PAL[i % len(PAL)], width=1, style=DASH[i % len(DASH)]), name=k)
+        resid = r.y - r.fit - 0.15 * (np.nanmax(r.y) - np.nanmin(r.y))
+        self.pk_plot.plot(r.E, resid, pen=pg.mkPen("#5B6B8C", width=1), name="residual (offset)")
+        _set_range(self.pk_plot, [float(r.E[0]), float(r.E[-1])], [r.y, r.fit, resid])
+
+    def _export_peaks(self) -> None:
+        if self.peak_result is None:
+            self.pk_info.setText("run the decomposition first"); return
+        p, _ = QFileDialog.getSaveFileName(self, "Export peak decomposition", "peaks.csv", "CSV (*.csv)")
+        if p:
+            self.export_peaks(Path(p))
+
+    def export_peaks(self, path: Path) -> None:
+        r = self.peak_result
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(f"# peak decomposition of {self._pk_name}; {'converged' if r.converged else 'not converged'}; RMSE {r.rmse:.6g}\n")
+            f.write("parameter,value,uncertainty\n")
+            for k, v in r.params.items():
+                f.write(f"{k},{v:.6g},{r.errors[k]:.6g}\n")
+            f.write("\nenergy_eV,data,fit,residual," + ",".join(r.components) + "\n")
+            for i in range(len(r.E)):
+                f.write(f"{r.E[i]:.6g},{r.y[i]:.6g},{r.fit[i]:.6g},{r.y[i] - r.fit[i]:.6g}," + ",".join(f"{c[i]:.6g}" for c in r.components.values()) + "\n")
 
     def _D_cache(self) -> np.ndarray:
         labels, E, D = self._matrix()
