@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, Q
 from aurora import APP_NAME, ORG_NAME, __version__
 from aurora.app.about import AboutDialog
 from aurora.app.home import HomePerspective
+from aurora.app.reduce import ReducePerspective
+from aurora.app.session import Session
+from aurora.app.survey import SurveyPerspective
 from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
 from aurora.app.theme import TOKENS, qss
 
@@ -66,11 +69,19 @@ class MainWindow(QMainWindow):
         body.setSpacing(0)
         body.addWidget(self._rail())
         self.stack = QStackedWidget()
+        self.session = Session(self)
+        self.session.status.connect(lambda m: self.statusBar().showMessage(m, 6000))
         self.home = HomePerspective()
         self.home.project_opened.connect(self._on_project)
-        self.pages: dict[str, QWidget] = {"home": self.home}
+        self.survey = SurveyPerspective(self.session)
+        self.reduce = ReducePerspective(self.session)
+        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce}
         self.stack.addWidget(self.home)
+        self.stack.addWidget(self.survey)
+        self.stack.addWidget(self.reduce)
         for key, title in PERSPECTIVES[1:]:
+            if key in self.pages:
+                continue
             w = Placeholder(title, PLACEHOLDER_TEXT.get(key, ""))
             self.pages[key] = w
             self.stack.addWidget(w)
@@ -172,11 +183,15 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.home.shutdown()
+        if self.reduce._worker is not None:
+            self.reduce._worker.wait(30000)
+        self.session.save()
         super().closeEvent(event)
 
     def _on_project(self, project) -> None:
         self.crumb.setText(f"{project.root.name}   ·   {len(project.days)} days   ·   {project.n_holders} holders")
         self.statusBar().showMessage(f"{len(project.scans)} scans in {project.root}")
+        self.session.set_project(project)
 
 
 def create_app(argv: list[str] | None = None) -> QApplication:

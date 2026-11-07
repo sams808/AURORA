@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,7 +31,14 @@ def save_npz(path: Path, **arrays) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp.npz")
-    np.savez(tmp, **arrays)
+    with open(tmp, "wb") as f:                  # explicit handle: closed before the rename (Windows refuses otherwise)
+        np.savez(f, **arrays)
+    for attempt in range(5):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:                 # a virus scanner may still hold the new file for a moment
+            time.sleep(0.2 * (attempt + 1))
     os.replace(tmp, path)
 
 

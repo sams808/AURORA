@@ -10,7 +10,7 @@ ICON_WIN = os.path.join(ROOT, "branding", "aurora.ico")
 
 # xraydb needs scipy.interpolate and sqlalchemy (its tables are a bundled sqlite file)
 datas = collect_data_files("xraydb") + [(os.path.join(ROOT, "aurora", "resources"), os.path.join("aurora", "resources"))]
-hiddenimports = (collect_submodules("numpy") + collect_submodules("sqlalchemy") + collect_submodules("scipy.interpolate")
+hiddenimports = (collect_submodules("numpy") + collect_submodules("sqlalchemy") + collect_submodules("scipy.interpolate") + collect_submodules("pyqtgraph")
                  + ["PySide6.QtSvg", "h5py.defs", "h5py.utils", "h5py.h5ac", "h5py._proxy"])
 
 a = Analysis(
