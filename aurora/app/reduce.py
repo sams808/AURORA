@@ -137,6 +137,10 @@ class ReducePerspective(QWidget):
         # ---- left: scans of the holder + zones
         left = QSplitter(Qt.Vertical)
         sc = Card("Scans of the holder")
+        self.load_all_btn = QPushButton("Load all")
+        self.load_all_btn.setToolTip("read every complete stack of the holder so the zones attach to all of them")
+        self.load_all_btn.clicked.connect(self.load_all)
+        sc.header.addWidget(self.load_all_btn)
         self.scan_list = QListWidget()
         self.scan_list.currentItemChanged.connect(self._scan_picked)
         sc.body.addWidget(self.scan_list, 1)
@@ -286,6 +290,43 @@ class ReducePerspective(QWidget):
         self._worker.done.connect(lambda sd, sid=sid: self._loaded(sid), Qt.QueuedConnection)
         self._worker.failed.connect(lambda t: self.status_label.setText("could not read the stack: " + t.strip().splitlines()[-1]), Qt.QueuedConnection)
         self._worker.start()
+
+    def load_all(self) -> None:
+        """Read every complete stack of the holder that is not loaded yet (one worker, cached stacks are instant)."""
+        if self._worker is not None and self._worker.isRunning():
+            return
+        sids = [self.session.stack_id(s) for s in self.session.stacks_of() if self.session.stack_loaded(self.session.stack_id(s)) is None]
+        if not sids:
+            self.status_label.setText("every scan of the holder is loaded")
+            return
+        session = self.session
+
+        def job(cb):
+            for i, sid in enumerate(sids):
+                cb(i, len(sids), f"reading {sid[11:]}")
+                try:
+                    session.stack(sid)
+                except Exception as err:
+                    cb(i, len(sids), f"{sid[11:]}: {err}")
+            return sids
+
+        self.status_label.setText(f"reading {len(sids)} scans …")
+        self._worker = Worker(job, self)
+        self._worker.progress.connect(lambda i, n, m: self.status_label.setText(f"{m}  ({i + 1}/{n})"), Qt.QueuedConnection)
+        self._worker.done.connect(self._all_loaded, Qt.QueuedConnection)
+        self._worker.failed.connect(lambda t: self.status_label.setText("could not read: " + t.strip().splitlines()[-1]), Qt.QueuedConnection)
+        self._worker.start()
+
+    def _all_loaded(self, sids) -> None:
+        self._worker.wait(30000)
+        n = sum(1 for s in sids if self.session.stack_loaded(s) is not None)
+        self.status_label.setText(f"{n} of {len(sids)} scans read")
+        self.session.touch()
+        cur = self.scan_list.currentItem()
+        if cur is not None and self.session.current_stack is None:
+            self.session.select_stack(cur.data(Qt.UserRole))
+        else:
+            self._rebuild_cards(); self.update_preview()
 
     def _loaded(self, sid: str) -> None:
         self._worker.wait(30000)

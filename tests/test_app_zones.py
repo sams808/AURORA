@@ -120,3 +120,28 @@ def test_real_zones_in_the_app(qapp, real_project, monkeypatch):
     t = win.reduce.preview._traces[0][1]
     assert t.n_pix == len(fz.members[sid]) and t.line == "F Kα" and abs(float(t.sum[t.E >= t.post[0]].mean()) - 1.0) < 1e-6
     win.close()
+
+
+def test_load_all_scans(qapp, fake_project):
+    from PySide6.QtCore import QEventLoop, QTimer
+    from aurora.app.main import MainWindow
+    proj = Project.discover(fake_project)
+    win = _window(qapp, proj)
+    rd = win.reduce
+    # the list auto-selection started a worker for the first scan; wait for it, then "Load all" finds nothing left
+    if rd._worker is not None:
+        rd._worker.wait(30000); qapp.processEvents()
+    sid = win.session.stack_id(proj.find(testdata.STACK))
+    if win.session.stack_loaded(sid) is None:
+        win.session.stack(sid)
+    rd.load_all()
+    assert "every scan" in rd.status_label.text()
+    win.session._stacks.clear()
+    loop = QEventLoop(); QTimer.singleShot(15000, loop.quit)
+    rd.status_label.setText("")
+    rd.load_all()
+    while rd._worker is not None and rd._worker.isRunning():
+        qapp.processEvents()
+    qapp.processEvents()
+    assert win.session.stack_loaded(sid) is not None and "1 of 1 scans read" in rd.status_label.text()
+    win.close()
