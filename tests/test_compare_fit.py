@@ -127,3 +127,20 @@ def test_pca_mcr_itfa():
     assert props[0].max() > 95 and props[4].max() > 95
     anchored = itfa(M, m, {0: np.array([m.C[0].sum(), 0.0]) if m.C[0, 0] > m.C[0, 1] else np.array([0.0, m.C[0].sum()])})
     assert anchored.rmse < 2e-3 and anchored.C.shape == (6, 2)
+
+
+def test_derivative_and_difference():
+    from aurora.core.compare import Spectrum, derivative, difference
+    E = np.linspace(680, 730, 251)
+    y = _edge(E)
+    d = derivative(E, y)
+    assert np.isfinite(d).all() and abs(E[int(np.argmax(d))] - 690) < 1.0        # steepest at the edge (white line nearby)
+    d3 = derivative(E, y, smooth_points=5)
+    assert np.isfinite(d3).all() and np.nanmax(d3) < np.nanmax(d) + 1e-9
+    yn = y.copy(); yn[100] = np.nan
+    assert np.isnan(derivative(E, yn)[100]) and np.isfinite(derivative(E, yn)[99])
+    a = Spectrum("A", "x", E, y); b = Spectrum("B", "x", E[::2] + 0.3, _edge(E[::2] + 0.3, 695))
+    diff = difference(a, b, a.y, b.y)
+    assert diff.label == "A − B" and diff.signal == "difference" and len(diff.E) == 251
+    assert np.isnan(diff.y[0]) and np.isfinite(diff.y[10:-10]).all()
+    assert abs(diff.y[-10] - (a.y[-10] - np.interp(E[-10], b.E, b.y))) < 1e-9

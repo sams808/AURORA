@@ -293,6 +293,31 @@ def stack_offsets(reqs: list[TraceRequest], default_spacing: float) -> list[floa
     return out
 
 
+def derivative(E: np.ndarray, y: np.ndarray, smooth_points: int = 1) -> np.ndarray:
+    """First derivative dy/dE on the (possibly uneven) energy grid, after an optional running mean of `smooth_points`."""
+    E = np.asarray(E, float); y = np.asarray(y, float)
+    if smooth_points > 1:
+        k = np.ones(int(smooth_points)) / int(smooth_points)
+        fin = np.isfinite(y)
+        ys = y.copy(); ys[~fin] = 0.0
+        num = np.convolve(ys, k, mode="same"); den = np.convolve(fin.astype(float), k, mode="same")
+        with np.errstate(all="ignore"):
+            y = np.where(den > 0, num / den, np.nan)
+    out = np.full(len(E), np.nan)
+    fin = np.isfinite(y)
+    if fin.sum() >= 3:
+        out[fin] = np.gradient(y[fin], E[fin])
+    return out
+
+
+def difference(a: Spectrum, b: Spectrum, ya: np.ndarray, yb: np.ndarray, shift_a: float = 0.0, shift_b: float = 0.0) -> Spectrum:
+    """a - b on a's (shifted) energy grid, b interpolated; NaN outside the overlap."""
+    Ea = a.E + shift_a; Eb = b.E + shift_b
+    fin = np.isfinite(yb) & np.isfinite(Eb)
+    yb_i = np.interp(Ea, Eb[fin], yb[fin], left=np.nan, right=np.nan) if fin.sum() >= 2 else np.full(len(Ea), np.nan)
+    return Spectrum(f"{a.label} − {b.label}", "difference", Ea, ya - yb_i, source=f"difference of {a.key} and {b.key}")
+
+
 def local_peaks(E: np.ndarray, y: np.ndarray, min_prominence: float = 0.05, min_distance_points: int = 5) -> list[tuple[float, float]]:
     fin = np.isfinite(y)
     if fin.sum() < 3:

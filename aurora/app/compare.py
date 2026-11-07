@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 from aurora.app.library import Library
 from aurora.app.preview import DASH
 from aurora.app.widgets import Card
-from aurora.core.compare import NORMS, export_wide_csv, local_peaks, stack_offsets
+from aurora.core.compare import NORMS, derivative, difference, export_wide_csv, local_peaks, stack_offsets
 
 COLS = ("Show", "Label", "Signal", "Shift eV", "Norm", "Pre lo", "Pre hi", "Post lo", "Post hi", "Flatten", "Spacing", "Scale", "Fit", "Diag")
 BOOL_COLS = (0, 9, 12, 13)
@@ -80,6 +80,10 @@ class ComparePerspective(QWidget):
         opts.addWidget(self.spacing)
         self.labels_on = QCheckBox("labels"); self.labels_on.setChecked(True); opts.addWidget(self.labels_on)
         self.signal_in_label = QCheckBox("signal in label"); opts.addWidget(self.signal_in_label)
+        self.deriv = QCheckBox("first derivative"); opts.addWidget(self.deriv)
+        self.deriv_smooth = QDoubleSpinBox(); self.deriv_smooth.setRange(1, 51); self.deriv_smooth.setDecimals(0); self.deriv_smooth.setValue(3)
+        self.deriv_smooth.setPrefix("smooth "); self.deriv_smooth.setSuffix(" pts"); opts.addWidget(self.deriv_smooth)
+        self.diff_btn = QPushButton("Difference of the two selected rows"); self.diff_btn.clicked.connect(self._difference); opts.addWidget(self.diff_btn)
         opts.addStretch(1)
         pc.body.addLayout(opts)
         pk = QHBoxLayout()
@@ -114,9 +118,10 @@ class ComparePerspective(QWidget):
         for w in (self.x_lo, self.x_hi):
             w.editingFinished.connect(self.replot)
         self.spacing.valueChanged.connect(self.replot)
-        for w in (self.labels_on, self.signal_in_label, self.show_peaks):
+        for w in (self.labels_on, self.signal_in_label, self.show_peaks, self.deriv):
             w.toggled.connect(self.replot)
         self.prominence.valueChanged.connect(self.replot); self.distance.valueChanged.connect(self.replot)
+        self.deriv_smooth.valueChanged.connect(self.replot)
         library.changed.connect(self._fill_table)
         library.changed.connect(self.replot)
 
@@ -285,8 +290,9 @@ class ComparePerspective(QWidget):
         xs, ys, failed, peaks_txt = [], [], [], []
         for i, ((r, s, nr), off) in enumerate(zip(items, offsets)):
             E = s.E + r.shift
-            y = nr.y + off
-            if not np.isfinite(nr.y).any():
+            base = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
+            y = base + off
+            if not np.isfinite(base).any():
                 failed.append(r.label); continue
             pen = pg.mkPen(r.colour or "#000000", width=1.4, style=DASH[i % len(DASH)])
             self.plot.plot(E, y, pen=pen, connect="finite")
@@ -298,7 +304,7 @@ class ComparePerspective(QWidget):
                     t.setPos(float(E[sel].max()), float(y[sel][-1]))
                     self.plot.addItem(t, ignoreBounds=True)
             if self.show_peaks.isChecked():
-                pk = local_peaks(E, nr.y, self.prominence.value(), int(self.distance.value()))
+                pk = local_peaks(E, base, self.prominence.value(), int(self.distance.value()))
                 if pk:
                     self.plot.addItem(pg.ScatterPlotItem([p[0] for p in pk], [p[1] + off for p in pk], size=7, brush=pg.mkBrush(r.colour or "#000"), pen=None), ignoreBounds=True)
                     peaks_txt.append(f"{r.label}: " + ", ".join(f"{p[0]:.1f}" for p in pk))
@@ -306,7 +312,22 @@ class ComparePerspective(QWidget):
             v = np.concatenate(ys)
             self.plot.getViewBox().setRange(xRange=(xr[0], xr[1]) if xr else (min(xs), max(xs)),
                                             yRange=(float(np.nanmin(v)), float(np.nanmax(v))), padding=0.05, disableAutoRange=True)
+        self.plot.setLabel("left", "d/dE of the normalised signal, offset" if self.deriv.isChecked() else "normalised, offset")
         self.status.setText(f"{len(items) - len(failed)} traces plotted" + (f"; normalisation failed (all NaN) for: {', '.join(failed)} — adjust the ranges" if failed else ""))
+        self.peaks_label.setText("peak maxima (shifted energies): " + " · ".join(peaks_txt) if peaks_txt else "")
+
+    def _difference(self) -> None:
+        rows = self.selected_rows()
+        if len(rows) != 2:
+            self.status.setText("select exactly two rows (Ctrl-click) for a difference"); return
+        ra, rb = self.lib.requests[rows[0]], self.lib.requests[rows[1]]
+        sa, sb = self.lib.spectrum_of(ra), self.lib.spectrum_of(rb)
+        if sa is None or sb is None:
+            return
+        from aurora.core.compare import process
+        d = difference(sa, sb, process(sa, ra).y, process(sb, rb).y, ra.shift, rb.shift)
+        self.lib.add_spectra([d], show_signals=("difference",), norm="none")
+        self.status.setText(f"added {d.label} (normalised A minus normalised B, no further normalisation)")
         self.peaks_label.setText("peak maxima (shifted energies): " + " · ".join(peaks_txt) if peaks_txt else "")
 
     def _draw_diagnostics(self) -> None:
