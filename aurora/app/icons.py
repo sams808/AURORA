@@ -1,7 +1,6 @@
 """Rail and action icons: inline stroke SVG rendered to QIcon in the colour asked for (no icon files to ship)."""
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, Qt
@@ -33,8 +32,9 @@ def svg(name: str, colour: str = "#C9D6F0", size: int = 22) -> str:
             f'stroke="{colour}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{body}</svg>')
 
 
-@lru_cache(maxsize=256)
 def icon(name: str, colour: str = "#C9D6F0", size: int = 22) -> QIcon:
+    """A fresh QIcon each call: never cache Qt objects at module level, they would outlive the QApplication
+    at interpreter exit and crash PySide6 (>= 6.12) on shutdown."""
     renderer = QSvgRenderer(QByteArray(svg(name, colour, size).encode()))
     ic = QIcon()
     for s in (size, size * 2):

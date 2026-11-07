@@ -170,6 +170,10 @@ class MainWindow(QMainWindow):
     def show_about(self) -> None:
         AboutDialog(self).exec()
 
+    def closeEvent(self, event) -> None:
+        self.home.shutdown()
+        super().closeEvent(event)
+
     def _on_project(self, project) -> None:
         self.crumb.setText(f"{project.root.name}   ·   {len(project.days)} days   ·   {project.n_holders} holders")
         self.statusBar().showMessage(f"{len(project.scans)} scans in {project.root}")

@@ -105,12 +105,20 @@ class HomePerspective(QWidget):
         """Show an already discovered project (tests, distcheck)."""
         self._on_done(project)
 
+    def shutdown(self) -> None:
+        """Let a running discovery finish before the widget goes away (a QThread destroyed while running aborts Qt)."""
+        if self._worker is not None:
+            self._worker.wait(30000)
+            self._worker = None
+
     def _on_progress(self, i: int, n: int, msg: str) -> None:
         self.progress.setRange(0, max(n, 1))
         self.progress.setValue(i)
         self.path_label.setText(f"{msg}  ({i}/{n})")
 
     def _on_done(self, project: Project) -> None:
+        if self._worker is not None:
+            self._worker.wait(30000)
         self.project = project
         self.progress.setVisible(False)
         self.open_btn.setEnabled(True)
@@ -122,6 +130,8 @@ class HomePerspective(QWidget):
         self.project_opened.emit(project)
 
     def _on_failed(self, text: str) -> None:
+        if self._worker is not None:
+            self._worker.wait(30000)
         self.progress.setVisible(False)
         self.open_btn.setEnabled(True)
         self.path_label.setText("could not open the project")

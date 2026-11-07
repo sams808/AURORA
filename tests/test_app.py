@@ -55,6 +55,9 @@ def test_home_opens_project_in_worker(qapp, fake_project):
     loop.exec()
     assert got and len(got[0].scans) == 4
     assert home.tree.topLevelItemCount() == 1
+    home.shutdown()
+    home.deleteLater()
+    qapp.processEvents()
 
 
 def test_distcheck():
