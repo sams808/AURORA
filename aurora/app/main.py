@@ -15,6 +15,7 @@ from aurora.app.check import CheckPerspective
 from aurora.app.compare import ComparePerspective
 from aurora.app.fit import FitPerspective
 from aurora.app.library import Library
+from aurora.app.maps import MapsPerspective
 from aurora.app.home import HomePerspective
 from aurora.app.reduce import ReducePerspective
 from aurora.app.report import ReportPerspective
@@ -86,9 +87,10 @@ class MainWindow(QMainWindow):
         self.compare = ComparePerspective(self.library)
         self.fit = FitPerspective(self.library)
         self.reduce.library = self.library
-        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce,
-                                          "check": self.check, "compare": self.compare, "fit": self.fit, "report": self.report}
-        for w in (self.home, self.survey, self.reduce, self.check, self.compare, self.fit, self.report):
+        self.maps = MapsPerspective(self.session)
+        self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce, "check": self.check,
+                                          "compare": self.compare, "fit": self.fit, "maps": self.maps, "report": self.report}
+        for w in (self.home, self.survey, self.reduce, self.check, self.compare, self.fit, self.maps, self.report):
             self.stack.addWidget(w)
         for key, title in PERSPECTIVES[1:]:
             if key in self.pages:
@@ -194,7 +196,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.home.shutdown()
-        for w in (self.reduce, self.check, self.report):
+        for w in (self.reduce, self.check, self.maps, self.report):
             if w._worker is not None:
                 w._worker.wait(30000)
         self.session.save()
