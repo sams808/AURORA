@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test-and-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,build]"
+      - name: Tests
+        run: python -m pytest -q
+      - name: Headless smoke test
+        run: python -m aurora --distcheck
+      - name: Build (PyInstaller onedir)
+        run: pyinstaller --noconfirm --clean packaging/aurora.spec
+      - name: Frozen smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\AURORA\AURORA.exe" -ArgumentList "--distcheck" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "distcheck failed with exit code $($p.ExitCode)" }
+      - name: Frozen smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: ./dist/AURORA/AURORA --distcheck
+      - name: Package
+        shell: bash
+        run: |
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then 7z a -r ../AURORA-windows.zip AURORA; else ditto -c -k --keepParent AURORA.app ../AURORA-macos.zip; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AURORA-${{ runner.os }}
+          path: AURORA-*.zip
+          if-no-files-found: error

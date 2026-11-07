@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aurora-sgm"
+version = "0.1.0.dev0"
+description = "AURORA: soft X-ray XAS and XRF stack analysis for the SGM beamline (Canadian Light Source)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Sami Soudani"}]
+dependencies = [
+    "numpy>=1.26",
+    "h5py>=3.10",
+    "PySide6>=6.6",
+    "xraydb>=4.5",
+    "platformdirs>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+build = ["pyinstaller>=6.6"]
+
+[project.scripts]
+aurora = "aurora.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["aurora*"]
+
+[tool.setuptools.package-data]
+aurora = ["resources/*.png", "resources/*.ico"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

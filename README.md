@@ -2,7 +2,22 @@
 
 Soft X-ray XAS and XRF stack analysis for the SGM beamline (ambxas endstation) of the Canadian Light Source. Desktop application for Windows and macOS.
 
-Status: planning (2026-11-06). See `docs/BRAINSTORM.md` for the full feature universe, architecture, cross-platform plan and roadmap, `docs/DESIGN.md` for the design language, and `branding/` for the logo.
+Status: Phase 0 (2026-11-06): package skeleton, raw-data readers, project discovery, Qt shell with the Home perspective, headless CLI, tests, Windows + macOS builds in CI. See `docs/BRAINSTORM.md` for the feature universe, architecture and roadmap, `docs/DESIGN.md` for the design language, and `branding/` for the logo.
+
+## Quick start (developers)
+
+```
+python -m pip install -e ".[dev,build]"
+python -m pytest                       # synthetic data; the Nov 2026 beamtime tests run when AURORA_REAL_PROJECT exists
+aurora                                 # the application
+aurora project <beamtime folder>       # headless listing of days, holders, scans, status and flags
+aurora scan <scan folder>              # one scan's metadata and first energy
+aurora --distcheck                     # offscreen smoke test (used by CI on the frozen build)
+pyinstaller packaging/aurora.spec      # dist/AURORA (Windows) or dist/AURORA.app (macOS)
+```
+
+The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with `processed/`, `config/`, `reports/` beside it.
+`aurora.core` never imports Qt; `aurora.app` holds the PySide6 interface.
 
 ## Lineage and credits
 
@@ -17,9 +32,14 @@ Edge and emission-line energies come from xraydb. Data acquired at the SGM beaml
 ## Layout
 
 ```
-branding/   logo (SVG, PNG 16-1024, .ico), wordmark
-docs/       BRAINSTORM.md, DESIGN.md, sources/ (inventories of the parents)
-legacy/     the two parent code bases, kept as received
+aurora/core/    readers (h5, raw bin/csv, sgm_report caches, config, zones), names, grid, project model, synthetic test data
+aurora/app/     PySide6 shell: theme, icons, rail, Home perspective, About
+aurora/cli.py   aurora / aurora project / aurora scan / aurora --distcheck
+tests/          pytest (offscreen Qt); tests/test_real_data.py needs the beamtime folder
+packaging/      PyInstaller spec; .github/workflows/ci.yml builds on windows-latest and macos-14
+branding/       logo (SVG, PNG 16-1024, .ico), wordmark
+docs/           BRAINSTORM.md, DESIGN.md
+legacy/         sgm_report v2.5 (the Nov 2026 beamtime scripts); the two parent code bases stay local, not committed
 ```
 
 Author: Sami Soudani.
