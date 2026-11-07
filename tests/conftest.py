@@ -15,20 +15,12 @@ def _qt_teardown():
     yield
     try:
         from PySide6.QtWidgets import QApplication
-        import shiboken6
+        from aurora.app.main import shutdown_app
     except ImportError:
         return
     app = QApplication.instance()
-    if app is None:
-        return
-    for w in QApplication.topLevelWidgets():
-        w.close()
-        w.deleteLater()
-    app.processEvents()
-    import gc
-    gc.collect()
-    app.processEvents()
-    shiboken6.delete(app)
+    if app is not None:
+        shutdown_app(app)
 
 
 @pytest.fixture(autouse=True)

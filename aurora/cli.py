@@ -68,15 +68,17 @@ def cmd_distcheck() -> int:
     assert len(proj.scans) == 4, proj.scans
     statuses = sorted(s.status for s in proj.scans)
     assert statuses == ["aborted", "complete", "survey", "test"], statuses
-    from aurora.app.main import MainWindow, create_app
+    from aurora.app.main import MainWindow, create_app, shutdown_app
     app = create_app([APP_NAME])
     win = MainWindow()
     win.home.set_project(proj)
     app.processEvents()
     assert win.home.tree.topLevelItemCount() == 1
     from aurora.app.about import versions_text
+    size = f"{win.width()}x{win.height()}"
+    shutdown_app(app, win)
     print(versions_text())
-    print(f"distcheck ok: {len(proj.scans)} scans, statuses {statuses}, window {win.width()}x{win.height()}")
+    print(f"distcheck ok: {len(proj.scans)} scans, statuses {statuses}, window {size}")
     return 0
 
 

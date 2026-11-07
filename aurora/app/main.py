@@ -193,10 +193,28 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     return app
 
 
+def shutdown_app(app: QApplication, *windows: QWidget) -> None:
+    """Destroy the windows and the QApplication in a fixed order. Left to interpreter teardown, PySide6 >= 6.12
+    segfaults on exit (module globals and the application die in an arbitrary order)."""
+    import gc
+    import shiboken6
+    for w in windows:
+        w.close()
+    for w in list(QApplication.topLevelWidgets()):
+        w.close()
+        w.deleteLater()
+    app.processEvents()
+    gc.collect()
+    app.processEvents()
+    shiboken6.delete(app)
+
+
 def run(project: Path | None = None) -> int:
     app = create_app()
     win = MainWindow()
     win.show()
     if project is not None:
         win.home.open_project(Path(project))
-    return app.exec()
+    code = app.exec()
+    shutdown_app(app, win)
+    return code
