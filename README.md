@@ -13,8 +13,12 @@ aurora                                 # the application
 aurora project <beamtime folder>       # headless listing of days, holders, scans, status and flags
 aurora scan <scan folder>              # one scan's metadata and first energy
 aurora --distcheck                     # offscreen smoke test (used by CI on the frozen build)
-pyinstaller packaging/aurora.spec      # dist/AURORA (Windows) or dist/AURORA.app (macOS)
+packaging\build_win.bat                # frozen build from a clean venv -> dist/AURORA (Windows)
+packaging/build_mac.sh                 # same on macOS -> dist/AURORA.app
 ```
+
+Always build from a clean virtual environment (the scripts create `.venv-build`): PyInstaller follows every import it
+finds in site-packages, and a global Python with torch or scikit-learn installed turns a 100 MB bundle into 1 GB.
 
 The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with `processed/`, `config/`, `reports/` beside it.
 `aurora.core` never imports Qt; `aurora.app` holds the PySide6 interface.

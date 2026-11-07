@@ -37,3 +37,4 @@ docs/sources/
 Thumbs.db
 .vscode/
 .idea/
+.venv-build/
