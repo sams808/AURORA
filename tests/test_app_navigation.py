@@ -35,7 +35,7 @@ def test_settings_dialog_round_trip(qapp):
     from aurora.app.settings_dialog import SettingsDialog, get
     assert get("despike_k") == 6.0 and get("fluo_norm") == "i0jump" and get("open_last_project") is True
     d = SettingsDialog()
-    d.k.setValue(8.0); d.fn.setCurrentText("area"); d.open_last.setChecked(False); d.author.setText("Sami Soudani")
+    d.k.setValue(8.0); d.fn.setCurrentIndex(d.fn.findData("area")); d.open_last.setChecked(False); d.author.setText("Sami Soudani")
     d.accept()
     assert get("despike_k") == 8.0 and get("fluo_norm") == "area" and get("open_last_project") is False
     # new zone settings pick up the defaults

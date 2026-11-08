@@ -5,14 +5,17 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QProgressBar,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
                                QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from aurora.app import jobs, nav
+from aurora.app.help_text import explain_all, header_tips
 from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, role_pen, set_item_tone,
                               status_text)
-from aurora.app.widgets import Card, Worker
+from aurora.app.vocab import DET_LABELS
+from aurora.app.widgets import Card, ElidedLabel, EmptyState, TaskBar, overlay_host, set_enabled, set_plot_hint
 from aurora.core.constants import DETS
 from aurora.core.names import split_stack_id
 from aurora.core.qc import (CountRate, count_rate_probe, day_reference, i0_candidates, i0_check, saturation_check,
@@ -20,60 +23,68 @@ from aurora.core.qc import (CountRate, count_rate_probe, day_reference, i0_candi
 from aurora.core.zones import members, zone_traces
 
 COLS = ("Time", "Scan", "Edge", "Status", "I0 level", "I0", "SDD1 kcps", "SDD2 kcps", "SDD3 kcps", "SDD4 kcps", "Saturated", "High rate", "Notes")
+COL_HELP = {0: "check.col.time", 1: "check.col.scan", 2: "check.col.edge", 3: "check.col.status", 4: "check.col.i0_level",
+            5: "check.col.i0", 6: "check.col.kcps", 7: "check.col.kcps", 8: "check.col.kcps", 9: "check.col.kcps",
+            10: "check.col.saturated", 11: "check.col.high", 12: "check.col.notes"}
 
 
 class CheckPerspective(QWidget):
     def __init__(self, session: Session, parent: QWidget | None = None):
         super().__init__(parent)
         self.session = session
-        self._worker: Worker | None = None
         self.library = None                   # the Compare library (MainWindow sets it)
         self._rates: dict[str, CountRate] = {}
         self._results: dict[str, dict] = {}
+        self._cands = []
         self._x_curves = None                 # last I0-explorer read (scan name, curves), redrawn on a theme change
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
         head = QHBoxLayout()
         h1 = QLabel("Check"); h1.setObjectName("h1")
-        sub = QLabel("count rate, saturation, I0 validity per scan · good I0 for the holder · the four detectors on a zone")
+        sub = ElidedLabel("count rate, saturation, I0 validity per scan · good I0 for the holder · the four detectors on a zone",
+                          Qt.ElideRight)
         sub.setObjectName("muted")
-        head.addWidget(h1); head.addWidget(sub); head.addStretch(1)
+        head.addWidget(h1); head.addWidget(sub, 1)
         self.run_btn = QPushButton("Run the checks on this holder"); self.run_btn.setObjectName("primary")
         self.run_btn.clicked.connect(self.run_checks)
         head.addWidget(self.run_btn)
         root.addLayout(head)
-        self.progress = QProgressBar(); self.progress.setVisible(False)
-        root.addWidget(self.progress)
+        self.taskbar = TaskBar(self)
+        root.addWidget(self.taskbar)
 
         split = QSplitter(Qt.Vertical)
-        top = Card("Scans of the holder")
+        self.table_card = top = Card("Scans of the holder", help_anchor="5-check")
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
+        self.table.setAccessibleName("checks of the holder's scans")
         self.table.horizontalHeader().setSectionResizeMode(len(COLS) - 1, QHeaderView.Stretch)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.itemSelectionChanged.connect(self._row_selected)
         top.body.addWidget(self.table, 1)
-        self.day_label = QLabel(""); self.day_label.setObjectName("muted")
+        self.day_label = ElidedLabel("", Qt.ElideRight); self.day_label.setObjectName("muted")
         top.body.addWidget(self.day_label)
         split.addWidget(top)
 
         bottom = QSplitter(Qt.Horizontal)
-        i0c = Card("I0 of the holder's scans (per-pixel mean)")
+        i0c = Card("I0 of the holder's scans (per-pixel mean)", help_anchor="5-check")
         opts = QHBoxLayout()
         self.i0_norm = QCheckBox("normalise to the level"); self.i0_norm.setChecked(True); self.i0_norm.toggled.connect(self._draw_i0)
         self.auto_btn = QPushButton("Auto-select good I0"); self.auto_btn.clicked.connect(self._auto_select)
         opts.addWidget(self.i0_norm); opts.addStretch(1); opts.addWidget(self.auto_btn)
         i0c.body.addLayout(opts)
         self.i0_list = QListWidget()
+        self.i0_list.setAccessibleName("I0 of each scan; tick the good ones")
+        self.i0_list.setTextElideMode(Qt.ElideMiddle)
+        self.i0_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.i0_list.itemChanged.connect(self._good_toggled)
         i0c.body.addWidget(self.i0_list, 1)
         self.i0_plot = make_plot(x="energy (eV)", y="I0")
         self.i0_plot.getViewBox().disableAutoRange()
         i0c.body.addWidget(self.i0_plot, 2)
         bottom.addWidget(i0c)
-        sddc = Card("The four detectors on the selected zone")
+        sddc = Card("The four detectors on the selected zone", help_anchor="5-check")
         self.sdd_note = QLabel("select a zone in Reduce and a scan above"); self.sdd_note.setObjectName("muted"); self.sdd_note.setWordWrap(True)
         sddc.body.addWidget(self.sdd_note)
         self.sdd_plot = make_plot(x="energy (eV)", y="normalised (own range)", legend="inside")
@@ -82,10 +93,13 @@ class CheckPerspective(QWidget):
         self.spike_note = QLabel(""); self.spike_note.setObjectName("muted"); self.spike_note.setWordWrap(True)
         sddc.body.addWidget(self.spike_note)
         bottom.addWidget(sddc)
-        i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)")
+        i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)", help_anchor="5-check")
         xrow = QHBoxLayout()
-        self.x_scan = QComboBox(); xrow.addWidget(self.x_scan, 1)
-        xb = QPushButton("Read"); xb.clicked.connect(self.explore_i0); xrow.addWidget(xb)
+        self.x_scan = QComboBox()
+        self.x_scan.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.x_scan.setMinimumContentsLength(12)
+        xrow.addWidget(self.x_scan, 1)
+        self.x_read_btn = xb = QPushButton("Read"); xb.clicked.connect(self.explore_i0); xrow.addWidget(xb)
         i0x.body.addLayout(xrow)
         self.x_plot = make_plot(x="energy (eV)", y="normalised to the median", legend="inside")
         self.x_plot.getViewBox().disableAutoRange()
@@ -94,7 +108,18 @@ class CheckPerspective(QWidget):
         bottom.addWidget(i0x)
         split.addWidget(bottom)
         split.setSizes([330, 520])
-        root.addWidget(split, 1)
+        self.body = overlay_host(split)
+        root.addWidget(self.body, 1)
+        self.empty_state = EmptyState("No project open: the quality checks of each holder's scans appear here.",
+                                      [("Open project…", lambda: nav.open_project_dialog(self)),
+                                       ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="check",
+                                      parent=self.body)
+        self.run_state = EmptyState("The checks have not run on this holder yet.",
+                                    [("Run the checks on this holder", self.run_checks)], icon="check", parent=self.table)
+        explain_all([(self.run_btn, "check.run"), (self.i0_norm, "check.i0_norm"), (self.auto_btn, "check.auto"),
+                     (self.x_scan, "check.x_scan"), (self.x_read_btn, "check.x_read")])
+        header_tips(self.table, COL_HELP)
+        session.project_changed.connect(lambda _p: self.update_actions())
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda z: self._update_sdd())
         session.stack_selected.connect(lambda sd: self._update_sdd())
@@ -104,6 +129,29 @@ class CheckPerspective(QWidget):
         # the good-I0 picker and the I0 explorer are Advanced
         self.i0_card, self.sdd_card, self.explorer_card = i0c, sddc, i0x
         mark_advanced(self.i0_card, self.explorer_card)
+        self.update_actions()
+        self._draw_i0(); self._update_sdd(); self._draw_x()
+
+    def update_actions(self) -> None:
+        ses = self.session
+        has = ses.project is not None
+        h = ses.holder()
+        busy = h is not None and jobs.of(self).job(f"check:{ses.current_holder}") is not None
+        name = f"holder {h.name}" if h else "this holder"
+        self.run_btn.setText(f"Run the checks on {name}")
+        set_enabled(self.run_btn, has and bool(ses.stacks_of()) and not busy,
+                    "open a project first" if not has else ("the checks are running" if busy else
+                                                            "the holder has no complete stack"))
+        set_enabled(self.x_read_btn, has and self.x_scan.count() > 0, "open a project first" if not has else
+                    "the holder has no stack")
+        set_enabled(self.auto_btn, bool(self._cands), "run the checks or load the holder's scans first")
+        self.table_card.set_title(f"Scans of holder {h.name}" if h else "Scans of the holder")
+        self.empty_state.set_shown(not has)
+        show_run = has and h is not None and not self._results and not busy and bool(ses.stacks_of())
+        if show_run:
+            self.run_state.set_content(f"The checks have not run on {name} yet.",
+                                       [(f"Run the checks on {name}", self.run_checks)])
+        self.run_state.set_shown(show_run)
 
     def _theme_changed(self) -> None:
         refill_tones(self.table)
@@ -122,6 +170,7 @@ class CheckPerspective(QWidget):
         for s in (h.stacks + h.dropped) if h else []:
             if s.kind == "stack" and s.n_energies > 1:
                 self.x_scan.addItem(f"{s.time} {s.label} · {s.status}", s.name)
+        self.update_actions()
 
     def explore_i0(self) -> None:
         name = self.x_scan.currentData()
@@ -147,7 +196,9 @@ class CheckPerspective(QWidget):
         self.x_plot.clear(); self.x_plot.plotItem.legend.clear()
         c = self._x_curves
         if c is None or not c.E.size:
+            set_plot_hint(self.x_plot, "choose a stack and Read its I0 curves")
             return
+        set_plot_hint(self.x_plot, None)
 
         def med(a):
             m = np.nanmedian(a) if np.isfinite(a).any() else 1.0
@@ -164,7 +215,7 @@ class CheckPerspective(QWidget):
             self.x_plot.getViewBox().setRange(xRange=(float(c.E[0]), float(c.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
 
     def run_checks(self) -> None:
-        if self.session.project is None or (self._worker is not None and self._worker.isRunning()):
+        if self.session.project is None:
             return
         scans = list(self.session.stacks_of())
         if not scans:
@@ -180,22 +231,17 @@ class CheckPerspective(QWidget):
                 cb(len(scans) + i, 2 * len(scans), f"loading {s.name}")
                 try:
                     session.stack(session.stack_id(s))
-                except Exception as err:
+                except Exception:
                     rates.setdefault(session.stack_id(s), None)
                     continue
             return rates
 
-        self.progress.setVisible(True); self.progress.setRange(0, 0)
-        self.run_btn.setEnabled(False)
-        self._worker = Worker(job, self)
-        self._worker.progress.connect(lambda i, n, m: (self.progress.setRange(0, max(n, 1)), self.progress.setValue(i), self.day_label.setText(m)), Qt.QueuedConnection)
-        self._worker.done.connect(self._done, Qt.QueuedConnection)
-        self._worker.failed.connect(lambda t: (self.progress.setVisible(False), self.run_btn.setEnabled(True), self.day_label.setText(t.strip().splitlines()[-1])), Qt.QueuedConnection)
-        self._worker.start()
+        jobs.of(self).submit(f"check:{self.session.current_holder}", job, on_done=self._done,
+                             on_failed=lambda t: self.day_label.setText(t.strip().splitlines()[-1]),
+                             on_end=lambda _s: self.update_actions(), label="running the checks", taskbar=self.taskbar)
+        self.update_actions()
 
     def _done(self, rates: dict) -> None:
-        self._worker.wait(30000)
-        self.progress.setVisible(False); self.run_btn.setEnabled(True)
         self._rates = {k: v for k, v in rates.items() if v is not None}
         self.compute()
         self.session.touch()        # memberships for the stacks loaded here
@@ -215,9 +261,10 @@ class CheckPerspective(QWidget):
             i0r = i0_check(cr.i0_level, day_i0)
             self._results[sid] = dict(rate=cr, sat=sat, i0=i0r, day_kcps=day_kcps, day_i0=day_i0)
         day_kcps, day_i0 = day_reference(list(self._rates.values()))
-        self.day_label.setText("median over the holder's scans: " + ", ".join(f"{d.upper()} {k:.0f} kcps" for d, k in zip(DETS, day_kcps) if np.isfinite(k))
+        self.day_label.setText("median over the holder's scans: " + ", ".join(f"{d} {k:.0f} kcps" for d, k in zip(DET_LABELS, day_kcps) if np.isfinite(k))
                                + (f" · I0 level {day_i0:.3g}" if np.isfinite(day_i0) else ""))
         self._fill_table(); self._fill_i0(); self._update_sdd()
+        self.update_actions()
 
     # ------------------------------------------------------------------ table
     def _fill_table(self) -> None:
@@ -275,6 +322,7 @@ class CheckPerspective(QWidget):
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if self.session.zones.good_i0.get(c.sid) else Qt.Unchecked)
             it.setData(Qt.UserRole, c.sid)
+            it.setToolTip(it.text())
             set_item_tone(it, tone, icon=False)       # the check box sits where an icon would
             self.i0_list.addItem(it)
         self.i0_list.blockSignals(False)
@@ -300,7 +348,9 @@ class CheckPerspective(QWidget):
         self.i0_plot.clear()
         cands = getattr(self, "_cands", [])
         if not cands:
+            set_plot_hint(self.i0_plot, "the I0 of the loaded scans appears here")
             return
+        set_plot_hint(self.i0_plot, None)
         xs, ys = [], []
         curves = []
         for i, c in enumerate(cands):
@@ -336,7 +386,9 @@ class CheckPerspective(QWidget):
         if z is None or sd is None or sid not in z.settings:
             self.sdd_note.setText("select a zone (Reduce) and a scan that covers it")
             self.spike_note.setText("")
+            set_plot_hint(self.sdd_plot, "select a zone in Reduce and a scan that covers it")
             return
+        set_plot_hint(self.sdd_plot, None)
         pix = members(z, sd.x, sd.y, sd.pitch)
         st = z.settings[sid]
         good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
@@ -354,7 +406,7 @@ class CheckPerspective(QWidget):
             for k in range(4):
                 flagged = any(d == DETS[k] for d, _ in c.flags)
                 pen = pg.mkPen(curve(k), width=2 if flagged else 1, style=dash(k))
-                self.sdd_plot.plot(c.energies, c.normalised[:, k], pen=pen, name=f"SDD{k + 1}" + (" !" if flagged else ""))
+                self.sdd_plot.plot(c.energies, c.normalised[:, k], pen=pen, name=DET_LABELS[k] + (" !" if flagged else ""))
             vals = c.normalised[np.isfinite(c.normalised)]
             self.sdd_plot.getViewBox().setRange(xRange=xs, yRange=(float(vals.min()), float(vals.max())), padding=0.05, disableAutoRange=True)
         sp = spike_summary(t)

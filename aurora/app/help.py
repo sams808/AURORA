@@ -24,6 +24,84 @@ DOCS = [
 ]
 
 
+# F1 and Help > Help on this page: the MANUAL.md section of each perspective, of the Settings dialog and of the tabs
+PERSPECTIVE_HELP: dict[str, str] = {
+    "home": "2-home", "survey": "3-survey", "reduce": "4-reduce", "check": "5-check", "compare": "6-compare",
+    "fit": "7-fit", "maps": "8-maps", "report": "9-report", "settings": "10-settings",
+}
+# (perspective, tab title) -> anchor. The Maps tabs point at the Maps section until it gains subsections.
+TAB_HELP: dict[tuple[str, str], str] = {
+    ("fit", "LCF"): "71-lcf-linear-combination-fit", ("fit", "PCA / MCR-ALS"): "72-pca--mcr-als",
+    ("fit", "ITFA"): "73-itfa", ("fit", "Peaks"): "74-peaks",
+    ("maps", "Explore"): "8-maps", ("maps", "Elemental maps"): "8-maps", ("maps", "RGB"): "8-maps",
+    ("maps", "Clusters"): "8-maps",
+}
+HELP_ANCHOR_PROP = "aurora_help_anchor"
+
+
+def set_help_anchor(widget: QWidget, anchor: str | None) -> None:
+    """The MANUAL.md section F1 opens while `widget` (a page, a tab, a dialog) is the current one."""
+    widget.setProperty(HELP_ANCHOR_PROP, anchor or "")
+
+
+def help_anchor_of(widget: QWidget | None) -> str | None:
+    """The help anchor set on the widget or the nearest ancestor that has one."""
+    w = widget
+    while w is not None:
+        a = w.property(HELP_ANCHOR_PROP)
+        if a:
+            return str(a)
+        w = w.parentWidget()
+    return None
+
+
+def page_anchor(key: str, page: QWidget | None = None) -> str:
+    """The anchor F1 opens for perspective `key`: its current tab's section (TAB_HELP), else the page's own anchor,
+    else PERSPECTIVE_HELP."""
+    tabs = getattr(page, "tabs", None) if page is not None else None
+    if tabs is not None and hasattr(tabs, "currentWidget") and tabs.count():
+        cur = tabs.currentWidget()
+        a = cur.property(HELP_ANCHOR_PROP) if cur is not None else None
+        if a:
+            return str(a)
+        t = TAB_HELP.get((key, tabs.tabText(tabs.currentIndex())))
+        if t:
+            return t
+    a = page.property(HELP_ANCHOR_PROP) if page is not None else None
+    return str(a) if a else PERSPECTIVE_HELP.get(key, "1-the-window")
+
+
+_HEADINGS: dict[str, dict[str, str]] = {}           # doc -> {anchor: section number}; plain strings only
+
+
+def headings(doc: str = "MANUAL.md") -> dict[str, str]:
+    """{anchor: section number ('4.5', '10', '' when unnumbered)} of a bundled document's headings."""
+    if doc not in _HEADINGS:
+        out: dict[str, str] = {}
+        p = docs_dir() / doc
+        in_code = False
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for ln in lines:
+            if ln.lstrip().startswith("```"):
+                in_code = not in_code
+                continue
+            m = None if in_code else re.match(r"^(#{1,6})\s+(.*?)\s*$", ln)
+            if m:
+                title = m.group(2)
+                num = re.match(r"^(\d+(?:\.\d+)*)\.?\s", title)
+                out[slug(title)] = num.group(1) if num else ""
+        _HEADINGS[doc] = out
+    return _HEADINGS[doc]
+
+
+def section_of(anchor: str, doc: str = "MANUAL.md") -> str:
+    """'45-one-card-per-attached-scan' -> '4.5' (the section number shown in What's This texts)."""
+    return headings(doc).get(anchor, "")
+
+
 def docs_dir() -> Path:
     """The bundled manuals (aurora/resources/docs): in the frozen app, the .app bundle and a source checkout."""
     return resources_dir() / "docs"
@@ -45,6 +123,7 @@ class DocBrowser(QTextBrowser):
         self.setOpenLinks(True)
         self.setSearchPaths([str(docs_dir())])
         self._loaded = ""
+        self.anchor = ""                        # the section the page was opened at
         self._fit = QTimer(self)
         self._fit.setSingleShot(True)
         self._fit.setInterval(120)
@@ -66,6 +145,7 @@ class DocBrowser(QTextBrowser):
             self._loaded = target
             self.polish_document()
         frag = name.fragment()
+        self.anchor = frag
         if frag:
             self.scrollToAnchor(frag)
         elif target:
@@ -225,6 +305,10 @@ class HelpWindow(QMainWindow):
     def current_doc(self) -> str:
         return Path(self.browser.source().toLocalFile()).name
 
+    def current_anchor(self) -> str:
+        """The section the window was last opened at ('' for the top of a document)."""
+        return self.browser.anchor
+
     def find(self, backward: bool = False) -> bool:
         text = self.find_edit.text()
         if not text:
@@ -261,9 +345,15 @@ class HelpWindow(QMainWindow):
 
 
 def open_help(widget: QWidget, doc: str = "USER_GUIDE.md", anchor: str | None = None) -> None:
-    """From any widget: open the manuals window of its main window at `doc#anchor` (the perspectives' ? buttons)."""
-    win = widget.window()
-    if hasattr(win, "show_help"):
+    """From any widget: open the manuals window of its main window at `doc#anchor` (F1, the cards' '?' buttons, the
+    Settings dialog's Help button). A widget outside the main window (a dialog) finds it through its parents."""
+    from aurora.app.nav import window_of
+    win = window_of(widget)
+    if win is not None and hasattr(win, "show_help"):
         win.show_help(doc, anchor)
-    else:
-        HelpWindow(win).show_doc(doc, anchor)
+        return
+    top = QWidget.window(widget) if widget is not None else None
+    h = top.findChild(HelpWindow) if top is not None else None
+    if h is None:
+        h = HelpWindow(top)
+    h.show_doc(doc, anchor)

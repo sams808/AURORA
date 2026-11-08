@@ -239,7 +239,17 @@ class Session(QObject):
             return None
         return next((z for z in hz.zones if z.id == zid), None)
 
-    def new_zone(self, label: str = "") -> Zone:
+    def _no_holder(self) -> bool:
+        """No project (or a project without a holder): say so in the status line instead of failing."""
+        if self.project is None or self.current_holder is None:
+            self.status.emit("open a project first")
+            return True
+        return False
+
+    def new_zone(self, label: str = "") -> Zone | None:
+        """A new empty zone of the current holder, selected; None (and a status line) without a project or holder."""
+        if self._no_holder():
+            return None
         hz = self.holder_zones()
         zid = max((z.id for z in hz.zones), default=0) + 1
         with self.edit(f"new zone {zid}"):
@@ -250,6 +260,8 @@ class Session(QObject):
         return z
 
     def delete_zone(self, zid: int) -> None:
+        if self._no_holder():
+            return None
         hz = self.holder_zones(create=False)
         if hz is None:
             return
@@ -260,6 +272,8 @@ class Session(QObject):
                 self.zone_selected.emit(None)
 
     def select_zone(self, zid: int | None) -> None:
+        if zid is not None and self._no_holder():
+            return None
         self.current_zone = zid
         self.zone_selected.emit(self.zone(zid) if zid is not None else None)
 

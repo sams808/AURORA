@@ -38,7 +38,7 @@ the headless listing and the tree agree.
 2. The stack map shows F Kα integrated above the edge, divided by I0. Select **rect+**, drag a rectangle over the
    left half of the map. A zone appears in the list.
 3. In the zone card, pick the label `1 alpha` (offered from the sample sheet) and the group `Minerals`.
-4. **New zone**, **rect+**, drag over the right half; label `2 beta`, group `Simple Glass`.
+4. **New sample**, **rect+**, drag over the right half; label `2 beta`, group `Simple Glass`.
 5. Select zone 1 again. The scan card below shows include ticked, SDD1–4 ticked, line F Kα, fluorescence
    "/ I0, edge jump = 1", de-spike k = 6, I0 own. Untick SDD3 and watch the preview's sum change.
 6. Try **brush−** with brush 1 and click a pixel inside zone 1: it is erased from the zone (the info line counts it).
@@ -50,7 +50,7 @@ saved automatically.
 ## Tutorial 3: proposals and the zones file
 
 1. In Reduce, **Delete** both zones.
-2. **Propose…**. The demo has no sgm_report summary, so the proposals come from the bright pads of the survey map.
+2. **Propose zones**. The demo has no sgm_report summary, so the proposals come from the bright pads of the survey map.
    Rename and regroup them as in tutorial 2, delete the ones you do not want.
 3. Go to Survey. The zones are drawn on the plate map with the footprint of the stack. Click the footprint: Reduce
    opens on that stack.
@@ -61,7 +61,7 @@ saved automatically.
 
 ## Tutorial 4: run the checks and explore I0
 
-1. Go to Check, **Run the checks on this holder**. The table fills with the I0 level, the count rate per detector,
+1. Go to Check, **Run the checks on holder N5**. The table fills with the I0 level, the count rate per detector,
    and empty Saturated / High rate columns (the demo is clean).
 2. In **I0 of the holder's scans**, tick the stack, or **Auto-select good I0**. Back in Reduce, a scan card's I0
    combo now offers "good-I0 mean" with a meaning.
@@ -76,7 +76,7 @@ saved automatically.
 This tutorial uses CSVs. Write five with the script below or use any folder of reduced CSVs you have
 (AURORA, sgm_report `_xanes.csv`, John Bussey's `_full_reduced.csv`).
 
-1. Compare, **Add reduced folder…** → the folder. Each file gives rows for its signals. Untick **Show** on the TEY
+1. Compare, **Add saved spectra…** → the folder. Each file gives rows for its signals. Untick **Show** on the TEY
    rows (or **Hide all** then tick the sdd-scaled ones).
 2. Select every sdd-scaled row, set pre/post to −20, −5, 15, 35 and **Apply**. Norm stays `larch`.
 3. Tick **mark peaks**: the maxima are dotted and listed under the plot. Select one row and read its E0 and edge
@@ -153,7 +153,7 @@ a recognisable edge are listed without one and never filtered out.
 The order that worked during the November 2026 F K campaign:
 
 1. Open the beamtime folder (the one with `raw/`). If sgm_report ran, its summaries feed the flags and proposals.
-2. Per holder: Survey to see the plate, Reduce **Load all**, **Propose…**, correct the labels and groups from the
+2. Per holder: Survey to see the plate, Reduce **Load all**, **Propose zones**, correct the labels and groups from the
    sample sheet, delete what is not a sample.
 3. Check: **Run the checks**, read Saturated / High rate / I0 invalid. For saturated scans untick the SDDs on the zone
    cards (TEY only); for scans with an invalid I0, tick the good scans and set their cards to "good-I0 mean".

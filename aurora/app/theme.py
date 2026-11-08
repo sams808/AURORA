@@ -653,6 +653,11 @@ QWidget#topbar QToolButton#modebtn:hover {{ border-color: {t['aurora']}; }}
 QWidget#topbar QToolButton#modebtn:checked {{ background: {t['aurora']}; color: {t['on_accent']}; border-color: {t['aurora']};
     font-weight: 600; }}
 QWidget#topbar QToolButton#modebtn:focus {{ border: 2px solid {t['chrome_text']}; padding: 2px 11px; }}
+QWidget#topbar QToolButton#holderbtn {{ color: {t['chrome_text']}; background: transparent; border: 1px solid transparent;
+    border-radius: 6px; padding: 2px 6px; font-size: {px_(13)}; font-weight: 600; }}
+QWidget#topbar QToolButton#holderbtn:hover {{ border-color: {t['map_axis']}; }}
+QWidget#topbar QToolButton#holderbtn:focus {{ border: 2px solid {t['chrome_text']}; padding: 1px 5px; }}
+QWidget#topbar QToolButton#holderbtn::menu-indicator {{ image: none; width: 0; }}
 QWidget#rail {{ background: {t['rail']}; }}
 QWidget#rail QToolButton#railbtn {{ color: {t['rail_text']}; background: transparent; border: 0; border-radius: 10px;
     padding: 8px 4px; font-size: {px_(12)}; font-weight: 400; min-width: 76px; }}
@@ -662,6 +667,13 @@ QWidget#rail QToolButton#railbtn:focus {{ border: 2px solid {t['chrome_text']}; 
 QWidget#rail QToolButton#railbtn:checked:focus {{ border: 2px solid {t['on_accent']}; }}
 QFrame#card {{ background: {t['card']}; border: 1px solid {t['line']}; border-radius: 12px; }}
 QLabel#cardtitle {{ font-weight: 600; }}
+QToolButton#cardhelp {{ color: {t['muted']}; background: transparent; border: 1px solid {t['line']}; border-radius: 10px;
+    padding: 0px 6px; font-size: {px_(12)}; font-weight: 600; }}
+QToolButton#cardhelp:hover {{ color: {t['ink']}; border-color: {t['action']}; }}
+QToolButton#cardhelp:focus {{ border: 2px solid {t['focus']}; padding: 0px 5px; }}
+QFrame#emptystate {{ background: {t['card']}; border: 1px solid {t['edge']}; border-radius: 12px; }}
+QFrame#emptystate QLabel#emptytext {{ color: {t['ink']}; font-size: {px_(14)}; }}
+QFrame#taskbar QLabel {{ color: {t['muted']}; }}
 QLabel#h1 {{ font-size: {px_(18)}; font-weight: 600; }}
 QLabel#muted {{ color: {t['muted']}; }}
 {tones}
@@ -879,6 +891,8 @@ def make_plot(kind: str = "plot", title: str | None = None, x: str | None = None
 def _pg_defaults() -> None:
     import pyqtgraph as pg
     pg.setConfigOptions(imageAxisOrder="row-major", background=TOKENS["plot_bg"], foreground=TOKENS["plot_fg"], antialias=True)
+    from aurora.app import pgcompat
+    pgcompat.install()                  # SVG export on Qt 6.12 (closed paths)
 
 
 # ----------------------------------------------------------------------------- apply

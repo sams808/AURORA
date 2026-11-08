@@ -148,11 +148,46 @@ def test_demo_and_log_actions(qapp, tmp_path, monkeypatch):
     win.close()
 
 
-def test_credits_everywhere():
-    from aurora.credits import CREDITS, CREDITS_SHORT
-    from aurora.app.about import CREDITS as about_credits
+def test_credits_everywhere(qapp, tmp_path):
+    from pathlib import Path
+    from aurora import __version__
+    from aurora.credits import CREDITS, CREDITS_SHORT, FOOTER
+    from aurora.app.about import CREDITS as about_credits, AboutDialog
     assert "version 2 of John Bussey's SGM XAS GUI" in CREDITS_SHORT and "James J. Dynes" in CREDITS_SHORT
-    assert "Jupyter notebooks" in CREDITS_SHORT and about_credits == CREDITS
+    assert "Jupyter notebooks" in CREDITS_SHORT and about_credits == CREDITS and CREDITS.startswith(CREDITS_SHORT)
+    # About: the credits paragraph, the author, the licence, a Licences… button
+    d = AboutDialog()
+    text = d.text()
+    assert CREDITS_SHORT in text and "Sami Soudani" in text and "MIT licence" in text and "Sam " not in text
+    assert d.licences_btn.text() == "Licences…"
+    d.deleteLater()
+    # README opens 'Lineage and credits' with CREDITS_SHORT verbatim; CREDITS.md quotes CREDITS verbatim
+    root = Path(__file__).resolve().parent.parent
+    readme = root.joinpath("README.md").read_text(encoding="utf-8")
+    section = readme.split("## Lineage and credits", 1)[1].lstrip()
+    assert section.startswith(CREDITS_SHORT)
+    assert f"> {CREDITS}" in root.joinpath("CREDITS.md").read_text(encoding="utf-8").splitlines()
+    # a built report: CREDITS on the cover, FOOTER in every page footer, the PDF metadata
+    from aurora.core.model import Project
+    from aurora.core.report import ReportBuilder
+    from aurora.core.testdata import make_fake_project, make_fake_zones
+    proj = Project.discover(make_fake_project(tmp_path / "beamtime"))
+    b = ReportBuilder(proj, make_fake_zones(proj), tmp_path / "report", title="Credits test", author="A B", png_dpi=60)
+    res = b.build()
+    assert CREDITS_SHORT in b.cover_credits and b.cover_credits == CREDITS
+    assert len(b.footers) == res.pages >= 3
+    assert all(f.startswith(f"AURORA {__version__} · {FOOTER} · ") and " · A B · " in f for f in b.footers)
+    raw = res.pdf.read_bytes().decode("latin-1")
+    esc = lambda t: t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")      # noqa: E731
+    assert f"/Creator (AURORA {__version__})" in raw and f"/Subject ({esc(CREDITS_SHORT)})" in raw
+    assert "/Author (A B)" in raw and "Sami Soudani" not in raw
+    b2 = ReportBuilder(proj, make_fake_zones(proj), tmp_path / "report2", title="No author", author="", png_dpi=60)
+    b2.build()
+    assert all(" ·  · " not in f for f in b2.footers) and "/Author" not in b2.out.joinpath(
+        next(p.name for p in b2.out.glob("*.pdf"))).read_bytes().decode("latin-1")
+    # the self-test JSON and the Report a problem diagnostics carry CREDITS_SHORT
+    from aurora.app.diagnostics import diagnostics_text
+    assert CREDITS_SHORT in diagnostics_text(None)
 
 
 def test_logging_setup(tmp_path, monkeypatch):

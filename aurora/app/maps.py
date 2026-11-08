@@ -8,18 +8,27 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel, QProgressBar,
-                               QPushButton, QSlider, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel, QPushButton,
+                               QSlider, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
+from aurora.app import jobs, nav
+from aurora.app.help_text import explain, explain_all, labelled
 from aurora.app.mapview import MapView
 from aurora.app.session import Session
 from aurora.app.theme import (MAP_OVERLAY, categorical, curve, dash, make_plot, on_theme_changed, pc, restyle_plot,
                               role_pen, style_plot, with_alpha)
-from aurora.app.widgets import Card, Worker
+from aurora.app.vocab import DET_LABELS, det_items, plural, unit_suffix
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_path, guarded_write,
+                                notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
 from aurora.core.constants import DETS
 from aurora.core.grid import to_grid
 from aurora.core.hypercube import Hypercube, export_pymca_4d, export_pymca_xanes, pca_kmeans
 from aurora.core.zones import members
+
+CHANNELS = 256                     # SDD channels per spectrum (the raw .bin layout)
+CUBE_BYTES = 4                     # uint32 counts in the cached cube
+NO_PROJECT = "open a project first"
+NO_CUBE = "load a hypercube first"
 
 
 class MapsPerspective(QWidget):
@@ -27,7 +36,6 @@ class MapsPerspective(QWidget):
         super().__init__(parent)
         self.session = session
         self.hc: Hypercube | None = None
-        self._worker: Worker | None = None
         self.library = None                          # the Compare library (MainWindow sets it)
         self._roi: np.ndarray | None = None          # pixel indices of the ROI (None = all)
         self._cluster = None
@@ -36,39 +44,49 @@ class MapsPerspective(QWidget):
         root.setSpacing(12)
         head = QHBoxLayout()
         h1 = QLabel("Maps"); h1.setObjectName("h1")
-        sub = QLabel("the full hypercube of a stack: any emission window, any energy, any region"); sub.setObjectName("muted")
-        head.addWidget(h1); head.addWidget(sub); head.addSpacing(16)
-        head.addWidget(QLabel("stack"))
-        self.scan_combo = QComboBox(); self.scan_combo.setMinimumWidth(260); head.addWidget(self.scan_combo)
+        sub = ElidedLabel("the full hypercube of a stack: any emission window, any energy, any region", Qt.ElideRight)
+        sub.setObjectName("muted")
+        head.addWidget(h1); head.addWidget(sub, 1)
+        self.scan_combo = QComboBox()
+        self.scan_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.scan_combo.setMinimumContentsLength(26)
+        self.scan_combo.currentIndexChanged.connect(lambda _i: self.update_actions())
+        head.addWidget(pair(labelled("stack", self.scan_combo, "maps.stack"), self.scan_combo))
         self.load_btn = QPushButton("Load hypercube"); self.load_btn.setObjectName("primary"); self.load_btn.clicked.connect(self.load)
         head.addWidget(self.load_btn)
-        head.addStretch(1)
-        self.status = QLabel(""); self.status.setObjectName("muted"); head.addWidget(self.status)
+        self.status = ElidedLabel("", Qt.ElideRight); self.status.setObjectName("muted"); head.addWidget(self.status, 1)
         root.addLayout(head)
-        self.progress = QProgressBar(); self.progress.setVisible(False); root.addWidget(self.progress)
+        self.taskbar = TaskBar(self)
+        root.addWidget(self.taskbar)
 
-        ctl = QHBoxLayout()
-        ctl.addWidget(QLabel("detector"))
-        self.det = QComboBox(); self.det.addItems(["sum", "SDD1", "SDD2", "SDD3", "SDD4"]); ctl.addWidget(self.det)
-        ctl.addWidget(QLabel("window"))
-        self.line = QComboBox(); ctl.addWidget(self.line)
-        ctl.addWidget(QLabel("eV"))
-        self.w_lo = QDoubleSpinBox(); self.w_lo.setRange(0, 5000); self.w_lo.setValue(600); ctl.addWidget(self.w_lo)
-        self.w_hi = QDoubleSpinBox(); self.w_hi.setRange(0, 5000); self.w_hi.setValue(720); ctl.addWidget(self.w_hi)
+        ctl_box = QWidget()
+        ctl = FlowLayout(ctl_box, spacing=6)
+        self.det = QComboBox(); self.det.addItems(det_items())
+        ctl.addWidget(pair(labelled("detector", self.det, "maps.det"), self.det))
+        self.line = QComboBox()
+        self.line.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.line.setMinimumContentsLength(10)
+        ctl.addWidget(pair(labelled("window", self.line, "maps.line"), self.line))
+        self.w_lo = QDoubleSpinBox(); self.w_lo.setRange(0, 5000); self.w_lo.setValue(600)
+        self.w_hi = QDoubleSpinBox(); self.w_hi.setRange(0, 5000); self.w_hi.setValue(720)
+        for w in (self.w_lo, self.w_hi):
+            w.setSuffix(unit_suffix("eV"))
+        ctl.addWidget(pair(self.w_lo, self.w_hi))
         self.per_i0 = QCheckBox("/ I0"); self.per_i0.setChecked(True); ctl.addWidget(self.per_i0)
         self.log = QCheckBox("log"); ctl.addWidget(self.log)
         self.deconv = QCheckBox("deconvolve"); ctl.addWidget(self.deconv)
         self.deconv_method = QComboBox(); self.deconv_method.addItems(["Richardson-Lucy", "Wiener"]); ctl.addWidget(self.deconv_method)
-        self.psf_um = QDoubleSpinBox(); self.psf_um.setRange(0.5, 2000); self.psf_um.setValue(100); self.psf_um.setSuffix(" µm PSF"); ctl.addWidget(self.psf_um)
-        self.deconv_iter = QSpinBox(); self.deconv_iter.setRange(1, 500); self.deconv_iter.setValue(20); self.deconv_iter.setSuffix(" it"); ctl.addWidget(self.deconv_iter)
-        ctl.addWidget(QLabel("ROI"))
-        self.roi_mode = QComboBox(); self.roi_mode.addItems(["whole map", "current zone", "rectangle (draw)"]); ctl.addWidget(self.roi_mode)
-        ctl.addStretch(1)
-        root.addLayout(ctl)
+        self.psf_um = QDoubleSpinBox(); self.psf_um.setRange(0.5, 2000); self.psf_um.setValue(100); self.psf_um.setSuffix(unit_suffix("um"))
+        ctl.addWidget(pair(labelled("PSF", self.psf_um, "maps.psf"), self.psf_um))
+        self.deconv_iter = QSpinBox(); self.deconv_iter.setRange(1, 500); self.deconv_iter.setValue(20)
+        self.deconv_iter.setSuffix(unit_suffix("iterations")); ctl.addWidget(self.deconv_iter)
+        self.roi_mode = QComboBox(); self.roi_mode.addItems(["whole map", "current zone", "rectangle (draw)"])
+        ctl.addWidget(pair(labelled("ROI", self.roi_mode, "maps.roi"), self.roi_mode))
+        root.addWidget(ctl_box)
         erow = QHBoxLayout()
-        erow.addWidget(QLabel("energy"))
-        self.energy = QSlider(Qt.Horizontal); self.energy.setRange(0, 0); erow.addWidget(self.energy, 1)
-        self.energy_label = QLabel("-"); self.energy_label.setMinimumWidth(90); erow.addWidget(self.energy_label)
+        self.energy = QSlider(Qt.Horizontal); self.energy.setRange(0, 0)
+        erow.addWidget(labelled("energy", self.energy, "maps.energy")); erow.addWidget(self.energy, 1)
+        self.energy_label = QLabel("-"); self.energy_label.setMinimumWidth(110); erow.addWidget(self.energy_label)
         self.avg = QCheckBox("average over energies"); erow.addWidget(self.avg)
         root.addLayout(erow)
 
@@ -77,7 +95,16 @@ class MapsPerspective(QWidget):
         self.tabs.addTab(self._elements_tab(), "Elemental maps")
         self.tabs.addTab(self._rgb_tab(), "RGB")
         self.tabs.addTab(self._cluster_tab(), "Clusters")
-        root.addWidget(self.tabs, 1)
+        self.body = overlay_host(self.tabs)
+        root.addWidget(self.body, 1)
+        self.empty_state = EmptyState("No project open: the hypercube of any stack opens here.",
+                                      [("Open project…", lambda: nav.open_project_dialog(self)),
+                                       ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="maps",
+                                      parent=self.body)
+        self.cube_state = EmptyState("No hypercube loaded.", [("Load hypercube", self.load)], icon="maps", parent=self.body)
+        explain_all([(self.load_btn, "maps.load"), (self.w_lo, "maps.w_lo"), (self.w_hi, "maps.w_hi"),
+                     (self.per_i0, "maps.per_i0"), (self.log, "maps.log"), (self.deconv, "maps.deconv"),
+                     (self.deconv_method, "maps.deconv_method"), (self.deconv_iter, "maps.iter"), (self.avg, "maps.avg")])
         self.det.currentIndexChanged.connect(self.redraw)
         self.line.currentIndexChanged.connect(self._line_picked)
         self.w_lo.valueChanged.connect(self.redraw); self.w_hi.valueChanged.connect(self.redraw)
@@ -86,10 +113,52 @@ class MapsPerspective(QWidget):
         self.roi_mode.currentIndexChanged.connect(self._roi_changed)
         self.deconv.toggled.connect(self.redraw); self.deconv_method.currentIndexChanged.connect(self.redraw)
         self.psf_um.valueChanged.connect(self.redraw); self.deconv_iter.valueChanged.connect(self.redraw)
+        session.project_changed.connect(lambda _p: self.update_actions())
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda z: self._roi_changed())
         session.zones_changed.connect(self._roi_changed)
         on_theme_changed(self, lambda _s: self._theme_changed())
+        self.update_actions()
+        self._draw_empty()
+
+    def window(self, det: int | None = None):
+        """QWidget.window() without an argument; with a detector, its emission window in channels (window_channels)."""
+        if det is None:
+            return QWidget.window(self)
+        return self.window_channels(det)
+
+    def cube_estimate(self, sid: str | None = None) -> str:
+        """'about 120 MB' for the stack's cached cube (energies x pixels x 256 channels x 4 detectors x 4 bytes)."""
+        sid = sid or self.scan_combo.currentData()
+        scan = self.session.scan_of(sid) if sid else None
+        if scan is None or not scan.n_energies or not scan.n_points:
+            return ""
+        mb = scan.n_energies * scan.n_points * CHANNELS * len(DETS) * CUBE_BYTES / 1e6
+        cached = (self.session.project.root / ".aurora" / "cache" / scan.day / scan.name / "cube_sdd1.npy").exists()
+        return "cached, opens at once" if cached else f"about {mb:.0f} MB, cached under .aurora/cache"
+
+    def update_actions(self) -> None:
+        has = self.session.project is not None
+        sid = self.scan_combo.currentData()
+        busy = sid is not None and jobs.of(self).job(f"cube:{sid}") is not None
+        set_enabled(self.load_btn, has and bool(sid) and not busy,
+                    NO_PROJECT if not has else ("loading" if busy else "the holder has no complete stack"))
+        cube = self.hc is not None
+        for b in (self.draw_el_btn, self.el_export, self.draw_rgb_btn, self.cluster_btn, self.xanes_export):
+            set_enabled(b, cube, NO_PROJECT if not has else NO_CUBE)
+        self.empty_state.set_shown(not has)
+        show_cube = has and not cube and bool(sid) and not busy
+        if show_cube:
+            est = self.cube_estimate(sid)
+            self.cube_state.set_content(f"No hypercube loaded. Load the one of {self.scan_combo.currentText()}"
+                                        + (f" ({est})." if est else "."), [("Load hypercube", self.load)])
+        self.cube_state.set_shown(show_cube)
+
+    def _draw_empty(self) -> None:
+        for plot, text in ((self.spec, "the emission spectrum of the ROI appears here"),
+                           (self.xanes, "the XANES of the ROI appears here"),
+                           (self.cluster_plot, "Run the clustering to see the cluster spectra")):
+            set_plot_hint(plot, text)
 
     def _theme_changed(self) -> None:
         self._style_band()
@@ -105,14 +174,14 @@ class MapsPerspective(QWidget):
     # ------------------------------------------------------------------ tabs
     def _explore_tab(self) -> QWidget:
         w = QSplitter(Qt.Horizontal)
-        left = Card("Map at the energy")
+        left = Card("Map at the energy", help_anchor="8-maps")
         self.map = MapView(); self.map.set_tool("navigate")
         self.map.rect_drawn.connect(self._rect)
         left.body.addWidget(self.map, 1)
-        self.map_hint = QLabel(""); self.map_hint.setObjectName("muted"); left.body.addWidget(self.map_hint)
+        self.map_hint = ElidedLabel("", Qt.ElideMiddle); self.map_hint.setObjectName("muted"); left.body.addWidget(self.map_hint)
         w.addWidget(left)
         right = QSplitter(Qt.Vertical)
-        sc = Card("Emission spectrum of the ROI (drag the band to set the window)")
+        sc = Card("Emission spectrum of the ROI (drag the band to set the window)", help_anchor="8-maps")
         self.spec = make_plot(x="emission energy (eV)", y="counts")
         self.spec.getViewBox().disableAutoRange()
         self.band = pg.LinearRegionItem(values=[600, 720])
@@ -121,7 +190,7 @@ class MapsPerspective(QWidget):
         self.spec.addItem(self.band, ignoreBounds=True)
         sc.body.addWidget(self.spec, 1)
         right.addWidget(sc)
-        xc = Card("XANES of the ROI in the window")
+        xc = Card("XANES of the ROI in the window", help_anchor="8-maps")
         self.xanes = make_plot(x="incident energy (eV)", y="window counts / I0", legend="inside")
         self.xanes.getViewBox().disableAutoRange()
         xc.body.addWidget(self.xanes, 1)
@@ -134,7 +203,9 @@ class MapsPerspective(QWidget):
         w = QWidget(); lay = QVBoxLayout(w)
         row = QHBoxLayout()
         b = QPushButton("Draw the elemental maps (every fixed line)"); b.clicked.connect(self.draw_elements); row.addWidget(b)
+        self.draw_el_btn = b
         self.el_export = QPushButton("Export PyMca 4D (_Elemental_PyMca.h5)…"); self.el_export.clicked.connect(self._export_4d); row.addWidget(self.el_export)
+        explain_all([(b, "maps.draw_elements"), (self.el_export, "maps.export_4d")])
         row.addStretch(1)
         lay.addLayout(row)
         self.el_layout = pg.GraphicsLayoutWidget()
@@ -147,9 +218,12 @@ class MapsPerspective(QWidget):
         row = QHBoxLayout()
         self.rgb_lines = []
         for k, name in enumerate(("R", "G", "B")):
-            row.addWidget(QLabel(name))
-            c = QComboBox(); row.addWidget(c); self.rgb_lines.append(c)
+            c = QComboBox()
+            row.addWidget(labelled(name, c, "maps.rgb")); row.addWidget(c); self.rgb_lines.append(c)
+            c.setAccessibleName(f"{name} window")
         b = QPushButton("Draw the RGB composite"); b.clicked.connect(self.draw_rgb); row.addWidget(b)
+        self.draw_rgb_btn = b
+        explain(b, "maps.draw_rgb")
         row.addStretch(1)
         lay.addLayout(row)
         self.rgb_view = MapView(); self.rgb_view.set_tool("navigate"); self.rgb_view.set_lookup(None)   # RGB, no colour map
@@ -158,20 +232,23 @@ class MapsPerspective(QWidget):
 
     def _cluster_tab(self) -> QWidget:
         w = QSplitter(Qt.Horizontal)
-        left = Card("PCA + k-means on the pixels (window XANES / I0)")
-        row = QHBoxLayout()
-        row.addWidget(QLabel("PCA components")); self.n_pc = QSpinBox(); self.n_pc.setRange(1, 20); self.n_pc.setValue(5); row.addWidget(self.n_pc)
-        row.addWidget(QLabel("clusters")); self.n_k = QSpinBox(); self.n_k.setRange(2, 20); self.n_k.setValue(4); row.addWidget(self.n_k)
+        left = Card("PCA + k-means on the pixels (window XANES / I0)", help_anchor="8-maps")
+        row_box = QWidget(); row = FlowLayout(row_box, spacing=6)
+        self.n_pc = QSpinBox(); self.n_pc.setRange(1, 20); self.n_pc.setValue(5); self.n_pc.setSuffix(unit_suffix("components"))
+        row.addWidget(pair(labelled("PCA", self.n_pc, "maps.n_pc"), self.n_pc))
+        self.n_k = QSpinBox(); self.n_k.setRange(2, 20); self.n_k.setValue(4); self.n_k.setSuffix(unit_suffix("clusters"))
+        row.addWidget(pair(labelled("k-means", self.n_k, "maps.n_k"), self.n_k))
         b = QPushButton("Run"); b.setObjectName("primary"); b.clicked.connect(self.run_clusters); row.addWidget(b)
         b2 = QPushButton("Export PyMca XANES stack (_PCA-CA.h5)…"); b2.clicked.connect(self._export_xanes); row.addWidget(b2)
-        row.addStretch(1)
-        left.body.addLayout(row)
+        self.cluster_btn, self.xanes_export = b, b2
+        explain_all([(b, "maps.run_clusters"), (b2, "maps.export_xanes")])
+        left.body.addWidget(row_box)
         self.cluster_map = MapView(); self.cluster_map.set_tool("navigate")
         self.cluster_map.set_lookup(self._cluster_lut(self.n_k.value()))       # categorical colours, one per cluster
         left.body.addWidget(self.cluster_map, 1)
         self.cluster_info = QLabel(""); self.cluster_info.setObjectName("muted"); self.cluster_info.setWordWrap(True); left.body.addWidget(self.cluster_info)
         w.addWidget(left)
-        right = Card("Cluster mean spectra")
+        right = Card("Cluster mean spectra", help_anchor="8-maps")
         self.cluster_plot = make_plot(x="incident energy (eV)", legend="inside"); self.cluster_plot.getViewBox().disableAutoRange()
         right.body.addWidget(self.cluster_plot, 1)
         w.addWidget(right)
@@ -184,23 +261,21 @@ class MapsPerspective(QWidget):
             self.scan_combo.addItem(f"{s.time} {s.label} · {s.edge_text} {s.energy_text}", self.session.stack_id(s))
         self.hc = None; self._roi = None
         self.map.clear_overlays(); self.map.set_grid(None); self.spec.clear(); self.spec.addItem(self.band, ignoreBounds=True); self.xanes.clear()
+        self._draw_empty()
+        self.update_actions()
 
     def load(self) -> None:
         sid = self.scan_combo.currentData()
-        if not sid or self.session.project is None or (self._worker is not None and self._worker.isRunning()):
+        if not sid or self.session.project is None:
             return
         scan = self.session.scan_of(sid); project = self.session.project
-        self.progress.setVisible(True); self.progress.setRange(0, 0); self.load_btn.setEnabled(False)
-        self._worker = Worker(lambda cb: Hypercube.load(project, scan, progress=cb), self)
-        self._worker.progress.connect(lambda i, n, m: (self.progress.setRange(0, max(n, 1)), self.progress.setValue(i), self.status.setText(m)), Qt.QueuedConnection)
-        self._worker.done.connect(self._loaded, Qt.QueuedConnection)
-        self._worker.failed.connect(lambda t: (self.progress.setVisible(False), self.load_btn.setEnabled(True), self.status.setText(t.strip().splitlines()[-1])), Qt.QueuedConnection)
-        self._worker.start()
+        jobs.of(self).submit(f"cube:{sid}", lambda cb: Hypercube.load(project, scan, progress=cb), on_done=self._loaded,
+                             on_failed=lambda t: self.status.setText(t.strip().splitlines()[-1]),
+                             on_end=lambda _s: self.update_actions(), label=f"loading the hypercube of {scan.name}",
+                             taskbar=self.taskbar)
+        self.update_actions()
 
     def _loaded(self, hc: Hypercube) -> None:
-        if self._worker is not None:
-            self._worker.wait(30000)
-        self.progress.setVisible(False); self.load_btn.setEnabled(True)
         self.set_hypercube(hc)
 
     def set_hypercube(self, hc: Hypercube) -> None:
@@ -219,6 +294,7 @@ class MapsPerspective(QWidget):
                             + (f" · {len(hc.skipped)} skipped" if hc.skipped else ""))
         self._roi_changed()
         self.redraw(); self.map.autorange()
+        self.update_actions()
 
     # ------------------------------------------------------------------ ROI and window
     def _roi_changed(self, *_) -> None:
@@ -262,7 +338,8 @@ class MapsPerspective(QWidget):
         self.line.blockSignals(True); self.line.setCurrentIndex(0); self.line.blockSignals(False)
         self.redraw()
 
-    def window(self, det: int) -> tuple[int, int]:
+    def window_channels(self, det: int) -> tuple[int, int]:
+        """The emission window (w_lo..w_hi eV) of detector `det` in channels."""
         return self.hc.window_channels(det, self.w_lo.value(), self.w_hi.value())
 
     # ------------------------------------------------------------------ drawing
@@ -272,7 +349,7 @@ class MapsPerspective(QWidget):
             return
         d = None if self.det.currentIndex() == 0 else self.det.currentIndex() - 1
         d0 = 0 if d is None else d
-        lo, hi = self.window(d0)
+        lo, hi = self.window_channels(d0)
         ei = None if self.avg.isChecked() else self.energy.value()
         self.energy_label.setText(f"{hc.E[self.energy.value()]:.2f} eV" + ("" if hc.valid[self.energy.value()] else " (skipped)"))
         m = hc.window_map(d, lo, hi, ei, self.per_i0.isChecked())
@@ -286,6 +363,7 @@ class MapsPerspective(QWidget):
             g.img = deconvolve_grid(g.img, self.psf_um.value(), float(np.mean(hc.pitch)),
                                     "lucy" if self.deconv_method.currentIndex() == 0 else "wiener", self.deconv_iter.value())
         self.map.set_grid(g)
+        set_plot_hint(self.spec, None); set_plot_hint(self.xanes, None)
         if self._roi is not None and self._roi.size:
             self.map.draw_pixels(hc.x[self._roi], hc.y[self._roi], hc.pitch, MAP_OVERLAY["roi"])
         self.map_hint.setText(f"window ch {lo}-{hi - 1} ({self.w_lo.value():.0f}-{self.w_hi.value():.0f} eV) · "
@@ -305,9 +383,9 @@ class MapsPerspective(QWidget):
         self.xanes.clear(); self.xanes.plotItem.legend.clear()
         xs = []
         for k in range(4):
-            lo_k, hi_k = self.window(k)
+            lo_k, hi_k = self.window_channels(k)
             xa = hc.xanes(k, lo_k, hi_k, self._roi, self.per_i0.isChecked())
-            self.xanes.plot(hc.E, xa, pen=pg.mkPen(curve(k), width=1, style=dash(k)), connect="finite", name=f"SDD{k + 1}")
+            self.xanes.plot(hc.E, xa, pen=pg.mkPen(curve(k), width=1, style=dash(k)), connect="finite", name=DET_LABELS[k])
             xs.append(xa)
         tot = np.nansum(xs, axis=0); tot[np.all(np.isnan(xs), axis=0)] = np.nan
         self.xanes.plot(hc.E, tot, pen=role_pen("sum", 2), connect="finite", name="sum")
@@ -376,7 +454,7 @@ class MapsPerspective(QWidget):
         if hc is None:
             return
         d = None if self.det.currentIndex() == 0 else self.det.currentIndex() - 1
-        lo, hi = self.window(0 if d is None else d)
+        lo, hi = self.window_channels(0 if d is None else d)
         M = hc.pixel_matrix(d, lo, hi, self.per_i0.isChecked())
         cr = pca_kmeans(M, hc.E[hc.valid], self.n_pc.value(), self.n_k.value())
         self._cluster = cr
@@ -387,7 +465,7 @@ class MapsPerspective(QWidget):
         self.cluster_map.image.setLevels((0, max(n_k - 1, 1)))      # one categorical colour per cluster index
         self.cluster_map.autorange()
         self._draw_clusters()
-        self.cluster_info.setText(f"{cr.centres.shape[0]} clusters on {int((cr.labels >= 0).sum())} px · PCA explained " + ", ".join(f"{100 * e:.1f} %" for e in cr.explained))
+        self.cluster_info.setText(f"{plural(cr.centres.shape[0], 'cluster')} on {int((cr.labels >= 0).sum())} px · PCA explained " + ", ".join(f"{100 * e:.1f} %" for e in cr.explained))
 
     @staticmethod
     def _cluster_lut(n: int) -> np.ndarray:
@@ -399,7 +477,9 @@ class MapsPerspective(QWidget):
         self.cluster_plot.clear(); self.cluster_plot.plotItem.legend.clear()
         cr = self._cluster
         if cr is None:
+            set_plot_hint(self.cluster_plot, "Run the clustering to see the cluster spectra")
             return
+        set_plot_hint(self.cluster_plot, None)
         cols = categorical(max(cr.centres.shape[0], 2))
         for k in range(cr.centres.shape[0]):
             n = int((cr.labels == k).sum())
@@ -412,17 +492,25 @@ class MapsPerspective(QWidget):
     def _export_xanes(self) -> None:
         if self.hc is None:
             return
-        p, _ = QFileDialog.getSaveFileName(self, "PyMca XANES stack", f"{self.hc.name}_PCA-CA.h5", "HDF5 (*.h5)")
+        p, _ = QFileDialog.getSaveFileName(self, "PyMca XANES stack", default_path("maps", f"{self.hc.name}_PCA-CA.h5", self.session),
+                                           "HDF5 (*.h5)")
         if p:
+            remember_dir("maps", p)
             d = None if self.det.currentIndex() == 0 else self.det.currentIndex() - 1
-            lo, hi = self.window(0 if d is None else d)
-            export_pymca_xanes(self.hc, Path(p), d, lo, hi, self.per_i0.isChecked())
-            self.status.setText(f"written {p}")
+            lo, hi = self.window_channels(0 if d is None else d)
+            with guarded_write(self, Path(p).name) as g:
+                export_pymca_xanes(self.hc, Path(p), d, lo, hi, self.per_i0.isChecked())
+            if g.ok:
+                notify_saved(self.status, [Path(p)])
 
     def _export_4d(self) -> None:
         if self.hc is None:
             return
-        p, _ = QFileDialog.getSaveFileName(self, "PyMca 4D stack", f"{self.hc.name}_Elemental_PyMca.h5", "HDF5 (*.h5)")
+        p, _ = QFileDialog.getSaveFileName(self, "PyMca 4D stack", default_path("maps", f"{self.hc.name}_Elemental_PyMca.h5", self.session),
+                                           "HDF5 (*.h5)")
         if p:
-            export_pymca_4d(self.hc, Path(p), self.per_i0.isChecked())
-            self.status.setText(f"written {p}")
+            remember_dir("maps", p)
+            with guarded_write(self, Path(p).name) as g:
+                export_pymca_4d(self.hc, Path(p), self.per_i0.isChecked())
+            if g.ok:
+                notify_saved(self.status, [Path(p)])

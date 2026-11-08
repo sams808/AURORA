@@ -1,8 +1,8 @@
 # Credits
 
-Text for the About dialog, the splash screen, the README and the footer of every report.
+The text below (aurora/credits.py, CREDITS) is printed in the About dialog and on the cover of every report; the README opens its credits with the first sentence, and every report page carries the short footer.
 
-> AURORA builds on the SGM XAS GUI by John Bussey (Washington State University), on the SGM_Beamline_Analysis toolkit by James J. Dynes and the SGM beamline staff (Canadian Light Source), and on the beamtime reporting pipeline by Sami Soudani (Washington State University). Edge and emission-line energies from xraydb. Data from the SGM beamline, Canadian Light Source.
+> AURORA is version 2 of John Bussey's SGM XAS GUI (Washington State University), based on James J. Dynes' SGM_Beamline_Analysis Jupyter notebooks (Canadian Light Source). It adds the beamtime reporting pipeline of Sami Soudani (Washington State University). Edge and emission-line energies from xraydb. Data from the SGM beamline, Canadian Light Source.
 
 ## Detail
 

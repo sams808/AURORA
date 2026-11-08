@@ -6,8 +6,9 @@ Status 0.3.0 (2026-11-06): every planned perspective is in place (Home, Survey, 
 Report), with stitching, deconvolution, peak decomposition, a reference library, zone proposals and the I0 explorer.
 Windows and macOS builds in CI. See `CHANGELOG.md`.
 
-Documentation (`docs/`): [user guide](docs/USER_GUIDE.md) (short), [manual](docs/MANUAL.md) (every control),
-[tutorials](docs/TUTORIALS.md) (on the demo beamtime: `aurora demo <folder>`), [installation](docs/INSTALL.md),
+Documentation (`aurora/resources/docs/`, also in the application's Help menu): [user guide](aurora/resources/docs/USER_GUIDE.md) (short),
+[manual](aurora/resources/docs/MANUAL.md) (every control), [tutorials](aurora/resources/docs/TUTORIALS.md) (on the demo
+beamtime: `aurora demo <folder>`), [installation](aurora/resources/docs/INSTALL.md),
 [developer manual](docs/DEVELOPER.md), [brainstorm](docs/BRAINSTORM.md) (feature universe, architecture, roadmap),
 [design](docs/DESIGN.md). Logo in `branding/`.
 
@@ -35,13 +36,14 @@ The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with `processe
 
 ## Lineage and credits
 
-AURORA builds on three pieces of work:
+AURORA is version 2 of John Bussey's SGM XAS GUI (Washington State University), based on James J. Dynes' SGM_Beamline_Analysis Jupyter notebooks (Canadian Light Source).
 
-- **SGM XAS GUI** by **John Bussey**, Washington State University (2026): the reduce / check / compare / LCF / MCR-ALS / ITFA workflow, the reduced-CSV layout with its provenance header and the settings files. AURORA keeps that workflow and stays file-compatible with it. Original program: `legacy/CLS_GUI_JohnBussey/`.
-- **SGM_Beamline_Analysis** by **James J. Dynes and the SGM beamline staff**, Canadian Light Source (github.com/Beamlines-CanadianLightSource/SGM_Beamline_Analysis): raw-data parsing, SDD calibration, alignment, hypercube dashboard, PCA and clustering, PyMca export, stitching. Original toolkit: `legacy/SGM_Beamline_Analysis/`.
-- **sgm_report** beamtime reporting pipeline by **Sami Soudani**, Washington State University: survey pad detection, plate layouts, fixed ROI bins, per-SDD checks, saturation detection, holder reports.
+- **SGM XAS GUI** by **John Bussey**, Washington State University (2026): the reduce / check / compare / LCF / MCR-ALS / ITFA workflow, the reduced-CSV layout with its provenance header and the settings files. AURORA keeps that workflow and its file formats, and its Easy mode follows the GUI's basic path. Original program: `legacy/CLS_GUI_JohnBussey/`.
+- **SGM_Beamline_Analysis** by **James J. Dynes and the SGM beamline staff**, Canadian Light Source (github.com/Beamlines-CanadianLightSource/SGM_Beamline_Analysis): the notebook toolkit for raw-data parsing, SDD calibration, alignment, the hypercube dashboard, PCA and clustering, PyMca export and stitching. Original toolkit: `legacy/SGM_Beamline_Analysis/`.
+- **sgm_report**, the beamtime reporting pipeline by **Sami Soudani**, Washington State University: survey pad detection, plate layouts, fixed ROI bins, per-SDD checks, saturation detection and holder reports.
 
 Edge and emission-line energies come from xraydb. Data acquired at the SGM beamline of the Canadian Light Source.
+The full credits text is in `CREDITS.md`; the licence is in `LICENSE` (MIT).
 
 ## Layout
 

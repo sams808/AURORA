@@ -12,8 +12,10 @@ from typing import Callable
 Progress = Callable[..., None]
 
 
-class Cancelled(Exception):
-    """Raised inside a job when its token was cancelled. Never an error: the job simply stops."""
+class Cancelled(BaseException):
+    """Raised inside a job when its token was cancelled. Never an error: the job simply stops.
+
+    A BaseException (like KeyboardInterrupt), so the `except Exception` blocks of the core loops let it through."""
 
 
 class CancelToken:

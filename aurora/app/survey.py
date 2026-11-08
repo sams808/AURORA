@@ -6,13 +6,17 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
-                               QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from aurora.app import nav
+from aurora.app.help_text import explain_all, labelled
 from aurora.app.mapview import MapView
 from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
 from aurora.app.theme import FOOTPRINTS, curve, on_theme_changed, swatch_icon
-from aurora.app.widgets import Card
+from aurora.app.vocab import det_items, plural, unit_suffix
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_path, guarded_write, notify_saved,
+                                overlay_host, pair, remember_dir, set_enabled)
 from aurora.core.model import ScanInfo
 
 FOOTPRINT_LABELS = {"complete": "complete", "aborted": "aborted", "in_progress": "in progress", "test": "test"}
@@ -23,20 +27,17 @@ class FootprintLegend(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay = FlowLayout(self, spacing=6)
         cap = QLabel("footprints:"); cap.setObjectName("muted")
         lay.addWidget(cap)
         self._icons: dict[str, QLabel] = {}
         for status, text in FOOTPRINT_LABELS.items():
             ic = QLabel()
+            ic.setAccessibleName(f"{text} footprint")
             self._icons[status] = ic
             lay.addWidget(ic)
             t = QLabel(text); t.setObjectName("muted")
             lay.addWidget(t)
-            lay.addSpacing(6)
-        lay.addStretch(1)
         self.refresh()
         on_theme_changed(self, lambda _s: self.refresh())
 
@@ -59,14 +60,14 @@ class SurveyPerspective(QWidget):
 
         head = QHBoxLayout()
         h1 = QLabel("Survey"); h1.setObjectName("h1")
-        sub = QLabel("plate map, scan footprints, zones"); sub.setObjectName("muted")
-        head.addWidget(h1); head.addWidget(sub)
-        head.addSpacing(16)
-        head.addWidget(QLabel("Holder"))
+        sub = ElidedLabel("plate map, scan footprints, zones", Qt.ElideRight); sub.setObjectName("muted")
+        head.addWidget(h1); head.addWidget(sub, 1)
         self.holder_combo = QComboBox()
+        self.holder_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.holder_combo.setMinimumContentsLength(18)
         self.holder_combo.currentIndexChanged.connect(self._holder_picked)
+        head.addWidget(labelled("Holder", self.holder_combo, "survey.holder"))
         head.addWidget(self.holder_combo)
-        head.addStretch(1)
         self.import_btn = QPushButton("Import zones…")
         self.import_btn.clicked.connect(self._import)
         self.export_btn = QPushButton("Export zones…")
@@ -74,60 +75,67 @@ class SurveyPerspective(QWidget):
         head.addWidget(self.import_btn); head.addWidget(self.export_btn)
         root.addLayout(head)
 
-        split = QSplitter(Qt.Horizontal)
-        left = Card("Survey map")
+        self.split = split = QSplitter(Qt.Horizontal)
+        left = Card("Survey map", help_anchor="3-survey")
         self.options_row = QWidget()                   # channel, SDD, / I0, log, invert, clip, overlays: Advanced
-        opts = QHBoxLayout(self.options_row); opts.setContentsMargins(0, 0, 0, 0)
-        opts.addWidget(QLabel("channel"))
-        self.channel = QComboBox(); opts.addWidget(self.channel)
-        opts.addWidget(QLabel("SDD"))
-        self.sdd = QComboBox(); self.sdd.addItems(["sum", "1", "2", "3", "4"]); opts.addWidget(self.sdd)
+        opts = FlowLayout(self.options_row, spacing=6)
+        self.channel = QComboBox()
+        self.channel.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.channel.setMinimumContentsLength(8)
+        opts.addWidget(pair(labelled("channel", self.channel, "survey.channel"), self.channel))
+        self.sdd = QComboBox(); self.sdd.addItems(det_items())
+        opts.addWidget(pair(labelled("SDD", self.sdd, "survey.sdd"), self.sdd))
         self.per_i0 = QCheckBox("/ I0"); self.per_i0.setChecked(True); opts.addWidget(self.per_i0)
         self.log = QCheckBox("log"); self.log.setChecked(True); opts.addWidget(self.log)
         self.invert = QCheckBox("invert"); opts.addWidget(self.invert)
-        opts.addWidget(QLabel("clip %"))
-        self.clip = QDoubleSpinBox(); self.clip.setRange(0, 20); self.clip.setValue(0.5); self.clip.setSingleStep(0.5); opts.addWidget(self.clip)
+        self.clip = QDoubleSpinBox(); self.clip.setRange(0, 20); self.clip.setValue(0.5); self.clip.setSingleStep(0.5)
+        self.clip.setSuffix(unit_suffix("percent"))
+        opts.addWidget(pair(labelled("clip", self.clip, "survey.clip"), self.clip))
         self.show_footprints = QCheckBox("footprints"); self.show_footprints.setChecked(True); opts.addWidget(self.show_footprints)
         self.show_zones = QCheckBox("zones"); self.show_zones.setChecked(True); opts.addWidget(self.show_zones)
-        opts.addStretch(1)
         left.body.addWidget(self.options_row)
         self.map = MapView()
+        self.map.setAccessibleName("plate map of the holder")
         self.map.hovered.connect(self._hover)
         self.map.clicked.connect(self._clicked)
         left.body.addWidget(self.map, 1)
-        self.hint = QLabel(""); self.hint.setObjectName("muted")
+        self.hint = ElidedLabel("", Qt.ElideRight); self.hint.setObjectName("muted")
         left.body.addWidget(self.hint)
         self.footprint_legend = FootprintLegend()
         left.body.addWidget(self.footprint_legend)
         split.addWidget(left)
 
         right = QSplitter(Qt.Vertical)
-        zc = Card("Zones of this holder")
+        self.zones_card = zc = Card("Zones of the holder", help_anchor="3-survey")
         self.zone_table = QTableWidget(0, 4)
         self.zone_table.setHorizontalHeaderLabels(["#", "Label", "Group", "Scans"])
+        self.zone_table.setAccessibleName("zones of the holder")
         self.zone_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.zone_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.zone_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.zone_table.itemSelectionChanged.connect(self._zone_row_selected)
         zc.body.addWidget(self.zone_table, 1)
         right.addWidget(zc)
-        sc = Card("Sketch")
+        sc = Card("Sketch", help_anchor="3-survey")
         self.sketch = QLabel("no sketch for this holder (zones_html/sketches/<holder>.png)")
         self.sketch.setObjectName("muted")
+        self.sketch.setWordWrap(True)
         self.sketch.setAlignment(Qt.AlignCenter)
         self.sketch.setMinimumHeight(160)
         sc.body.addWidget(self.sketch, 1)
         right.addWidget(sc)
-        tc = Card("Samples on this holder (sample sheet)")
+        self.samples_card = tc = Card("Samples on the holder (sample sheet)", help_anchor="3-survey")
         self.sheet_table = QTableWidget(0, 4)
         self.sheet_table.setHorizontalHeaderLabels(["Sample", "Group", "Composition", "Edges"])
+        self.sheet_table.setAccessibleName("samples of the holder")
         self.sheet_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.sheet_table.setEditTriggers(QTableWidget.NoEditTriggers)
         tc.body.addWidget(self.sheet_table, 1)
         right.addWidget(tc)
         split.addWidget(right)
         split.setStretchFactor(0, 3); split.setStretchFactor(1, 2)
-        root.addWidget(split, 1)
+        self.body = overlay_host(split)
+        root.addWidget(self.body, 1)
 
         for w in (self.channel, self.sdd):
             w.currentIndexChanged.connect(self.redraw_map)
@@ -135,6 +143,13 @@ class SurveyPerspective(QWidget):
             w.toggled.connect(self.redraw_map)
         self.clip.valueChanged.connect(self.redraw_map)
 
+        self.empty_state = EmptyState("No project open: the plate map of each holder appears here.",
+                                      [("Open project…", lambda: nav.open_project_dialog(self)),
+                                       ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="survey",
+                                      parent=self.body)
+        explain_all([(self.per_i0, "survey.per_i0"), (self.log, "survey.log"), (self.invert, "survey.invert"),
+                     (self.show_footprints, "survey.footprints"), (self.show_zones, "survey.zones"),
+                     (self.import_btn, "survey.import"), (self.export_btn, "survey.export")])
         session.project_changed.connect(self._project_changed)
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
@@ -142,14 +157,25 @@ class SurveyPerspective(QWidget):
         on_theme_changed(self, lambda _s: self.redraw_map())
         # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
         mark_advanced(self.options_row, self.import_btn, self.export_btn)
+        self.update_actions()
+
+    def update_actions(self) -> None:
+        has = self.session.project is not None
+        for b in (self.import_btn, self.export_btn):
+            set_enabled(b, has, "open a project first")
+        self.empty_state.set_shown(not has)
+        h = self.session.holder()
+        self.zones_card.set_title(f"Zones of holder {h.name}" if h else "Zones of the holder")
+        self.samples_card.set_title(f"Samples on holder {h.name} (sample sheet)" if h else "Samples on the holder (sample sheet)")
 
     # ------------------------------------------------------------------ wiring
     def _project_changed(self, project) -> None:
         self.holder_combo.blockSignals(True)
         self.holder_combo.clear()
         for key, (day, h) in self.session.holder_keys.items():
-            self.holder_combo.addItem(f"{day} · {h.name}  ({len(h.stacks)} stacks)", key)
+            self.holder_combo.addItem(f"{h.name} · {day} · {plural(len(h.stacks), 'stack')}", key)
         self.holder_combo.blockSignals(False)
+        self.update_actions()
 
     def _holder_picked(self, i: int) -> None:
         key = self.holder_combo.itemData(i)
@@ -161,6 +187,7 @@ class SurveyPerspective(QWidget):
         if i >= 0 and self.holder_combo.currentIndex() != i:
             self.holder_combo.blockSignals(True); self.holder_combo.setCurrentIndex(i); self.holder_combo.blockSignals(False)
         self.load_holder()
+        self.update_actions()
 
     def load_holder(self) -> None:
         self._survey = None
@@ -212,7 +239,8 @@ class SurveyPerspective(QWidget):
             for i, z in enumerate(hz.zones if hz else []):
                 self.map.draw_zone(z, curve(i), selected=(z.id == self.session.current_zone))
         note = "; ".join(sv.notes)
-        self.hint.setText(f"{sv.n} points at {sv.energy:.1f} eV, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm" + (f" · {note}" if note else ""))
+        self.hint.setText(f"{plural(sv.n, 'point')} at {sv.energy:.1f} eV, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm"
+                          + (f" · {note}" if note else ""))
 
     def _footprints(self) -> list[ScanInfo]:
         h = self.session.holder()
@@ -298,14 +326,27 @@ class SurveyPerspective(QWidget):
                 return
 
     def _import(self) -> None:
-        start = str(self.session.project.root / "zones_html") if self.session.project else ""
-        p, _ = QFileDialog.getOpenFileName(self, "Import zones (zones_all.json)", start, "JSON (*.json)")
-        if p:
-            with self.session.edit(f"import zones from {Path(p).name}"):
-                self.session.import_zones(Path(p))
+        p, _ = QFileDialog.getOpenFileName(self, "Import zones (zones_all.json)", default_path("zones", "zones_all.json", self.session),
+                                           "JSON (*.json)")
+        if not p:
+            return
+        remember_dir("zones", p)
+        from aurora.core.io.config import ZonesFile
+        try:
+            ZonesFile.load(Path(p))                      # read it first: a broken file leaves the zones unchanged
+        except (OSError, ValueError) as err:
+            QMessageBox.warning(self, "Import zones", f"Could not read {Path(p).name}: {err}. The zones are unchanged.")
+            return
+        with self.session.edit(f"import zones from {Path(p).name}"):
+            self.session.import_zones(Path(p))
 
     def _export(self) -> None:
-        start = str(self.session.project.root / "zones_html" / "zones_all.json") if self.session.project else "zones_all.json"
-        p, _ = QFileDialog.getSaveFileName(self, "Export zones", start, "JSON (*.json)")
-        if p:
+        p, _ = QFileDialog.getSaveFileName(self, "Export zones", default_path("zones", "zones_all.json", self.session),
+                                           "JSON (*.json)")
+        if not p:
+            return
+        remember_dir("zones", p)
+        with guarded_write(self, Path(p).name) as g:
             self.session.export_zones(Path(p))
+        if g.ok:
+            notify_saved(self.hint, [Path(p)])

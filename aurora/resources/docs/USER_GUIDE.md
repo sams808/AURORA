@@ -4,7 +4,16 @@ AURORA reads the raw folders of an SGM beamtime (ambxas endstation, Canadian Lig
 quality-checked spectra, comparisons, fits, maps and a report. Nothing is ever written into `raw/`.
 
 This is the short guide. `MANUAL.md` describes every control, `TUTORIALS.md` walks through the demo beamtime
-(`aurora demo <folder>`), `INSTALL.md` covers installation.
+(**Help > Open the demo beamtime**, or `aurora demo <folder>`), `INSTALL.md` covers installation. All four open from
+the **Help** menu; **F1** opens the manual at the section of the page you are on, and the small **?** of every panel
+at that panel's section. **Help > Keyboard shortcuts** (**Ctrl+/**) lists every shortcut.
+
+AURORA starts in **Easy mode**, the basic path of John Bussey's SGM XAS GUI: open the beamtime, draw the samples in
+Reduce, check the spectra, compare them, fit them with LCF, build the report. **Advanced mode** (the switch in the top
+bar, or **Ctrl+Shift+A**) shows every option, including Maps; switching never changes a value. **View > Appearance**
+and **View > Text size** choose light or dark and a larger text, at once. The top bar shows *project ▸ day ▸
+holder ▾*: click the holder to switch, or use **Ctrl+PgUp** / **Ctrl+PgDown**; **Ctrl+1** … **Ctrl+8** open the
+perspectives. Long tasks run in the background with a progress strip and **Cancel** (**Esc**).
 
 ## 1. Open a beamtime
 
@@ -52,13 +61,13 @@ writes the same format.
 Defaults for new settings come from Settings (de-spike k, normalisations). Saturated scans start with their SDDs
 unticked (TEY only); scans with an invalid I0 start with the good-I0 source.
 
-**Propose…** adds zones as a first guess (the sgm_report summary when the day has one, else the bright pads of the
+**Propose zones** adds zones as a first guess (the sgm_report summary when the day has one, else the bright pads of the
 survey). **Stitch…** (after Load all) merges overlapping tiles into one stack: halve the overlaps, check the seams,
 bake; the stitched stack is listed with the scans and works with zones, Check and Maps.
 
 ## 4. Check
 
-**Run the checks on this holder** probes seven energies of every stack:
+**Run the checks on holder N5** (named after the current holder) probes seven energies of every stack:
 
 - count rate of the brightest pixels per detector, against the median of the holder's other scans;
 - **saturated**: the brightest pixels give the same total at every energy while I0 varied (output no longer follows

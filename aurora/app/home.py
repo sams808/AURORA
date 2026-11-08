@@ -5,19 +5,23 @@ import html
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QHeaderView, QLabel, QProgressBar, QPushButton, QSplitter,
-                               QTextBrowser, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTextBrowser,
+                               QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
+from aurora.app import jobs
+from aurora.app.help_text import explain, header_tips
 from aurora.app.icons import icon
 from aurora.app.mode import is_advanced, mark_advanced_column, on_mode_changed
 from aurora.app.settings import recent_projects, remember_project
 from aurora.app.theme import MONO_FONT, TOKENS, on_theme_changed, refill_tones, set_item_tone, tone_of
-from aurora.app.widgets import Card, Worker
+from aurora.app.vocab import plural
+from aurora.app.widgets import Card, ElidedLabel, EmptyState, TaskBar, default_dir, remember_dir, set_enabled
 from aurora.core.constants import sdd_geometry
 from aurora.core.model import Project, ScanInfo
 
 COLS = ("Scan", "Time", "Kind", "Edge", "Status", "Energies", "Points", "Flags")
 KIND_COL, STATUS_COL, FLAGS_COL = 2, 4, 7
+NO_PROJECT = "no project open"
 
 
 class HomePerspective(QWidget):
@@ -28,7 +32,6 @@ class HomePerspective(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.project: Project | None = None
-        self._worker: Worker | None = None
         self._shown: ScanInfo | None = None           # the scan in the detail panel (re-rendered on a mode / theme change)
         self._quiet = False                           # the open in progress is the last project at start
         root = QVBoxLayout(self)
@@ -38,33 +41,31 @@ class HomePerspective(QWidget):
         head = QHBoxLayout()
         h1 = QLabel("Home")
         h1.setObjectName("h1")
-        sub = QLabel("open a beamtime folder (raw/<day>/<scan>) and see what was measured")
+        sub = ElidedLabel("open a beamtime folder (raw/<day>/<scan>) and see what was measured", Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1)
-        head.addWidget(sub)
-        head.addStretch(1)
+        head.addWidget(sub, 1)
         self.open_btn = QPushButton(icon("folder", TOKENS["ink"]), " Open project…")
         self.open_btn.clicked.connect(self.choose_project)
         self.reload_btn = QPushButton(icon("refresh", TOKENS["ink"]), " Reload")
-        self.reload_btn.setEnabled(False)
         self.reload_btn.clicked.connect(lambda: self.open_path(self.project.root) if self.project else None)
         head.addWidget(self.open_btn)
         head.addWidget(self.reload_btn)
         root.addLayout(head)
 
-        self.progress = QProgressBar()
-        self.progress.setVisible(False)
-        root.addWidget(self.progress)
+        self.taskbar = TaskBar(self)
+        root.addWidget(self.taskbar)
 
         split = QSplitter(Qt.Horizontal)
-        left = Card("Scans")
-        self.path_label = QLabel("no project open")
+        left = Card("Scans", help_anchor="2-home")
+        self.path_label = ElidedLabel(NO_PROJECT, Qt.ElideMiddle)
         self.path_label.setObjectName("muted")
         self.path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        left.header.addWidget(self.path_label)
+        left.fill_header(self.path_label)
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(COLS))
         self.tree.setHeaderLabels(COLS)
+        self.tree.setAccessibleName("days, holders and scans of the project")
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
         self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
@@ -76,20 +77,36 @@ class HomePerspective(QWidget):
         self.tree.itemDoubleClicked.connect(lambda it, col: self.scan_activated.emit(it.data(0, Qt.UserRole)) if isinstance(it.data(0, Qt.UserRole), ScanInfo) else None)
         left.body.addWidget(self.tree, 1)
         split.addWidget(left)
+        self.scans_card = left
 
-        right = Card("Scan")
+        right = Card("Scan", help_anchor="2-home")
         self.details = QTextBrowser()
         self.details.setOpenExternalLinks(False)
+        self.details.setAccessibleName("details of the selected scan")
         self.details.setHtml(self._welcome_html())
         right.body.addWidget(self.details, 1)
         split.addWidget(right)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 2)
         root.addWidget(split, 1)
+
+        self.empty_state = EmptyState(
+            "No project open. Open a beamtime folder (the one that holds raw/), a loose folder of scans or one .h5 file.",
+            [("Open project…", self.choose_project), ("Open the demo beamtime", self._open_demo)], icon="folder",
+            parent=self.tree)
+        explain(self.open_btn, "home.open")
+        explain(self.reload_btn, "home.reload")
+        header_tips(self.tree, {i: f"home.col.{c.lower()}" for i, c in enumerate(COLS)})
         on_theme_changed(self, lambda _s: self._theme_changed())
         # Easy mode: the Kind column, the full h5 attribute table, the SDD geometry and the sgm_report notes are Advanced
         mark_advanced_column(self.tree, KIND_COL)
         on_mode_changed(self, lambda _adv: self._render_details(), call_now=False)
+        self.update_actions()
+
+    def update_actions(self) -> None:
+        busy = jobs.of(self).job("discover") is not None
+        set_enabled(self.reload_btn, self.project is not None and not busy, "open a project first")
+        self.empty_state.set_shown(self.project is None)
 
     def _theme_changed(self) -> None:
         self.open_btn.setIcon(icon("folder", TOKENS["ink"]))
@@ -100,35 +117,41 @@ class HomePerspective(QWidget):
     def _render_details(self) -> None:
         if self._shown is not None:
             self.details.setHtml(self._scan_html(self._shown))
-        elif self.project is None and self.path_label.text() == "no project open":
+        elif self.project is None and self.path_label.text() == NO_PROJECT:
             self.details.setHtml(self._welcome_html())
+
+    def _open_demo(self) -> None:
+        from aurora.app.nav import window_of
+        win = window_of(self)
+        if win is not None and hasattr(win, "open_demo"):
+            win.open_demo()
 
     # ------------------------------------------------------------------ opening
     def choose_project(self) -> None:
-        start = recent_projects()[0] if recent_projects() else str(Path.home())
-        d = QFileDialog.getExistingDirectory(self, "Open a beamtime project folder (contains raw/)", start)
+        rec = recent_projects()
+        start = str(Path(rec[0]).parent) if rec else default_dir("project")
+        d = QFileDialog.getExistingDirectory(self, "Open a beamtime project folder (contains raw/), a scan folder", start)
         if d:
+            remember_dir("project", Path(d).parent)
             self.open_path(Path(d))
 
     def open_path(self, path: Path, quiet: bool = False) -> None:
         """Open a beamtime folder, a day or scan folder, or one .h5 file (its scan folder). The one entry point of
         Open…, Reload, the demo, a folder dropped on the window, the command-line folder and the last project at
-        start. The path is only looked at in the discovery worker, so an unreachable share never blocks the window.
+        start. The path is only looked at in the discovery job, so an unreachable share never blocks the window.
         quiet: a failure is a calm note in the path line (the last project at start), not the failure panel."""
-        if self._worker is not None and self._worker.isRunning():
+        mgr = jobs.of(self)
+        if mgr.job("discover") is not None:
             return
         path = Path(path)
         target = path.parent if path.suffix.lower() == ".h5" else path       # a string test, no stat
         self._quiet = quiet
         self.path_label.setText(f"reading {path} …")
-        self.progress.setVisible(True)
-        self.progress.setRange(0, 0)
         self.open_btn.setEnabled(False)
-        self._worker = Worker(lambda cb: Project.discover(target, progress=cb), self)
-        self._worker.progress.connect(self._on_progress, Qt.QueuedConnection)
-        self._worker.done.connect(self._on_done, Qt.QueuedConnection)
-        self._worker.failed.connect(self._on_failed, Qt.QueuedConnection)
-        self._worker.start()
+        mgr.submit("discover", lambda cb: Project.discover(target, progress=cb), on_done=self._on_done,
+                   on_failed=self._on_failed, on_end=lambda _s: self._open_ended(), label=f"reading {path.name}",
+                   taskbar=self.taskbar, report=False)
+        self.update_actions()
 
     def open_project(self, path: Path) -> None:
         """Former name of open_path."""
@@ -140,33 +163,24 @@ class HomePerspective(QWidget):
 
     def shutdown(self) -> None:
         """Let a running discovery finish before the widget goes away (a QThread destroyed while running aborts Qt)."""
-        if self._worker is not None:
-            self._worker.wait(30000)
-            self._worker = None
+        jobs.of(self).wait_idle(30000)
 
-    def _on_progress(self, i: int, n: int, msg: str) -> None:
-        self.progress.setRange(0, max(n, 1))
-        self.progress.setValue(i)
-        self.path_label.setText(f"{msg}  ({i}/{n})")
+    def _open_ended(self) -> None:
+        self.open_btn.setEnabled(True)
+        self.update_actions()
 
     def _on_done(self, project: Project) -> None:
-        if self._worker is not None:
-            self._worker.wait(30000)
         self._quiet = False
         self.project = project
-        self.progress.setVisible(False)
         self.open_btn.setEnabled(True)
-        self.reload_btn.setEnabled(True)
         remember_project(project.root)
-        n_scans = len(project.scans)
-        self.path_label.setText(f"{project.root}   ·   {len(project.days)} days, {project.n_holders} holders, {n_scans} scans")
+        self.path_label.setText(f"{project.root}   ·   {plural(len(project.days), 'day')}, "
+                                f"{plural(project.n_holders, 'holder')}, {plural(len(project.scans), 'scan')}")
         self._fill_tree(project)
+        self.update_actions()
         self.project_opened.emit(project)
 
     def _on_failed(self, text: str) -> None:
-        if self._worker is not None:
-            self._worker.wait(30000)
-        self.progress.setVisible(False)
         self.open_btn.setEnabled(True)
         if self._quiet:                               # the last project at start: say so, keep the welcome page
             self._quiet = False
@@ -182,13 +196,13 @@ class HomePerspective(QWidget):
         self._shown = None
         self.tree.clear()
         for day in project.days:
-            d_item = QTreeWidgetItem([day.date or day.path.name, "", f"{len(day.holders)} holders", "", "",
-                                      "", f"{len(day.scans)} scans", ""])
+            d_item = QTreeWidgetItem([day.date or day.path.name, "", plural(len(day.holders), "holder"), "", "",
+                                      "", plural(len(day.scans), "scan"), ""])
             d_item.setData(0, Qt.UserRole, None)
             self.tree.addTopLevelItem(d_item)
             for holder in day.holders:
                 n_ok = len(holder.stacks)
-                h_item = QTreeWidgetItem([f"holder {holder.name}", "", "", "", f"{n_ok} complete stacks",
+                h_item = QTreeWidgetItem([f"holder {holder.name}", "", "", "", f"{n_ok} complete {'stack' if n_ok == 1 else 'stacks'}",
                                           "", "", f"{len(holder.dropped)} dropped" if holder.dropped else ""])
                 d_item.addChild(h_item)
                 for s in holder.scans:
@@ -248,7 +262,8 @@ class HomePerspective(QWidget):
             notes = s.summary.get("notes", [])
             flags = "<h4>sgm_report summary</h4>" + "".join(f"<p>{e(str(n))}</p>" for n in notes)
             if s.summary.get("mode"):
-                flags += f"<p>mode {e(str(s.summary['mode']))}, {e(str(s.summary.get('type', '')))}, {len(s.summary.get('zones', []))} zones</p>"
+                flags += (f"<p>mode {e(str(s.summary['mode']))}, {e(str(s.summary.get('type', '')))}, "
+                          f"{plural(len(s.summary.get('zones', [])), 'zone')}</p>")
             if s.summary.get("dropped"):
                 flags += f"<p>dropped: {e(str(s.summary['dropped']))}</p>"
         geo_html = ", ".join(f"{k.upper()} {v}" for k, v in geo.items())

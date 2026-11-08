@@ -29,10 +29,7 @@ def pump(qapp, n=5):
 
 
 def wait_home(qapp, win, timeout=30.0):
-    t0 = time.time()
-    while win.home._worker is not None and win.home._worker.isRunning() and time.time() - t0 < timeout:
-        qapp.processEvents()
-        time.sleep(0.01)
+    win.jobs.wait_idle(int(timeout * 1000))
     pump(qapp, 10)
 
 
@@ -162,8 +159,7 @@ def test_every_zone_edit_goes_through_session_edit(qapp, fake_project, monkeypat
     try:
         win = window(qapp, Project.discover(fake_project))
         ses, rd = win.session, win.reduce
-        if rd._worker is not None:
-            rd._worker.wait(30000); pump(qapp)
+        win.jobs.wait_idle(30000); pump(qapp)
         sid = ses.stack_id(ses.project.find(testdata.STACK))
         sd = ses.stack(sid)
         ses.touch(); ses.select_stack(sid); pump(qapp)
@@ -249,8 +245,7 @@ def test_library_everywhere_navigation_and_edit_menu(qapp, tmp_path):
     pump(qapp)
     assert ses.current_holder == "N5" and win.stack.currentWidget() is win.survey
     assert win.reduce.scan_list.currentItem().data(Qt.UserRole) == sid
-    if win.reduce._worker is not None:
-        win.reduce._worker.wait(30000); pump(qapp)
+    win.jobs.wait_idle(30000); pump(qapp)
     with ses.edit("a zone to jump to"):
         z = ses.new_zone("target")
     ses.select_zone(None)

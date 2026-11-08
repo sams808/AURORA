@@ -79,7 +79,11 @@ def on_settings_changed(owner: QObject, fn) -> None:
 class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        from aurora.app.help import set_help_anchor
+        from aurora.app.help_text import explain, explain_buttons
+        from aurora.app.vocab import NORM_LABELS, unit_suffix
         self.setWindowTitle("AURORA settings")
+        set_help_anchor(self, "10-settings")
         lay = QVBoxLayout(self)
         form = QFormLayout()
         self.form = form
@@ -95,18 +99,26 @@ class SettingsDialog(QDialog):
         self.text_size.setCurrentIndex(max(0, self.text_size.findData(get("text_size"))))
         form.addRow("text size", self.text_size)
         self.author = QLineEdit(get("report_author"))
+        self.author.setPlaceholderText("blank: resolved when a report is built")
         form.addRow("report author", self.author)
         self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
         form.addRow("", self.open_last)
         self.advanced = QCheckBox("advanced mode (every option; Easy mode shows the basic workflow)")
         self.advanced.setChecked(get("advanced_mode"))
         form.addRow("", self.advanced)
+        self.update_check = QCheckBox("check GitHub for a newer AURORA at start (once a day)")
+        self.update_check.setChecked(get("update_check"))
+        form.addRow("", self.update_check)
         # Advanced rows
-        self.k = QDoubleSpinBox(); self.k.setRange(1, 50); self.k.setValue(get("despike_k"))
+        self.k = QDoubleSpinBox(); self.k.setRange(1, 50); self.k.setValue(get("despike_k")); self.k.setSuffix(unit_suffix("MAD"))
         form.addRow("de-spike threshold k (new zone settings)", self.k)
-        self.fn = QComboBox(); self.fn.addItems(["raw", "i0", "i0pre", "i0jump", "area", "max"]); self.fn.setCurrentText(get("fluo_norm"))
+        self.fn = QComboBox()
+        self.tn = QComboBox()
+        for box, key in ((self.fn, "fluo_norm"), (self.tn, "tey_norm")):
+            for code, text in NORM_LABELS.items():
+                box.addItem(text, code)
+            box.setCurrentIndex(max(0, box.findData(get(key))))
         form.addRow("default fluorescence normalisation", self.fn)
-        self.tn = QComboBox(); self.tn.addItems(["raw", "i0", "i0pre", "i0jump", "area", "max"]); self.tn.setCurrentText(get("tey_norm"))
         form.addRow("default TEY normalisation", self.tn)
         self.cmap = QComboBox(); self.cmap.addItems(COLORMAPS); self.cmap.setCurrentText(get("map_colormap"))
         form.addRow("map colour map", self.cmap)
@@ -116,20 +128,32 @@ class SettingsDialog(QDialog):
                       "not here.")
         note.setObjectName("muted"); note.setWordWrap(True)
         lay.addWidget(note)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Help)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        buttons.helpRequested.connect(self.show_help)
+        self.help_btn = buttons.button(QDialogButtonBox.Help)
+        explain_buttons(buttons)
         lay.addWidget(buttons)
+        for w, key in ((self.appearance, "appearance"), (self.text_size, "text_size"), (self.author, "author"),
+                       (self.open_last, "open_last"), (self.advanced, "advanced"), (self.update_check, "update_check"),
+                       (self.k, "k"), (self.fn, "fluo"), (self.tn, "tey"), (self.cmap, "cmap"), (self.ref_dir, "ref_dir")):
+            explain(w, f"settings.{key}")
         from aurora.app.mode import mark_advanced_row
         mark_advanced_row(form, self.k, self.fn, self.tn, self.cmap, self.ref_dir)
+
+    def show_help(self) -> None:
+        from aurora.app.help import PERSPECTIVE_HELP, open_help
+        open_help(self, "MANUAL.md", PERSPECTIVE_HELP["settings"])
 
     def accept(self) -> None:
         s = settings()
         s.setValue("despike_k", float(self.k.value()))
-        s.setValue("fluo_norm", self.fn.currentText())
-        s.setValue("tey_norm", self.tn.currentText())
+        s.setValue("fluo_norm", self.fn.currentData())
+        s.setValue("tey_norm", self.tn.currentData())
         s.setValue("map_colormap", self.cmap.currentText())
         s.setValue("report_author", self.author.text().strip())
         s.setValue("open_last_project", self.open_last.isChecked())
+        s.setValue("update_check", self.update_check.isChecked())
         s.setValue("reference_dir", self.ref_dir.text().strip())
         s.setValue("appearance", self.appearance.currentData())
         s.setValue("text_size", self.text_size.currentData())

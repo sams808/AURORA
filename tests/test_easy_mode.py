@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSpin
 from aurora.app import mode  # noqa: E402
 
 # Easy limits of visible interactive widgets (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider; a table
-# or list view counts as one). Survey: besides the map and the tables; Check: besides the table.
+# or list view counts as one). Survey: besides the map and the tables; Check: besides the table. The cards' '?' help
+# buttons (property aurora_help_button) open the manual and are not counted.
 LIMITS = {"home": 8, "survey": 2, "reduce": 18, "check": 10, "compare": 12, "fit": 10, "report": 8}
 VIEWS_NOT_COUNTED = {"survey", "check"}
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider)
@@ -46,6 +47,8 @@ def interactive(page: QWidget, count_views: bool = True) -> list[QWidget]:
     out = []
     for w in page.findChildren(QWidget):
         if not w.isVisible() or _inside(w, page, (QAbstractItemView, QComboBox, QAbstractSpinBox, QTabBar)):
+            continue
+        if w.property("aurora_help_button"):
             continue
         if isinstance(w, QAbstractItemView):
             if count_views:
@@ -219,9 +222,10 @@ def test_maps_is_advanced_only(qapp):
 def test_settings_dialog_rows(qapp):
     from aurora.app.settings_dialog import SettingsDialog
     d = SettingsDialog()
-    easy = [d.appearance, d.text_size, d.author, d.open_last, d.advanced]
+    easy = [d.appearance, d.text_size, d.author, d.open_last, d.advanced, d.update_check]
     adv = [d.k, d.fn, d.tn, d.cmap, d.ref_dir]
     assert all(d.form.isRowVisible(w) for w in easy) and not any(d.form.isRowVisible(w) for w in adv)
+    assert d.help_btn is not None and d.help_btn.toolTip()          # the Help button opens MANUAL.md#10-settings
     mode.set_advanced(True)
     assert all(d.form.isRowVisible(w) for w in easy + adv)
     d.deleteLater()

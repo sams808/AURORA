@@ -20,6 +20,7 @@ import numpy as np  # noqa: E402
 from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 
 from aurora import APP_NAME, __version__  # noqa: E402
+from aurora.credits import CREDITS, CREDITS_SHORT, FOOTER  # noqa: E402
 from aurora.core.constants import DETS  # noqa: E402
 from aurora.core.io.config import ScanSettings, Zone, ZonesFile  # noqa: E402
 from aurora.core.model import Project, ScanInfo  # noqa: E402
@@ -32,9 +33,7 @@ from aurora.core.zones import members, zone_traces  # noqa: E402
 log = logging.getLogger("aurora.report")
 
 AUTHOR = "Sami Soudani"
-CREDIT = ("Built with AURORA, which builds on the SGM XAS GUI by John Bussey (WSU), the SGM_Beamline_Analysis toolkit "
-          "by James J. Dynes and the SGM beamline staff (CLS) and the sgm_report pipeline by Sami Soudani (WSU). "
-          "Line and edge energies from xraydb.")
+CREDIT = CREDITS                # the cover credits: one source, aurora.credits
 # DEFAULT: the sample-sheet groups in the order of the handoff; unknown groups follow alphabetically, blank last
 GROUP_ORDER = ["Minerals", "Group 7", "RE-(O)-F", "Se", "Simple Glass", "Lab beakers",
                "Standards", "Misc",
@@ -113,6 +112,8 @@ class ReportBuilder:
         self.not_included: list[tuple[str, str, str]] = []
         self.page_pngs: list[Path] = []
         self._page_no = 0
+        self.footers: list[str] = []            # the footer text of every page, in order
+        self.cover_credits = ""                 # the credits printed on the cover
 
     # ------------------------------------------------------------------ data
     def stack(self, sid: str) -> StackData | None:
@@ -198,7 +199,10 @@ class ReportBuilder:
         figures: list[Path] = []
         csvs: list[Path] = []
         n_pages = 0
-        with PdfPages(pdf_path) as pdf:
+        meta = {"Title": self.title, "Creator": f"{APP_NAME} {__version__}", "Subject": CREDITS_SHORT}
+        if self.author:
+            meta["Author"] = self.author             # the resolved report author; never a default name
+        with PdfPages(pdf_path, metadata=meta) as pdf:
             n_pages += self._cover(pdf, entries, groups, by_group)
             for gi, g in enumerate(groups):
                 if progress:
@@ -224,11 +228,20 @@ class ReportBuilder:
                             skipped=self.skipped, manifest=manifest, page_pngs=list(self.page_pngs))
 
     # ------------------------------------------------------------------ pages
+    def footer_text(self) -> str:
+        """'AURORA x.y.z · FOOTER · <project> · <author> · <date>' (no author part when the author is empty)."""
+        parts = [f"{APP_NAME} {__version__}", FOOTER, self.zones.project or self.project.root.name, self.author,
+                 dt.date.today().isoformat()]
+        return " · ".join(p for p in parts if p)
+
     def _footer(self, fig, page_text: str = "") -> None:
-        fig.text(0.05, 0.015, f"{APP_NAME} {__version__} · {self.zones.project or self.project.root.name} · {self.author} · "
-                 f"{dt.date.today().isoformat()}", fontsize=7, color="#5B6B8C")
+        text = self.footer_text()
+        self.footers.append(text)
+        head, _, tail = text.partition(f" · {FOOTER} · ")       # two lines: the credit, then project / author / date
+        lines = f"{head} · {FOOTER}\n{tail}" if tail else text
+        fig.text(0.05, 0.012, lines, fontsize=6.5, color="#4E5D7A", linespacing=1.4)
         if page_text:
-            fig.text(0.95, 0.015, page_text, fontsize=7, color="#5B6B8C", ha="right")
+            fig.text(0.95, 0.012, page_text, fontsize=7, color="#4E5D7A", ha="right")
 
     def _save_page(self, pdf: PdfPages, fig) -> int:
         pdf.savefig(fig)
@@ -290,7 +303,9 @@ class ReportBuilder:
                      weight="bold" if ln in ("Provenance", "How to read the figures", "Contents") else "normal",
                      family="DejaVu Sans", color="#15213B")
             y -= 0.022
-        fig.text(0.08, 0.075, CREDIT[:150] + "\n" + CREDIT[150:], fontsize=7, color="#5B6B8C")
+        import textwrap
+        self.cover_credits = CREDITS
+        fig.text(0.08, 0.06, "\n".join(textwrap.wrap(CREDITS, 120)), fontsize=7, color="#4E5D7A", linespacing=1.4)
         self._footer(fig, "page 1")
         return self._save_page(pdf, fig)
 

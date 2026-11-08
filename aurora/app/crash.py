@@ -1,10 +1,12 @@
 """Unexpected errors: logged to the log file and shown in a dialog with the details, instead of a silent failure
-(the frozen app has no console). Installed by `aurora.app.main.run()` only, never in tests."""
+(the frozen app has no console). The hooks are installed by `aurora.app.main.run()` only, never in tests; failed
+background jobs call show_error (rate-limited) themselves."""
 from __future__ import annotations
 
 import logging
 import sys
 import threading
+import time
 import traceback
 
 from PySide6.QtCore import QTimer, QUrl
@@ -12,7 +14,8 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 log = logging.getLogger("aurora.crash")
-_STATE = {"showing": False}
+_STATE = {"showing": False, "last": -1e9}
+RATE_LIMIT_S = 3.0          # DEFAULT: at most one error dialog every 3 s (a failing loop never floods the screen)
 
 
 def open_log_folder() -> None:
@@ -23,7 +26,13 @@ def open_log_folder() -> None:
 def show_error(title: str, text: str, details: str = "") -> None:
     """A dialog with the message, the details (traceback) and 'Copy details' / 'Open log folder'."""
     if _STATE["showing"] or QApplication.instance() is None:
+        log.info("error dialog not shown (one is open): %s", text)
         return
+    now = time.monotonic()
+    if now - _STATE["last"] < RATE_LIMIT_S:
+        log.info("error dialog rate-limited: %s", text)
+        return
+    _STATE["last"] = now
     _STATE["showing"] = True
     try:
         box = QMessageBox(QApplication.activeWindow())

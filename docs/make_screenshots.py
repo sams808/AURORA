@@ -1,60 +1,60 @@
-"""Grab every perspective of AURORA on the demo beamtime for the manuals (docs/img/*.png).
+"""Grab every perspective of AURORA on the demo beamtime for the manuals (aurora/resources/docs/img/*.png).
 
-Run from the repo root with the project's Python:  python docs/make_screenshots.py
-Writes a fresh demo folder in a temporary directory; nothing else is touched.
+Run from the repo root with the project's Python:
+
+    python docs/make_screenshots.py                          # light scheme, Advanced mode, into the bundled docs
+    python docs/make_screenshots.py --scheme dark --out DIR  # the dark set, somewhere else
+
+Advanced mode, so every control the manual describes is on screen. Writes a fresh demo folder in a temporary
+directory, and the settings go to a temporary folder too: nothing else is touched.
 """
 from __future__ import annotations
 
-import json
+import argparse
 import os
 import sys
 import tempfile
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("AURORA_SETTINGS_DIR", str(Path(tempfile.mkdtemp(prefix="aurora_docs_settings_"))))
 
-from PySide6.QtCore import QTimer, Qt  # noqa: E402
-
-from aurora.app.main import MainWindow, create_app, shutdown_app  # noqa: E402
-from aurora.cli import cmd_demo  # noqa: E402
-from aurora.core import testdata  # noqa: E402
-from aurora.core.hypercube import Hypercube  # noqa: E402
-from aurora.core.model import Project  # noqa: E402
-from aurora.core.qc import count_rate_probe  # noqa: E402
-
-OUT = ROOT / "docs" / "img"
-OUT.mkdir(exist_ok=True)
+OUT = ROOT / "aurora" / "resources" / "docs" / "img"          # the manuals bundled with the application
+SIZE = (1500, 940)
 
 
-def edge(E, e0=690.0, width=1.0, white=0.6):
-    return 0.2 + 0.002 * (E - E[0]) + 1.0 / (1 + np.exp(-(E - e0) / width)) + white * np.exp(-((E - e0 - 2) / 1.5) ** 2)
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--scheme", choices=["light", "dark"], default="light")
+    ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--easy", action="store_true", help="Easy mode instead of Advanced")
+    args = ap.parse_args(argv)
+    out = args.out
+    out.mkdir(parents=True, exist_ok=True)
 
+    from PySide6.QtCore import QTimer, Qt
+    from aurora.app import mode
+    from aurora.app.main import MainWindow, create_app, shutdown_app
+    from aurora.app.settings import settings
+    from aurora.app.theme import apply_theme
+    from aurora.cli import cmd_demo
+    from aurora.core import testdata
+    from aurora.core.hypercube import Hypercube
+    from aurora.core.model import Project
+    from aurora.core.qc import count_rate_probe
 
-def write_john(path: Path, label: str, E, y):
-    rng = np.random.default_rng(abs(hash(label)) % 1000)
-    y = y + rng.normal(0, 0.01, E.size)
-    rows = "\n".join(f"{e},{10 * v},60,83,{20 * v},60,83,{5 * v},60,83,{5 * v},60,83,2.0,{0.5 * v},{40 * v},{10 * v},False" for e, v in zip(E, y))
-    path.write_text(f"# sample_label: {label}\nenergy,sdd1,sdd1_roi_lo,sdd1_roi_hi,sdd2,sdd2_roi_lo,sdd2_roi_hi,sdd3,sdd3_roi_lo,sdd3_roi_hi,"
-                    "sdd4,sdd4_roi_lo,sdd4_roi_hi,I0,TEY,sdd_total,sdd_mean,bad_point\n" + rows, encoding="utf-8")
-
-
-def main() -> int:
     demo = Path(tempfile.mkdtemp(prefix="aurora_docs_")) / "demo_beamtime"
-    cmd_demo(demo)
-    reduced = demo.parent / "reduced"
-    E = np.linspace(660, 740, 321)
-    a, b, c = edge(E, 690, 1.0, 0.6), edge(E, 700, 1.6, 0.2), edge(E, 695, 1.2, 0.9)
-    for name, y in (("NaF", a), ("CaF2", b), ("BaY2F8", c), ("mixture 1", 0.5 * a + 0.3 * b + 0.2 * c), ("mixture 2", 0.2 * a + 0.5 * b + 0.3 * c)):
-        (reduced / name).mkdir(parents=True)
-        write_john(reduced / name / f"{name}_full_reduced.csv", name, E, y)
-
+    cmd_demo(demo)                                    # raw data, processed/reduced spectra and references
+    s = settings()
+    s.setValue("appearance", args.scheme)
+    s.setValue("reference_dir", str(demo / "references"))
+    s.sync()
     app = create_app(["AURORA"])
+    apply_theme(app, appearance=args.scheme)
+    mode.set_advanced(not args.easy)
     win = MainWindow()
-    win.resize(1500, 940)
+    win.resize(*SIZE)
     win.show()
     proj = Project.discover(demo)
     win.home.set_project(proj)
@@ -63,6 +63,11 @@ def main() -> int:
     sid = ses.stack_id(scan)
     sd = ses.stack(sid)
     ses.touch(); ses.select_stack(sid)
+    tree = win.home.tree
+    holder_item = tree.topLevelItem(0).child(0)
+    for i in range(holder_item.childCount()):
+        if holder_item.child(i).text(0) == testdata.STACK:
+            tree.setCurrentItem(holder_item.child(i))
     x0, x1, y0, y1 = sd.bbox
     z1 = ses.new_zone("1 alpha"); z1.group = "Minerals"; z1.rects.append([x0, (x0 + x1) / 2, y0, y1])
     z2 = ses.new_zone("2 beta"); z2.group = "Simple Glass"; z2.rects.append([(x0 + x1) / 2, x1, y0, y1])
@@ -73,7 +78,7 @@ def main() -> int:
     ck.compute()
     ck.x_scan.setCurrentIndex([ck.x_scan.itemData(i) for i in range(ck.x_scan.count())].index(testdata.STACK)); ck.explore_i0()
     lib = win.library
-    lib.add_folder(reduced)
+    lib.add_folder(demo / "processed" / "reduced")
     for r in lib.requests:
         r.show = r.signal != "TEY"; r.fit = r.signal != "TEY"
     lib.changed.emit()
@@ -103,8 +108,8 @@ def main() -> int:
     def step():
         if state["i"] > 0:
             name = shots[state["i"] - 1][0]
-            win.grab().save(str(OUT / f"{name}.png"))
-            print("wrote", name)
+            win.grab().save(str(out / f"{name}.png"))
+            print("wrote", out / f"{name}.png")
         if state["i"] >= len(shots):
             app.quit(); return
         shots[state["i"]][1]()
@@ -113,6 +118,7 @@ def main() -> int:
 
     QTimer.singleShot(2500, step)
     code = app.exec()
+    ses._save_timer.stop()
     shutdown_app(app, win)
     return code
 

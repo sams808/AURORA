@@ -131,8 +131,7 @@ def test_load_all_scans(qapp, fake_project):
     win = _window(qapp, proj)
     rd = win.reduce
     # the list auto-selection started a worker for the first scan; wait for it, then "Load all" finds nothing left
-    if rd._worker is not None:
-        rd._worker.wait(30000); qapp.processEvents()
+    win.jobs.wait_idle(30000); qapp.processEvents()
     sid = win.session.stack_id(proj.find(testdata.STACK))
     if win.session.stack_loaded(sid) is None:
         win.session.stack(sid)
@@ -142,8 +141,7 @@ def test_load_all_scans(qapp, fake_project):
     loop = QEventLoop(); QTimer.singleShot(15000, loop.quit)
     rd.status_label.setText("")
     rd.load_all()
-    while rd._worker is not None and rd._worker.isRunning():
-        qapp.processEvents()
+    win.jobs.wait_idle(30000)
     qapp.processEvents()
-    assert win.session.stack_loaded(sid) is not None and "1 of 1 scans read" in rd.status_label.text()
+    assert win.session.stack_loaded(sid) is not None and "1 of 1 scan read" in rd.status_label.text()
     win.close()

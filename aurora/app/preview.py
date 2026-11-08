@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QVBoxLayout, QWidget
 
 from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
 from aurora.core.spectra import ZoneTraces
@@ -17,8 +18,8 @@ class PreviewPlot(QWidget):
         lay.setSpacing(4)
         opts = QHBoxLayout()
         self.toggles = QWidget()                       # display toggles: Advanced mode
-        tl = QHBoxLayout(self.toggles)
-        tl.setContentsMargins(0, 0, 0, 0)
+        from aurora.app.widgets import ElidedLabel, FlowLayout
+        tl = FlowLayout(self.toggles, spacing=6)
         self.show_sdd = QCheckBox("SDDs"); self.show_sdd.setChecked(True)
         self.show_sum = QCheckBox("sum"); self.show_sum.setChecked(True)
         self.show_tey = QCheckBox("TEY"); self.show_tey.setChecked(True)
@@ -30,9 +31,9 @@ class PreviewPlot(QWidget):
         self.all_scans = QCheckBox("all scans of the zone")
         opts.addWidget(self.all_scans)
         opts.addStretch(1)
-        self.readout = QLabel("")
+        self.readout = ElidedLabel("", Qt.ElideRight)
         self.readout.setObjectName("muted")
-        opts.addWidget(self.readout)
+        opts.addWidget(self.readout, 1)
         lay.addLayout(opts)
         self.gl = pg.GraphicsLayoutWidget()
         self.top = self.gl.addPlot(row=0, col=0)
@@ -58,7 +59,12 @@ class PreviewPlot(QWidget):
         for c in (self.show_sdd, self.show_sum, self.show_tey, self.show_i0, self.show_spikes):
             c.toggled.connect(self.redraw)
         self.top.scene().sigMouseMoved.connect(self._moved)
+        from aurora.app.help_text import explain_all
         from aurora.app.mode import mark_advanced
+        explain_all([(self.show_sdd, "preview.sdd"), (self.show_sum, "preview.sum"), (self.show_tey, "preview.tey"),
+                     (self.show_i0, "preview.i0"), (self.show_spikes, "preview.spikes"),
+                     (self.all_scans, "preview.all_scans")])
+        self.gl.setAccessibleName("preview of the zone's traces")
         mark_advanced(self.toggles)
 
     def set_traces(self, traces: list[tuple[str, ZoneTraces, dict]]) -> None:
@@ -71,9 +77,15 @@ class PreviewPlot(QWidget):
             p.clear()
         if self.top.legend is not None:
             self.top.legend.clear()
+        from aurora.app.widgets import set_plot_hint
         if not self._traces:
-            self.top.setTitle("select a zone")
+            self.top.setTitle("")
+            set_plot_hint(self.top, "select a sample (zone) and a scan to see its traces")
+            for p in (self.mid, self.low):
+                set_plot_hint(p, " ")                 # no bare 0..1 axes on an empty preview
             return
+        for p in (self.top, self.mid, self.low):
+            set_plot_hint(p, None)
         multi = len(self._traces) > 1
         t0 = self._traces[0][1]
         self.top.setTitle("fluorescence" + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))

@@ -29,12 +29,71 @@ Contents
 
 ![Home](img/home.png)
 
-- **Rail** (left): the eight perspectives, Home → Report, in the order of a normal workflow. Settings sits at the
-  bottom. Every perspective keeps its state when you switch.
-- **Header**: the project name, number of days and holders.
-- **Menu**: File (Open project… Ctrl+O, Reload F5, Settings…, Quit), View (Full screen F11), Help (About: versions of
-  AURORA, Python, numpy, h5py, PySide6, xraydb).
-- **Status bar**: the last thing AURORA did (zones saved, report built, …).
+- **Top bar**: the AURORA mark, the crumb *project ▸ day ▸ holder ▾* and the Easy / Advanced switch. Click the holder
+  part of the crumb to choose another holder of the project; each entry reads like `N5 · 2026-11-05 · 1 stack ·
+  2 zones`. **Ctrl+PgUp** and **Ctrl+PgDown** step to the previous and next holder, wrapping around.
+- **Rail** (left): the eight perspectives, Home → Report, in the order of a normal workflow; **Ctrl+1** … **Ctrl+8**
+  open them, and the tooltip of each rail button names its shortcut. Settings sits at the bottom. Every perspective
+  keeps its state when you switch.
+- **Cards**: every panel has a title and a small **?** that opens this manual at the panel's section. **F1** (Help >
+  Help on this page) opens the section of the current perspective, or of the current tab in Fit and Maps.
+- **Empty panels** say what to do next, with a button for it (Open project…, Open the demo beamtime, Add saved
+  spectra…, Go to Compare, …). A button that cannot act yet is greyed, and its tooltip says why ("open a project
+  first", "run LCF first").
+- **Ctrl+Return** clicks the highlighted (primary) button of the current perspective, for example **Run the checks
+  on holder N5** or **Build the report**.
+- **Status bar**: the last thing AURORA did (zones saved, files written, report built, …).
+
+**Easy and Advanced mode.** AURORA starts in Easy mode: the basic path of John Bussey's SGM XAS GUI (open, draw the
+sample zones in Reduce, check, compare, fit with LCF, build the report), with the values that path uses fixed and
+stated where they matter (for example "± from 200 bootstrap draws" in Fit). Advanced mode shows every option. The
+top-bar switch, **View > Advanced mode** (**Ctrl+Shift+A**) and the Settings checkbox do the same; the status line
+confirms the mode. Switching never changes a value and never writes the session: a value chosen in Advanced mode
+stays in force in Easy mode.
+
+| Perspective | Easy mode | Advanced mode adds |
+|---|---|---|
+| Home | the scan tree and the scan summary | the Kind column, the full h5 attribute table, the SDD geometry, the sgm_report notes |
+| Survey | the plate map, footprints, samples, sketch | channel, detector, / I0, log, invert, clip, overlays, Import / Export zones |
+| Reduce | scans, rect+ and navigate, New sample, Delete, the label, the preview | rect−, brush+ / brush−, Load all, Propose zones, Stitch…, the map controls, group and comment, the per-scan settings cards, Send to Compare |
+| Check | the checks of the holder, the four detectors on a zone | the good-I0 picker, the I0 explorer |
+| Compare | Show, Label, Signal, Shift eV, Fit; x range; Export… | the normalisation columns, pre / post windows, plot options, peaks, Add CSV…, References…, configs |
+| Fit | the LCF tab with its fixed options shown | PCA / MCR-ALS, ITFA, Peaks, the LCF options |
+| Maps | not shown (**Ctrl+7** says it belongs to Advanced mode) | the whole perspective |
+| Report | title, output folder, Build, preview, Open PDF / folder | the groups, the appendices |
+
+**Appearance and text size.** **View > Appearance** follows the system or forces Light or Dark; **View > Text size**
+is Normal, Large or Larger (13, 15 or 17 px); both apply at once, without a restart, and are also in Settings. The
+map area, the rail and the top bar stay navy in both schemes, so colour maps look the same in both. A curve keeps its
+colour when the scheme changes, and every curve also has its own dash, so colour is never the only cue. A focused
+control shows a 2 px outline.
+
+**Long tasks** (reading a project, loading stacks, running the checks, loading a hypercube, building the report) run
+in the background behind a progress strip: the bar, the current step, the elapsed time and **Cancel** (**Esc**). A
+cancelled task stops at its next step and leaves nothing half-written (no cache, no partial report). A task that
+fails says so in its strip and opens one error dialog with the details (**Copy details**, **Open log folder**).
+Closing the window cancels the running tasks and waits a few seconds at most.
+
+**Exports and file dialogs** start in a sensible folder: the last folder used for that kind of file, else the
+project's `reports/` folder (or the matching project folder), else the project, else Documents. After an export the
+message line lists the files written, with an **Open folder** link. A file that cannot be written (open in another
+program, no permission) gives one calm dialog that names it.
+
+**Menus**
+
+- **File**: Open project… (**Ctrl+O**: a beamtime folder, a loose folder of scans or one .h5 file), Reload (**F5**),
+  Settings…, Quit. A folder or an .h5 file dropped on the window opens it too.
+- **Edit**: Undo and Redo (with a later version).
+- **View**: Advanced mode (**Ctrl+Shift+A**), Appearance, Text size, Previous holder (**Ctrl+PgUp**), Next holder
+  (**Ctrl+PgDown**), Go to (**Ctrl+1** … **Ctrl+8**; Maps only in Advanced mode), Full screen (**F11**).
+- **Help**: User guide, Manual, Tutorials, Installation and sharing; **Help on this page** (**F1**); **Keyboard
+  shortcuts** (**Ctrl+/**, generated from the window, so it always lists every shortcut); **What's this?**
+  (**Shift+F1**, then click a control to read what it does); **Open the demo beamtime**; **Run self-test…** (checks
+  every part of this installation on a synthetic beamtime in the background, then shows the summary with **Copy** and
+  **Open folder**); **Report a problem…** (what to send, **Copy diagnostics** with the versions, the project, the
+  settings location and the last 200 log lines, **Open the log folder**, and the GitHub issues address);
+  **Check for updates…** (asks GitHub whether a newer AURORA exists; nothing is downloaded or installed);
+  **Licences…** (AURORA's MIT licence, the credits, the third-party licences); **About AURORA**.
 
 One *session* is attached to the open project: the current holder, the zones of every holder, the per-scan settings
 of every zone, the good-I0 choices, the stitched stacks. It is saved automatically to `<project>/.aurora/session.json`
@@ -56,7 +115,7 @@ Vocabulary used throughout:
 
 ## 2. Home
 
-Open a beamtime with **File > Open project…** or **Open folder…**. The folder that contains `raw/` is the normal
+Open a beamtime with **File > Open project…** or the **Open project…** button. The folder that contains `raw/` is the normal
 choice; a single day folder or a single scan folder also works. The tree lists days, holders and scans:
 
 | Column | Meaning |
@@ -119,7 +178,7 @@ Stitched stacks (see 4.6) appear at the end of the list.
 ### 4.2 Stack map
 
 - **show**: line, detector (sum or one SDD), what to integrate (integrated above the edge, at one energy chosen with
-  the E# spinner, the mean over all energies), **/ I0**, **log**.
+  the energy box, which shows the energy in eV, the mean over all energies), **/ I0**, **log**.
 - Tools: **navigate** (pan with the left button, wheel to zoom), **rect+** adds a rectangle to the current zone,
   **rect−** removes one, **brush+** / **brush−** paint or erase single pixels, the brush size being n×n pixels.
   **rect+ starts a new zone** makes every rectangle a new zone, useful when drawing many samples in a row.
@@ -130,10 +189,10 @@ Stitched stacks (see 4.6) appear at the end of the list.
 
 ### 4.3 Zones
 
-**New zone**, **Delete**, **Propose…**, **Stitch…** and the list of zones of the holder (number, label, group,
+**New sample**, **Delete**, **Propose zones**, **Stitch…** and the list of zones of the holder (number, label, group,
 number of attached scans). Selecting a zone shows its rectangles on the map and its card on the right.
 
-**Propose…** adds a first guess of zones that you then correct or delete: when the day has an sgm_report summary, the
+**Propose zones** adds a first guess of zones that you then correct or delete: when the day has an sgm_report summary, the
 zones sgm_report found (one square of the right area per distinct name); otherwise the bright pads of the survey map
 (Otsu threshold on log XRF / I0, numbered in reading order). Proposed zones are ordinary zones.
 
@@ -148,17 +207,18 @@ zones sgm_report found (one square of the right area per distinct name); otherwi
 
 ### 4.5 One card per attached scan
 
-Every loaded scan that covers the zone gets a settings card. The settings travel with the zone in the session file
-and decide what the report contains.
+Every loaded scan that covers the zone gets a settings card (Advanced mode; Easy mode uses the defaults). The
+settings travel with the zone in the session file and decide what the report contains.
 
 | Control | Effect |
 |---|---|
 | include | the scan contributes to the report figures and CSVs |
 | SDD1–SDD4 | detectors in the fluorescence sum (saturated detectors start unticked) |
 | line | the emission window (one of the fixed lines) |
-| fluo | fluorescence normalisation: raw; / I0; / I0 minus the pre-edge line; / I0 with edge jump = 1; area = 1; max = 1 |
+| signal | PFY or IPFY (Advanced); stored with the zone; this version computes PFY |
+| fluo | fluorescence normalisation: raw counts; / I0; / I0, pre-edge = 0 (the pre-edge line removed); / I0, edge jump = 1; / I0, area = 1; / I0, maximum = 1 |
 | TEY | include TEY and its normalisation (same choices) |
-| de-spike k | single-point outliers beyond k MADs of a 5-point running median are interpolated (k = 6 by default) |
+| de-spike, k | single-point outliers beyond k MADs of a 5-point running median are interpolated (k = 6 MAD by default) |
 | I0 | own, or the mean of the good scans ticked in Check (scans flagged I0 invalid start with the good-I0 mean) |
 | pre / post | windows in eV, "680-684" style; blank = first 15 % / last 20 % of the energies |
 
@@ -186,7 +246,7 @@ divided by the number of ticked detectors, so a missing detector is visible as a
 
 ![Check](img/check.png)
 
-**Run the checks on this holder** probes seven energies of every stack (fast: the brightest pixels only) and fills
+**Run the checks on holder N5** (named after the current holder) probes seven energies of every stack (fast: the brightest pixels only) and fills
 the table:
 
 | Column | Meaning |
@@ -221,7 +281,7 @@ A library of spectra, each row one trace, and a stacked plot.
 
 ### 6.1 Loading
 
-- **Add reduced folder…**: a folder of reduced CSVs in any of the known layouts: AURORA zone CSVs, sgm_report
+- **Add saved spectra…**: a folder of reduced CSVs in any of the known layouts: AURORA zone CSVs, sgm_report
   `_xanes.csv`, John Bussey's `_full_reduced.csv` / `_absorption.csv`. Each file gives its signals (sdd-scaled sum,
   TEY, …) as separate rows.
 - **Add CSV…**: any column file; the energy column is found by name or taken as the first column.
@@ -244,7 +304,7 @@ A library of spectra, each row one trace, and a stacked plot.
 | Fit | the row is available in Fit |
 | Diag | the row's raw signal and fitted lines are shown in the diagnostics panel |
 
-**Remove row**, **Remove sample** (all rows of the file), ▲ ▼ reorder, **Show all** / **Hide all**.
+**Remove**, **Remove sample** (all rows of the file), ▲ ▼ reorder, **Show all** / **Hide all**.
 
 ### 6.3 Stacked plot
 
@@ -341,7 +401,7 @@ as a view, not as data: the exports are of the measured cube.
 
 The final report, organised by sample group, built from the zones and their settings.
 
-- **title** (default `AURORA report · <project>`), **output** folder (default `<project>/reports/aurora`).
+- **title** (default `AURORA report · <project>`), **output** folder (default `<project>/reports/aurora`, **Browse…**).
 - **Groups to include**: the sample-sheet groups found in the zones; **All** / **None**.
 - **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**.
 - **Build the report** runs in the background with progress; the pages are previewed with ◀ ▶; **Open folder**,
@@ -361,18 +421,26 @@ The same report runs headless, see section 11.
 
 ## 10. Settings
 
+The Settings dialog (rail, or **File > Settings…**) holds the few defaults that are not per scan. Its **Help** button
+opens this section. Easy mode shows the first six rows; Advanced mode adds the others.
+
 | Setting | Effect |
 |---|---|
-| de-spike threshold k | default for new zone settings (6) |
-| default fluorescence normalisation, default TEY normalisation | defaults for new zone settings (edge jump = 1) |
-| map colour map | viridis, magma, inferno, plasma, cividis |
-| report author | printed on the cover |
-| reference spectra folder | the folder behind Compare > References… |
-| open the last project at start | on by default |
+| appearance | follow the system, light or dark; applied at once (also **View > Appearance**) |
+| text size | normal, large or larger (13, 15 or 17 px); applied at once (also **View > Text size**) |
+| report author | printed in the report footer and the PDF metadata; blank by default, and a blank author is resolved when a report is built |
+| open the last project at start | on by default; an unreachable last project gives a calm note on Home and never blocks the start |
+| advanced mode | every option (Advanced) or the basic path of John Bussey's GUI (Easy); also the top-bar switch and **Ctrl+Shift+A** |
+| check GitHub for a newer AURORA at start (once a day) | off by default; when on, AURORA asks GitHub at most once a day and shows a notice when a newer release exists (nothing is downloaded); **Help > Check for updates…** asks at any time |
+| de-spike threshold k (Advanced) | default for new zone settings, in MADs (6) |
+| default fluorescence normalisation, default TEY normalisation (Advanced) | defaults for new zone settings (/ I0, edge jump = 1) |
+| map colour map (Advanced) | viridis, magma, inferno, plasma, cividis; applied to every map when Settings is accepted (clusters and RGB keep their own colours) |
+| reference spectra folder (Advanced) | the folder behind **Compare > References…** |
 
 Per-scan choices (detectors, lines, normalisation, I0 source) live with each zone in the session file, not here.
 Settings are stored in the user's registry (Windows) or preferences (macOS); the environment variable
-`AURORA_SETTINGS_DIR` redirects them to an ini file in that folder (used by the tests and the smoke test).
+`AURORA_SETTINGS_DIR` redirects them to an ini file in that folder (used by the tests and the self-test). File dialogs
+remember their last folder per kind of file in the same place.
 
 ## 11. Command line
 

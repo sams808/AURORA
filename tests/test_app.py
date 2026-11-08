@@ -33,7 +33,7 @@ def test_main_window_and_home(qapp, fake_project):
     assert "Edge" in win.home.details.toPlainText() and "Metadata" not in win.home.details.toPlainText()  # Easy
     mode.set_advanced(True)                                  # Advanced: the full h5 attribute table is back
     assert "Metadata" in win.home.details.toPlainText()
-    assert "holders" in win.crumb.text()
+    assert win.crumb.text() == f"{proj.root.name} ▸ 2026-11-05 ▸ N5"
     win.show_perspective("reduce")
     assert win.rail_buttons["reduce"].isChecked()
     win.close()
