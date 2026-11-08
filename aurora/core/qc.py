@@ -1,19 +1,27 @@
 """Quality checks of sgm_report v2.5, ported: count-rate probe, SDD saturation / high rate, I0 validity, the agreement of
-the four detectors on a zone trace, and a spike summary (docs/HANDOFF.md sections 2.4 and 5.4).
+the four detectors on a zone trace, and a spike summary (docs/HANDOFF.md sections 2.4 and 5.4). Plus AURORA's own:
+- the results of a holder's checks persist in <project>/.aurora/qc.json (QcResult, save_qc / load_qc) and feed
+  aurora.core.flags.merged_flags, so new zones untick saturated SDDs even on a beamtime without sgm_report;
+- the reference of a scan (the day's other scans) is energy-local: scans whose range overlaps within I0_REF_WINDOW_EV;
+- check_zone: John Bussey's sanity messages for one zone x scan (the Easy 'Spectra to check' queue).
 
 Every rule keeps its constants in aurora.core.constants; every result carries the sentence the report prints.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
 
-from aurora.core.constants import (COUNT_RATE_PROBE_N, DETS, I0_BAD_FRAC, I0_COL, SAT_I0_VAR, SAT_RATE_RATIO, SAT_TOP_CV)
+from aurora.core.constants import (BAD_POINT_FRACTION, COUNT_RATE_PROBE_N, DETS, FEW_POINTS, I0_BAD_FRAC, I0_COL,
+                                   I0_LOW_FRAC, I0_REF_WINDOW_EV, I0_VARIES_FACTOR, SAT_I0_VAR, SAT_RATE_RATIO,
+                                   SAT_TOP_CV)
+from aurora.core.flags import CHECK_SOURCE, qc_path
 from aurora.core.io.raw import read_point_dir, stack_energy_dirs, stack_last_mtime
 from aurora.core.model import Project, ScanInfo
 from aurora.core.spectra import ZoneTraces, i0_score
@@ -177,6 +185,176 @@ def i0_check(level: float, day_level: float) -> I0Result:
     return I0Result(level, day_level, bad, note)
 
 
+# ----------------------------------------------------------------------------- persisted results (qc.json)
+def _f(v) -> float | None:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
+@dataclass
+class QcResult:
+    """The checks of one scan, as stored in <project>/.aurora/qc.json under its sid ('<day>_<scan folder>')."""
+    sid: str
+    i0_level: float | None = None
+    i0_bad: bool = False
+    kcps: list = field(default_factory=lambda: [None] * len(DETS))     # brightest-pixel rate per SDD
+    saturated: list[str] = field(default_factory=list)
+    high_rate: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    probed_at: str = ""
+    aurora_version: str = ""
+    scan_mtime: float = 0.0             # stack_last_mtime of the energy folders when probed: re-checked when it changes
+    n_energies: int = 0
+    holder: str = ""
+    e_range: list | None = None          # [first, last] energy (eV) of the scan
+    i0_ref: float | None = None          # the energy-local median I0 level it was judged against
+    kcps_ref: list = field(default_factory=lambda: [None] * len(DETS))
+    n_ref: int = 0                       # scans in the reference
+
+    def to_json(self) -> dict:
+        d = asdict(self)
+        d.pop("sid")
+        return d
+
+    @classmethod
+    def from_json(cls, sid: str, d: dict) -> "QcResult":
+        kc = list(d.get("kcps") or [None] * len(DETS))[:len(DETS)]
+        kr = list(d.get("kcps_ref") or [None] * len(DETS))[:len(DETS)]
+        return cls(sid=sid, i0_level=_f(d.get("i0_level")), i0_bad=bool(d.get("i0_bad")), kcps=[_f(v) for v in kc],
+                   saturated=[str(x) for x in d.get("saturated") or []], high_rate=[str(x) for x in d.get("high_rate") or []],
+                   notes=[str(x) for x in d.get("notes") or []], probed_at=str(d.get("probed_at", "")),
+                   aurora_version=str(d.get("aurora_version", "")), scan_mtime=float(d.get("scan_mtime") or 0.0),
+                   n_energies=int(d.get("n_energies") or 0), holder=str(d.get("holder", "")),
+                   e_range=list(d["e_range"]) if isinstance(d.get("e_range"), (list, tuple)) else None,
+                   i0_ref=_f(d.get("i0_ref")), kcps_ref=[_f(v) for v in kr], n_ref=int(d.get("n_ref") or 0))
+
+    @property
+    def flags(self) -> list:
+        from aurora.core.flags import entry_flags
+        return entry_flags(self.to_json(), CHECK_SOURCE)
+
+
+def scan_range(scan: ScanInfo | None, cr: CountRate | None = None) -> tuple[float, float] | None:
+    """(first, last) energy of a scan: from its folder list, else from the probed energies."""
+    if scan is not None and np.isfinite(scan.e_min) and np.isfinite(scan.e_max):
+        return float(scan.e_min), float(scan.e_max)
+    if cr is not None and cr.rows:
+        es = [float(r["E_eV"]) for r in cr.rows]
+        return min(es), max(es)
+    return None
+
+
+def reference_pool(sid: str, ranges: dict[str, tuple[float, float] | None], window_ev: float = I0_REF_WINDOW_EV) -> list[str]:
+    """The other scans whose energy range overlaps this scan's range widened by +/- window_ev (docs/HANDOFF.md 2.4:
+    'the median of the other scans within +/- 150 eV'). A scan without a known range is compared with every other."""
+    me = ranges.get(sid)
+    out = []
+    for k, r in ranges.items():
+        if k == sid:
+            continue
+        if me is None or r is None or (r[0] <= me[1] + window_ev and r[1] >= me[0] - window_ev):
+            out.append(k)
+    return out
+
+
+def scan_mtime(scan: ScanInfo) -> tuple[float, int]:
+    """(stack_last_mtime of the energy folders, number of energy folders): what tells a changed scan (a stat each)."""
+    edirs = stack_energy_dirs(scan.path) if scan.path.is_dir() else []
+    return stack_last_mtime(edirs), len(edirs)
+
+
+def verdicts(rates: dict[str, CountRate], scans: dict[str, ScanInfo], holder: str = "",
+             mtimes: dict[str, tuple[float, int]] | None = None) -> dict[str, QcResult]:
+    """Per scan of one holder: saturation and I0 validity against the energy-local reference of the holder's other
+    scans (reference_pool). `scans` maps sid -> ScanInfo; `mtimes` sid -> scan_mtime (stored for the re-check)."""
+    from aurora import __version__
+    ranges = {sid: scan_range(scans.get(sid), cr) for sid, cr in rates.items()}
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    out: dict[str, QcResult] = {}
+    for sid, cr in rates.items():
+        pool = reference_pool(sid, ranges)
+        day_kcps, day_i0 = day_reference([rates[k] for k in pool])
+        scan = scans.get(sid)
+        sat = saturation_check(cr, day_kcps, scan.n_points if scan is not None else None)
+        i0r = i0_check(cr.i0_level, day_i0)
+        k = cr.top_kcps
+        mt, ne = (mtimes or {}).get(sid, (0.0, len(scan.energy_dirs) if scan is not None else 0))
+        rng = ranges.get(sid)
+        out[sid] = QcResult(sid=sid, i0_level=_f(i0r.level), i0_bad=bool(i0r.bad),
+                            kcps=[_f(round(float(v), 1)) if np.isfinite(v) else None for v in k],
+                            saturated=list(sat.saturated), high_rate=list(sat.high_rate),
+                            notes=sat.notes + ([i0r.note] if i0r.note else []), probed_at=now, aurora_version=__version__,
+                            scan_mtime=float(mt), n_energies=int(ne), holder=holder,
+                            e_range=[rng[0], rng[1]] if rng else None, i0_ref=_f(day_i0),
+                            kcps_ref=[_f(round(float(v), 1)) if np.isfinite(v) else None for v in day_kcps], n_ref=len(pool))
+    return out
+
+
+def probe_holders(project: Project, holders: dict[str, list[ScanInfo]], sid_of=None, progress=None,
+                  ) -> dict[str, QcResult]:
+    """The count-rate probe of every stack of every holder ({holder key: [ScanInfo]}), then the verdicts per holder.
+    progress(i, n, message) is called per stack (it may raise aurora.core.cancel.Cancelled). Nothing is saved."""
+    sid_of = sid_of or (lambda s: f"{s.day}_{s.name}")
+    todo = [(h, s) for h, scans in holders.items() for s in scans]
+    rates: dict[str, dict[str, CountRate]] = {h: {} for h in holders}
+    infos: dict[str, ScanInfo] = {}
+    mtimes: dict[str, tuple[float, int]] = {}
+    for i, (h, s) in enumerate(todo):
+        if progress:
+            progress(i, len(todo), f"count rate {s.name}")
+        sid = sid_of(s)
+        infos[sid] = s
+        try:
+            mtimes[sid] = scan_mtime(s)
+            rates[h][sid] = count_rate_probe(project, s)
+        except (OSError, ValueError) as err:
+            log.warning("%s: count-rate probe failed (%s)", s.name, err)
+    if progress:
+        progress(len(todo), len(todo), "verdicts")
+    out: dict[str, QcResult] = {}
+    for h, rr in rates.items():
+        out.update(verdicts(rr, infos, h, mtimes))
+    return out
+
+
+def load_qc(project: Project) -> dict[str, QcResult]:
+    """The stored results of <project>/.aurora/qc.json (empty when there is none)."""
+    from aurora.core.flags import qc_entries
+    return {sid: QcResult.from_json(sid, d) for sid, d in qc_entries(project).items()}
+
+
+def save_qc(project: Project, results: dict[str, QcResult]) -> Path:
+    """Merge `results` into <project>/.aurora/qc.json (entries of other scans are kept) with an atomic write."""
+    from aurora.core.io.textio import read_json, write_json_atomic
+    p = qc_path(project)
+    old = read_json(p, {})
+    data = {k: v for k, v in (old.items() if isinstance(old, dict) else [])}
+    for sid, r in results.items():
+        data[sid] = r.to_json()
+    write_json_atomic(p, dict(sorted(data.items())))
+    log.info("%s: %d scan check(s) written (%d in the file)", p, len(results), len(data))
+    return p
+
+
+def stale(results: dict[str, QcResult], scans: dict[str, ScanInfo]) -> list[str]:
+    """sids whose scan changed since it was checked (newer energy folders, or more of them). One stat per scan."""
+    out = []
+    for sid, r in results.items():
+        s = scans.get(sid)
+        if s is None:
+            continue
+        try:
+            mt, ne = scan_mtime(s)
+        except OSError:
+            continue
+        if abs(mt - r.scan_mtime) > 1e-3 or (r.n_energies and ne != r.n_energies):
+            out.append(sid)
+    return out
+
+
 # ----------------------------------------------------------------------------- the four detectors on a zone trace
 @dataclass
 class SddConsistency:
@@ -241,6 +419,111 @@ def sdd_consistency(traces: ZoneTraces, saturated: list[str] | None = None) -> S
 # ----------------------------------------------------------------------------- spikes and I0 scores
 def spike_summary(traces: ZoneTraces) -> dict[str, int]:
     return {k: len(v) for k, v in traces.spikes.items() if isinstance(v, list) and v}
+
+
+# ----------------------------------------------------------------------------- sanity of one zone x scan
+LEVELS = ("ok", "warn", "bad")
+
+
+def _n(n: int, word: str, many: str | None = None) -> str:
+    return f"{n} {word if n == 1 else (many or word + 's')}"
+
+
+def worst(messages) -> str:
+    """'bad', 'warn' or 'ok': the worst level of a message list."""
+    levels = {lv for lv, _ in messages or []}
+    return "bad" if "bad" in levels else ("warn" if "warn" in levels else "ok")
+
+
+def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | None = None) -> list[tuple[str, str]]:
+    """John Bussey's `check_reduced` for one zone x scan, on AURORA's traces: [(level, message)], level ok / warn / bad.
+
+    Ported checks: the region's points (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values or a
+    signal zero everywhere (bad), missing energies, I0 zero or missing, I0 varying by more than I0_VARIES_FACTOR, TEY
+    without finite values, and the fraction of energies flagged bad (spikes plus masked energies, BAD_POINT_FRACTION).
+    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source) and the de-spike notes.
+    `stack` (a StackData) or `n_total` gives the stack's pixel count for 'N of M points'."""
+    if n_total is None and stack is not None:
+        n_total = getattr(stack, "n_pix", None)
+    if traces is None or traces.n_pix == 0:
+        return [("bad", "region contains 0 measurement points: nothing to reduce; draw it over the scan's footprint")]
+    msgs: list[tuple[str, str]] = []
+    st = traces.settings
+    n = int(traces.n_pix)
+    of = f" of {n_total}" if n_total else ""
+    if n < FEW_POINTS:
+        msgs.append(("warn", f"only {_n(n, 'measurement point')}{of}: noisy"))
+    else:
+        msgs.append(("ok", f"region contains {n}{of} measurement points"))
+    E = np.asarray(traces.E, float)
+    nE = len(E)
+    ticked = [k for k in range(len(DETS)) if st is None or st.sdd[k]]
+    if all(y is None for y in traces.det_raw):
+        msgs.append(("bad", f"no per-detector data for the line {traces.line} in this stack"))
+    else:
+        window = (lambda k: f"channels {st.roi[DETS[k]][0]}-{st.roi[DETS[k]][1] - 1}") if (st is not None and st.roi) else \
+            (lambda k: traces.line)
+        for k in ticked:
+            y = traces.det_raw[k]
+            if y is None:
+                continue
+            y = np.asarray(y, float)
+            if not np.isfinite(y).any():
+                msgs.append(("bad", f"{DETS[k].upper()}: no finite values (missing files?)"))
+            elif np.nanmax(y) <= 0:
+                msgs.append(("bad", f"{DETS[k].upper()}: signal is zero everywhere - check its window ({window(k)})"))
+        if not ticked:
+            msgs.append(("warn", "no detector is ticked: no fluorescence trace"))
+    sum_ok = np.ones(nE, bool)
+    for k in ticked:
+        if traces.det_raw[k] is not None:
+            sum_ok &= np.isfinite(np.asarray(traces.det_raw[k], float))
+    missing = ~sum_ok if ticked and any(traces.det_raw[k] is not None for k in ticked) else np.zeros(nE, bool)
+    if missing.any() and not missing.all():
+        msgs.append(("warn", f"{_n(int(missing.sum()), 'missing energy point')}"))
+    i0 = np.asarray(traces.i0_raw, float)
+    zero = (~np.isfinite(i0) | (i0 <= 0)) & ~missing
+    if zero.any():
+        msgs.append(("warn", f"I0 is zero or missing at {_n(int(zero.sum()), 'energy', 'energies')}"))
+    pos = i0[np.isfinite(i0) & (i0 > 0)]
+    if pos.size and pos.max() / max(pos.min(), 1e-30) > I0_VARIES_FACTOR:
+        msgs.append(("warn", f"I0 varies by a factor {pos.max() / pos.min():.1f} over the scan"))
+    if (st is None or st.tey) and not np.isfinite(np.asarray(traces.tey_raw, float)).any():
+        msgs.append(("warn", "TEY has no finite values"))
+    bad = traces.bad_mask()
+    nb = int(bad.sum())
+    low = traces.masked.get("i0_low")
+    nlow = int(np.asarray(low, bool).sum()) if low is not None else 0
+    if nb == 0:
+        msgs.append(("ok", "no bad points"))
+    elif nb / max(nE, 1) > BAD_POINT_FRACTION:
+        msgs.append(("warn", f"{100 * nb / nE:.0f} % of the points flagged bad ({nb} of {nE}"
+                             + (f"; {nlow} with I0 below {I0_LOW_FRAC:.0%} of its median" if nlow else "") + ")"))
+    else:
+        msgs.append(("ok", f"{_n(nb, 'bad point')} of {nE}"
+                           + (f" ({nlow} with I0 below {I0_LOW_FRAC:.0%} of its median, left out)" if nlow else " interpolated")))
+    for note in traces.notes:
+        if "near the edge" in note:
+            msgs.append(("warn", note))
+        elif note.startswith("signal: IPFY") or note.startswith("IPFY:"):
+            msgs.append(("ok", note))
+    in_sum = {DETS[k] for k in ticked}
+    for f in flags or []:
+        src = getattr(f, "source", "")
+        if f.kind == "sdd_saturated":
+            if set(f.dets) & in_sum:
+                msgs.append(("warn", f"{f.text} ({src}) and in the fluorescence sum: its fluorescence is not usable; "
+                                     "TEY is"))
+            else:
+                msgs.append(("ok", f"{f.text} ({src}): left out of the sum"))
+        elif f.kind == "high_rate":
+            msgs.append(("warn", f"{f.text} ({src}): dead time or pile-up likely, compare with TEY"))
+        elif f.kind == "i0_invalid":
+            if st is not None and st.i0_source == "good":
+                msgs.append(("ok", f"I0 invalid ({src}): divided by the good-I0 mean"))
+            else:
+                msgs.append(("warn", f"I0 invalid ({src}): the / I0 traces are not meaningful; use the good-I0 mean"))
+    return msgs
 
 
 @dataclass

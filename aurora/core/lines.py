@@ -34,11 +34,30 @@ def resonant_line(el: str, shell: str) -> str:
     return f"{el} {LINE_LABEL_BY_SHELL.get(shell[0].upper(), 'Kα')}"
 
 
-def default_signal(scan, summary: dict | None = None) -> str:
+def line_element(label: str | None) -> str | None:
+    """'O Kα' -> 'O', 'Fe Lα' -> 'Fe'; None for 'total XRF' or anything that does not start with an element symbol."""
+    tok = (label or "").strip().split(" ", 1)[0]
+    if not tok:
+        return None
+    from aurora.core.names import element_symbols
+    return tok if tok in element_symbols() else None
+
+
+def default_signal(scan, summary: dict | None = None, line: str | None = None) -> str:
     """The signal a new zone x scan uses: 'pfy' or 'ipfy' (ScanSettings.signal).
 
-    Foundation stub: always 'pfy'. The science package returns 'ipfy' when the summary mode starts with 'IPFY', or
-    when the chosen line's element differs from the edge element (a non-resonant line, the sgm_report rule)."""
+    'ipfy' when the sgm_report summary mode starts with 'IPFY' ('IPFY O Kα'), or when the chosen line (`line`, else the
+    line of the summary mode) belongs to another element than the scan's edge: a non-resonant line, the sgm_report
+    rule. 'pfy' otherwise, also when the edge or the line is unknown."""
+    if summary is None:
+        summary = getattr(scan, "summary", None) or {}
+    mode = str((summary or {}).get("mode") or "").strip()
+    if mode.upper().startswith("IPFY"):
+        return "ipfy"
+    el = line_element(line or line_of_mode(mode))
+    edge = getattr(scan, "edge", None)
+    if el and edge and str(edge[0]) and el != str(edge[0]):
+        return "ipfy"
     return "pfy"
 
 

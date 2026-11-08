@@ -103,11 +103,18 @@ def test_ctrl_return_clicks_the_primary_button(qapp, two_holders):
     win = two_holders
     win.show_perspective("check")
     pump(qapp)
+    # Easy: 'Save ticked → Compare' is disabled while the queue is empty, whose empty state offers 'Go to Reduce'
+    assert win.check.save_btn.isVisible() and not win.check.save_btn.isEnabled()
+    assert win.check.queue_state.isVisible() and win.check.queue_state.buttons[0].text() == "Go to Reduce"
+    mode.set_advanced(True)                       # the holder checks (WP4 I23: Advanced) and their primary button
+    win.show_perspective("check")
+    pump(qapp)
     assert win.check.run_btn.isEnabled()
     QTest.keyClick(win, Qt.Key_Return, Qt.ControlModifier)
     pump(qapp)
     assert win.jobs.wait_idle(60000)
     pump(qapp)
+    mode.set_advanced(False)
     assert win.check._results, "the checks ran"
 
 

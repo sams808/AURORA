@@ -108,8 +108,9 @@ HELP: dict[str, tuple[str, str, str]] = {
                    "45-one-card-per-attached-scan"),
     "reduce.line": ("The emission window (one of the fixed lines).", "line", "45-one-card-per-attached-scan"),
     "reduce.signal": ("PFY: counts in the emission line window / I0.\nIPFY: I0 / counts of a non-resonant line (inverse "
-                      "partial fluorescence yield). The choice is stored with the zone; this version still computes "
-                      "the traces as PFY.", "signal", "45-one-card-per-attached-scan"),
+                      "partial fluorescence yield, Achkar et al. 2011), for the sum and each SDD. New scans default to "
+                      "IPFY when the sgm_report mode says IPFY or the line belongs to another element than the edge.",
+                      "signal", "45-one-card-per-attached-scan"),
     "reduce.fluo": ("Fluorescence normalisation: raw; / I0; / I0 minus the pre-edge line; / I0 with edge jump = 1; "
                     "area = 1; maximum = 1.", "fluorescence normalisation", "45-one-card-per-attached-scan"),
     "reduce.tey": ("Include TEY (total electron yield) with its own normalisation.", "include TEY",
@@ -227,6 +228,28 @@ HELP: dict[str, tuple[str, str, str]] = {
     "check.col.high": ("≥ 2× the holder median without the flat signature: dead time or pile-up likely.", "High rate",
                        "5-check"),
     "check.col.notes": ("The reasons in words.", "Notes", "5-check"),
+    "check.every": ("Probe every stack of every holder in one job (count rate, saturation, I0 validity), with progress "
+                    "and Cancel. The results are kept in .aurora/qc.json.", "Run the checks on every holder", "5-check"),
+    "check.queue": ("The spectra sent from Reduce with 'Add to Check': one row per sample region and scan, with John "
+                    "Bussey's sanity messages. Tick 'Looks OK' for the ones to save; right-click for more.",
+                    "spectra to check", "5-check"),
+    "check.tick_all": ("Tick 'Looks OK' on every row of the queue.", "Tick all", "5-check"),
+    "check.untick_all": ("Untick 'Looks OK' on every row of the queue.", "Untick all", "5-check"),
+    "check.save": ("Write every ticked spectrum without a problem in John Bussey's formats (_full_reduced.csv, "
+                   "_absorption.csv, _polygon_roi.json, _gui_settings.json) to processed/reduced/<sample>/, then add "
+                   "the folders to Compare.", "Save ticked spectra to Compare", "5-check"),
+    "check.view": ("What the preview shows for the selected row (John Bussey's five views): the detector signals after "
+                   "cleaning; the fluorescence sum with its bad points; I0 and TEY each over its maximum; sum / I0 and "
+                   "TEY / I0; the / I0 traces scaled from 0 to 1.", "preview view", "5-check"),
+    "check.qcol.sample": ("The sample region (zone) drawn in Reduce.", "Sample", "5-check"),
+    "check.qcol.scan": ("HH:MM and sample label of the scan.", "Scan", "5-check"),
+    "check.qcol.pts": ("Measurement points inside the region / points of the scan.", "Zone pts", "5-check"),
+    "check.qcol.bad": ("Energies flagged bad: spikes (interpolated), I0 below 20 % of its median, incomplete energies.",
+                       "Bad pts", "5-check"),
+    "check.qcol.messages": ("The sanity checks of John Bussey's GUI and AURORA's flags: ✓ ok, ! check, ✗ bad. Hover a chip "
+                            "for the messages.", "Messages", "5-check"),
+    "check.qcol.ok": ("Looks OK: the spectrum is saved by 'Save ticked → Compare' and goes into the report (the include "
+                      "tick of the scan). A row with a bad message starts unticked.", "Looks OK", "5-check"),
     # ------------------------------------------------------------------ compare
     "compare.add_folder": ("Add the spectra saved in a folder: John Bussey's _full_reduced.csv / _absorption.csv, "
                            "sgm_report _xanes.csv, AURORA zone CSVs.", "Add saved spectra", "61-loading"),

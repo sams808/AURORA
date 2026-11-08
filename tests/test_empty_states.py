@@ -53,7 +53,13 @@ def test_a_fresh_window(qapp, fake_project):
     assert win.reduce.new_zone_btn.isEnabled()
     win.show_perspective("check")
     pump(qapp)
+    # Easy: the empty 'Spectra to check' queue points to Reduce; Advanced: the holder checks have not run (WP4 I23)
+    assert win.check.queue_state.isVisible() and win.check.queue_state.buttons[0].text() == "Go to Reduce"
+    mode.set_advanced(True)
+    pump(qapp)
     assert win.check.run_state.isVisible() and "holder N5" in win.check.run_state.buttons[0].text()
+    mode.set_advanced(False)
+    pump(qapp)
     win.show_perspective("report")
     pump(qapp)
     assert win.report.zone_state.isVisible() and not win.report.build_btn.isEnabled()

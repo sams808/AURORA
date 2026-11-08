@@ -1,31 +1,105 @@
-"""Check perspective: per-scan quality (count rate, saturation, I0 validity), the good-I0 selection for the holder,
-and the agreement of the four detectors on the selected zone."""
+"""Check perspective.
+
+Easy mode is John Bussey's 'Check scans' tab: the 'Spectra to check' queue (one row per zone x scan sent from Reduce
+with 'Add to Check'), his sanity messages (aurora.core.qc.check_zone) as ok / check / bad chips with an icon and a
+word, the 'Looks OK' tick (ScanSettings.include, changed through session.edit), a preview of the selected row in his
+five views, and 'Save ticked → Compare', which writes his file formats (aurora.core.export.write_john) into
+<project>/processed/reduced/<sample>/ and adds the folders to the Compare library.
+
+Advanced mode adds the checks of sgm_report v2.5 per scan of the holder (count rate, saturation, I0 validity against
+the energy-local reference), the good-I0 picker, the agreement of the four detectors on the selected zone and the I0
+explorer. The results of the checks persist in <project>/.aurora/qc.json (aurora.core.qc.save_qc), are read back when
+the project opens, are re-checked when a scan changes, and reach new zones' defaults through session.add_flag_source.
+"""
 from __future__ import annotations
+
+import copy
+import html
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
-                               QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget,
+                               QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
-from aurora.app.help_text import explain_all, header_tips
-from aurora.app.mode import mark_advanced
-from aurora.app.session import Session
-from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, role_pen, set_item_tone,
-                              status_text)
+from aurora.app.help_text import explain_all, header_tips, labelled
+from aurora.app.mode import mark_advanced, on_mode_changed
+from aurora.app.session import CheckItem, Session
+from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
+                              set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
-from aurora.app.widgets import Card, ElidedLabel, EmptyState, TaskBar, overlay_host, set_enabled, set_plot_hint
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, set_enabled,
+                                set_plot_hint)
+from aurora.core import export, qc
 from aurora.core.constants import DETS
-from aurora.core.names import split_stack_id
-from aurora.core.qc import (CountRate, count_rate_probe, day_reference, i0_candidates, i0_check, saturation_check,
-                            sdd_consistency, spike_summary)
+from aurora.core.lines import default_signal
+from aurora.core.names import short_time, split_stack_id
+from aurora.core.qc import CountRate, QcResult, i0_candidates, sdd_consistency, spike_summary
 from aurora.core.zones import members, zone_traces
+
+log = logging.getLogger("aurora.check")
 
 COLS = ("Time", "Scan", "Edge", "Status", "I0 level", "I0", "SDD1 kcps", "SDD2 kcps", "SDD3 kcps", "SDD4 kcps", "Saturated", "High rate", "Notes")
 COL_HELP = {0: "check.col.time", 1: "check.col.scan", 2: "check.col.edge", 3: "check.col.status", 4: "check.col.i0_level",
             5: "check.col.i0", 6: "check.col.kcps", 7: "check.col.kcps", 8: "check.col.kcps", 9: "check.col.kcps",
             10: "check.col.saturated", 11: "check.col.high", 12: "check.col.notes"}
+QCOLS = ("Sample", "Scan", "Zone pts", "Bad pts", "Messages", "Looks OK")
+QCOL_HELP = {0: "check.qcol.sample", 1: "check.qcol.scan", 2: "check.qcol.pts", 3: "check.qcol.bad", 4: "check.qcol.messages",
+             5: "check.qcol.ok"}
+Q_OK = QCOLS.index("Looks OK")
+Q_MSG = QCOLS.index("Messages")
+# John Bussey's five preview views of a checked scan (CheckTab._plot), in AURORA's words
+VIEWS = (("signals", "detector signals, cleaned"), ("sum", "fluorescence sum and its bad points"),
+         ("i0tey", "I0 / max and TEY / max"), ("ratio", "sum / I0 and TEY / I0"), ("minmax", "/ I0, min-max scaled"))
+EASY_DESPIKE_MODE = "coherent"          # new zone x scan settings (I25); files without 'dsm' stay 'classic'
+
+
+def science_defaults(scan, st) -> None:
+    """Settings default for every new zone x scan (registered with session.add_settings_default): the coherent
+    de-spike, and lines.default_signal (IPFY for an 'IPFY …' summary mode or a non-resonant line). Fields the user
+    pinned are left alone."""
+    pinned = set(getattr(st, "pinned", []) or [])
+    if not pinned & {"dsm", "despike_mode"}:
+        st.despike_mode = EASY_DESPIKE_MODE
+    if not pinned & {"sig", "signal"} and scan is not None:
+        st.signal = default_signal(scan, getattr(scan, "summary", None) or {}, line=st.line or None)
+
+
+@dataclass
+class QueueRow:
+    item: CheckItem
+    zone: object
+    settings: object
+    frame: export.JohnFrame | None = None
+    messages: list = field(default_factory=list)
+    state: str = "ready"                # ready | loading | error
+    error: str = ""
+    n_total: int = 0
+
+    @property
+    def level(self) -> str:
+        return qc.worst(self.messages) if self.state == "ready" else ("bad" if self.state == "error" else "muted")
+
+
+def _minmax(y: np.ndarray) -> np.ndarray:
+    y = np.asarray(y, float)
+    fin = np.isfinite(y)
+    if not fin.any():
+        return y
+    lo, hi = np.nanmin(y), np.nanmax(y)
+    return (y - lo) / (hi - lo) if hi > lo else y - lo
+
+
+def _by_max(y: np.ndarray) -> np.ndarray:
+    y = np.asarray(y, float)
+    m = np.nanmax(np.abs(y)) if np.isfinite(y).any() else 0.0
+    return y / m if m else y
 
 
 class CheckPerspective(QWidget):
@@ -34,27 +108,91 @@ class CheckPerspective(QWidget):
         self.session = session
         self.library = None                   # the Compare library (MainWindow sets it)
         self._rates: dict[str, CountRate] = {}
-        self._results: dict[str, dict] = {}
+        self._results: dict[str, QcResult] = {}     # sid -> the stored or fresh checks of every holder's scans
         self._cands = []
         self._x_curves = None                 # last I0-explorer read (scan name, curves), redrawn on a theme change
+        self._rows: list[QueueRow] = []
+        self._row_cache: dict = {}
+        self._seen: set = set()               # queue items whose first verdict was applied (a bad one starts unticked)
+        self._filling = False
+        self._defer = False
+        self._queue_dirty = False
+        self._probed_holders: set = set()     # holders probed automatically for the queue (once each)
+        self._load_errors: dict[str, str] = {}  # sid -> why its stack could not be read (queue rows say so)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
         head = QHBoxLayout()
         h1 = QLabel("Check"); h1.setObjectName("h1")
-        sub = ElidedLabel("count rate, saturation, I0 validity per scan · good I0 for the holder · the four detectors on a zone",
-                          Qt.ElideRight)
+        self.sub = sub = ElidedLabel("", Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
-        self.run_btn = QPushButton("Run the checks on this holder"); self.run_btn.setObjectName("primary")
-        self.run_btn.clicked.connect(self.run_checks)
-        head.addWidget(self.run_btn)
         root.addLayout(head)
         self.taskbar = TaskBar(self)
         root.addWidget(self.taskbar)
 
         split = QSplitter(Qt.Vertical)
-        self.table_card = top = Card("Scans of the holder", help_anchor="5-check")
+        # ---------------------------------------------------------------- Easy: the queue and its preview
+        top = QSplitter(Qt.Horizontal)
+        self.queue_card = qcard = Card("Spectra to check", help_anchor="5-check")
+        self.queue = QTableWidget(0, len(QCOLS))
+        self.queue.setHorizontalHeaderLabels(QCOLS)
+        self.queue.setAccessibleName("spectra to check")
+        self.queue.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.queue.setSelectionBehavior(QTableWidget.SelectRows)
+        self.queue.setSelectionMode(QTableWidget.SingleSelection)
+        self.queue.verticalHeader().setVisible(False)
+        self.queue.horizontalHeader().setSectionResizeMode(Q_MSG, QHeaderView.Stretch)
+        self.queue.itemChanged.connect(self._queue_item_changed)
+        self.queue.itemSelectionChanged.connect(self._draw_preview)
+        self.queue.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.queue.customContextMenuRequested.connect(self._queue_menu)
+        qcard.body.addWidget(self.queue, 1)
+        qrow = QHBoxLayout()
+        self.tick_all_btn = QPushButton("Tick all"); self.tick_all_btn.clicked.connect(lambda: self.set_all_ok(True))
+        self.untick_all_btn = QPushButton("Untick all"); self.untick_all_btn.clicked.connect(lambda: self.set_all_ok(False))
+        self.save_btn = QPushButton("Save ticked → Compare"); self.save_btn.setObjectName("primary")
+        self.save_btn.clicked.connect(self.save_ticked)
+        qrow.addWidget(self.tick_all_btn); qrow.addWidget(self.untick_all_btn); qrow.addStretch(1); qrow.addWidget(self.save_btn)
+        qcard.body.addLayout(qrow)
+        self.queue_note = QLabel(""); self.queue_note.setObjectName("muted"); self.queue_note.setWordWrap(True)
+        qcard.body.addWidget(self.queue_note)
+        top.addWidget(qcard)
+        self.preview_card = pcard = Card("Preview of the selected spectrum", help_anchor="5-check")
+        vrow = QHBoxLayout()
+        self.view_combo = QComboBox()
+        for key, text in VIEWS:
+            self.view_combo.addItem(text, key)
+        self.view_combo.currentIndexChanged.connect(lambda _i: self._draw_preview())
+        vrow.addWidget(labelled("view", self.view_combo, "check.view")); vrow.addWidget(self.view_combo, 1)
+        pcard.body.addLayout(vrow)
+        self.qplot = make_plot(x="energy (eV)", y="mean counts")
+        self.qplot.addLegend(offset=(-10, -10))         # bottom right: rising XAS curves leave that corner free
+        restyle_plot(self.qplot)                          # theme the legend now (make_plot's hook restyles it later)
+        self.qplot.getViewBox().disableAutoRange()
+        self.qplot.setMinimumHeight(170)
+        pcard.body.addWidget(self.qplot, 1)
+        self.msg_label = QLabel(""); self.msg_label.setWordWrap(True); self.msg_label.setObjectName("muted")
+        self.msg_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.msg_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.msg_scroll = QScrollArea()                 # the messages scroll instead of squeezing the plot
+        self.msg_scroll.setWidget(self.msg_label)
+        self.msg_scroll.setWidgetResizable(True)
+        self.msg_scroll.setFrameShape(QFrame.NoFrame)
+        self.msg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.msg_scroll.setFixedHeight(self.fontMetrics().lineSpacing() + 6)
+        pcard.body.addWidget(self.msg_scroll)
+        top.addWidget(pcard)
+        top.setSizes([640, 520])
+        split.addWidget(top)
+
+        # ---------------------------------------------------------------- Advanced: the holder checks (sgm_report)
+        self.table_card = tcard = Card("Scans of the holder", help_anchor="5-check")
+        self.run_btn = QPushButton("Run the checks on this holder"); self.run_btn.setObjectName("primary")
+        self.run_btn.clicked.connect(self.run_checks)
+        self.every_btn = QPushButton("Run the checks on every holder")
+        self.every_btn.clicked.connect(self.run_every_holder)
+        tcard.header.addWidget(self.run_btn); tcard.header.addWidget(self.every_btn)
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.setAccessibleName("checks of the holder's scans")
@@ -62,12 +200,12 @@ class CheckPerspective(QWidget):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.itemSelectionChanged.connect(self._row_selected)
-        top.body.addWidget(self.table, 1)
+        tcard.body.addWidget(self.table, 1)
         self.day_label = ElidedLabel("", Qt.ElideRight); self.day_label.setObjectName("muted")
-        top.body.addWidget(self.day_label)
-        split.addWidget(top)
+        tcard.body.addWidget(self.day_label)
+        split.addWidget(tcard)
 
-        bottom = QSplitter(Qt.Horizontal)
+        self.bottom = bottom = QSplitter(Qt.Horizontal)
         i0c = Card("I0 of the holder's scans (per-pixel mean)", help_anchor="5-check")
         opts = QHBoxLayout()
         self.i0_norm = QCheckBox("normalise to the level"); self.i0_norm.setChecked(True); self.i0_norm.toggled.connect(self._draw_i0)
@@ -107,62 +245,179 @@ class CheckPerspective(QWidget):
         self.x_note = QLabel(""); self.x_note.setObjectName("muted"); self.x_note.setWordWrap(True); i0x.body.addWidget(self.x_note)
         bottom.addWidget(i0x)
         split.addWidget(bottom)
-        split.setSizes([330, 520])
-        self.body = overlay_host(split)
+        self.split = split
+        split.setSizes([400, 300, 420])
+        # Advanced at 1200 x 760 needs more height than the window has: the page scrolls vertically instead of
+        # squeezing the cards below their minimum (never sideways)
+        self.page_scroll = QScrollArea()
+        self.page_scroll.setWidget(split)
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState("No project open: the quality checks of each holder's scans appear here.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="check",
                                       parent=self.body)
+        self.queue_state = EmptyState("No spectra to check yet. In Reduce, draw the region of a sample and press "
+                                      "'Add to Check'.", [("Go to Reduce", lambda: nav.go(self, "reduce"))],
+                                      icon="check", parent=self.queue)
         self.run_state = EmptyState("The checks have not run on this holder yet.",
                                     [("Run the checks on this holder", self.run_checks)], icon="check", parent=self.table)
-        explain_all([(self.run_btn, "check.run"), (self.i0_norm, "check.i0_norm"), (self.auto_btn, "check.auto"),
-                     (self.x_scan, "check.x_scan"), (self.x_read_btn, "check.x_read")])
+        explain_all([(self.run_btn, "check.run"), (self.every_btn, "check.every"), (self.i0_norm, "check.i0_norm"),
+                     (self.auto_btn, "check.auto"), (self.x_scan, "check.x_scan"), (self.x_read_btn, "check.x_read"),
+                     (self.tick_all_btn, "check.tick_all"), (self.untick_all_btn, "check.untick_all"),
+                     (self.save_btn, "check.save"), (self.queue, "check.queue")])
         header_tips(self.table, COL_HELP)
-        session.project_changed.connect(lambda _p: self.update_actions())
+        header_tips(self.queue, QCOL_HELP)
+        session.project_changed.connect(self._project_opened)
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda z: self._update_sdd())
         session.stack_selected.connect(lambda sd: self._update_sdd())
         session.zones_changed.connect(self._update_sdd)
+        session.zones_changed.connect(self._zones_changed)
+        session.check_queue_changed.connect(self._refresh_queue)
+        # AURORA's own verdicts reach new zones' defaults (saturated SDDs off, good-I0 for an invalid I0), and new
+        # settings get the coherent de-spike and the default signal before any rule of Reduce applies
+        session.add_flag_source(self._flags_for)
+        session.add_settings_default(science_defaults)
+        providers = getattr(session, "_settings_defaults", None)
+        if isinstance(providers, list) and science_defaults in providers:
+            providers.remove(science_defaults)
+            providers.insert(0, science_defaults)
         on_theme_changed(self, lambda _s: self._theme_changed())
-        # Easy mode (until the 'Spectra to check' queue lands): the checks of the holder and the four-detector card;
-        # the good-I0 picker and the I0 explorer are Advanced
+        # Easy: the queue and its preview. Advanced: the holder checks, the good-I0 picker, the four detectors and
+        # the I0 explorer (the four cards of the earlier versions, unchanged)
         self.i0_card, self.sdd_card, self.explorer_card = i0c, sddc, i0x
-        mark_advanced(self.i0_card, self.explorer_card)
+        mark_advanced(self.table_card, self.i0_card, self.sdd_card, self.explorer_card, self.bottom)
+        for plot in (self.i0_plot, self.sdd_plot, self.x_plot):     # readable in Advanced (the page scrolls if needed)
+            plot.setMinimumHeight(140)
+        on_mode_changed(self, self._mode_changed)
         self.update_actions()
-        self._draw_i0(); self._update_sdd(); self._draw_x()
+        self._draw_i0(); self._update_sdd(); self._draw_x(); self._draw_preview()
+
+    # ------------------------------------------------------------------ state
+    def _mode_changed(self, adv: bool) -> None:
+        if adv:                                 # room for the queue, the holder table and the three cards
+            self.split.setSizes([430, 170, 300])
+        self.sub.setText("spectra to check · Looks OK · save to Compare" + (
+            " · count rate, saturation, I0 validity per scan · good I0 · the four detectors on a zone" if adv else ""))
+
+    def _holder_busy(self, key: str | None) -> bool:
+        m = jobs.of(self)
+        return bool(key and m.job(f"check:{key}") is not None) or m.job("check:every") is not None
 
     def update_actions(self) -> None:
         ses = self.session
         has = ses.project is not None
         h = ses.holder()
-        busy = h is not None and jobs.of(self).job(f"check:{ses.current_holder}") is not None
+        busy = h is not None and self._holder_busy(ses.current_holder)
         name = f"holder {h.name}" if h else "this holder"
         self.run_btn.setText(f"Run the checks on {name}")
         set_enabled(self.run_btn, has and bool(ses.stacks_of()) and not busy,
                     "open a project first" if not has else ("the checks are running" if busy else
                                                             "the holder has no complete stack"))
+        any_stack = has and any(ses.stacks_of(k) for k in ses.holder_keys)
+        set_enabled(self.every_btn, any_stack and jobs.of(self).job("check:every") is None,
+                    "open a project first" if not has else ("the checks are running" if any_stack else
+                                                            "no holder has a complete stack"))
         set_enabled(self.x_read_btn, has and self.x_scan.count() > 0, "open a project first" if not has else
                     "the holder has no stack")
         set_enabled(self.auto_btn, bool(self._cands), "run the checks or load the holder's scans first")
         self.table_card.set_title(f"Scans of holder {h.name}" if h else "Scans of the holder")
         self.empty_state.set_shown(not has)
-        show_run = has and h is not None and not self._results and not busy and bool(ses.stacks_of())
+        checked = any(ses.stack_id(s) in self._results for s in ses.stacks_of())
+        show_run = has and h is not None and not checked and not busy and bool(ses.stacks_of())
         if show_run:
             self.run_state.set_content(f"The checks have not run on {name} yet.",
                                        [(f"Run the checks on {name}", self.run_checks)])
         self.run_state.set_shown(show_run)
+        # the queue
+        n = len(self._rows)
+        empty_reason = "the queue is empty: send spectra from Reduce with 'Add to Check'"
+        set_enabled(self.tick_all_btn, n > 0, empty_reason)
+        set_enabled(self.untick_all_btn, n > 0, empty_reason)
+        ticked = [r for r in self._rows if r.state == "ready" and r.settings.include]
+        saving = jobs.of(self).job("check:save") is not None
+        can = has and self.library is not None and bool(ticked) and not saving
+        set_enabled(self.save_btn, can, "open a project first" if not has else (
+            "saving …" if saving else (empty_reason if not n else ("tick 'Looks OK' for the spectra to save"
+                                                                   if not ticked else "Compare is not available"))))
+        self.queue_state.set_shown(has and n == 0)
 
     def _theme_changed(self) -> None:
         refill_tones(self.table)
         refill_tones(self.i0_list)
+        refill_tones(self.queue)
         self._draw_i0()
         self._update_sdd()
         self._draw_x()
+        self._draw_preview()
+
+    # ------------------------------------------------------------------ persisted checks
+    def _flags_for(self, scan) -> list:
+        """Flag source registered with the session: this window's verdicts of the scan (fresh or from qc.json)."""
+        if scan is None:
+            return []
+        r = self._results.get(f"{getattr(scan, 'day', '')}_{getattr(scan, 'name', '')}")
+        return r.flags if r is not None else []
+
+    def _all_scans(self) -> dict:
+        ses = self.session
+        return {ses.stack_id(s): s for key in ses.holder_keys for s in ses.stacks_of(key)}
+
+    def _project_opened(self, project) -> None:
+        """Read the stored checks (qc.json) and show them without re-running; a background job re-checks the scans
+        whose files changed since."""
+        self._rates.clear()
+        self._rows, self._row_cache, self._seen, self._probed_holders = [], {}, set(), set()
+        self._load_errors = {}
+        try:
+            self._results = qc.load_qc(project) if project is not None else {}
+        except (OSError, ValueError) as err:
+            log.warning("checks of %s not read (%s)", getattr(project, "root", "?"), err)
+            self._results = {}
+        if self._results:
+            log.info("%d stored checks read from %s", len(self._results), qc.qc_path(project))
+            stored, scans = dict(self._results), self._all_scans()
+            jobs.of(self).submit("check:verify", lambda cb: qc.stale(stored, scans), on_done=self._verified,
+                                 label="looking for scans changed since their check", taskbar=self.taskbar, report=False)
+        self.update_actions()
+
+    def _verified(self, changed: list) -> None:
+        if not changed or self.session.project is None:
+            return
+        holders = sorted({self.session.holder_of_stack(sid) for sid in changed} - {None})
+        self.day_label.setText(f"{len(changed)} scan(s) changed since their check: checking them again")
+        self._probe(holders, "check:changed", load=False)
+
+    def _save_results(self, results: dict) -> None:
+        if not results or self.session.project is None:
+            return
+        try:
+            qc.save_qc(self.session.project, results)
+        except OSError as err:
+            log.warning("checks not saved: %s", err)
+            self.day_label.setText(f"the checks are shown but not saved ({err})")
+
+    def _day_text(self) -> str:
+        res = [self._results[self.session.stack_id(s)] for s in self.session.stacks_of()
+               if self.session.stack_id(s) in self._results]
+        if not res:
+            return ""
+        with np.errstate(all="ignore"):
+            k = np.array([[np.nan if v is None else v for v in r.kcps] for r in res], float)
+            kc = np.nanmedian(k, axis=0) if np.isfinite(k).any() else np.full(len(DETS), np.nan)
+            lv = np.array([np.nan if r.i0_level is None else r.i0_level for r in res], float)
+            i0 = float(np.nanmedian(lv)) if np.isfinite(lv).any() else float("nan")
+        when = max(r.probed_at for r in res)
+        return ("median over the holder's scans: " + ", ".join(f"{d} {v:.0f} kcps" for d, v in zip(DET_LABELS, kc) if np.isfinite(v))
+                + (f" · I0 level {i0:.3g}" if np.isfinite(i0) else "") + f" · checked {when.replace('T', ' ')}"
+                + " · references within ±150 eV")
 
     # ------------------------------------------------------------------ run
     def _holder_changed(self, key: str) -> None:
-        self._results.clear()
         self._fill_table()
         self._fill_i0()
         self.x_scan.clear()
@@ -170,6 +425,7 @@ class CheckPerspective(QWidget):
         for s in (h.stacks + h.dropped) if h else []:
             if s.kind == "stack" and s.n_energies > 1:
                 self.x_scan.addItem(f"{s.time} {s.label} · {s.status}", s.name)
+        self.day_label.setText(self._day_text())
         self.update_actions()
 
     def explore_i0(self) -> None:
@@ -214,57 +470,72 @@ class CheckPerspective(QWidget):
         if v.size:
             self.x_plot.getViewBox().setRange(xRange=(float(c.E[0]), float(c.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
 
-    def run_checks(self) -> None:
-        if self.session.project is None:
+    def _probe(self, keys, job_key: str, load: bool) -> None:
+        """One job: the count-rate probe of every stack of the holders `keys` and the verdicts (energy-local
+        references); with load=True the stacks are read as well (the good-I0 list needs them)."""
+        ses = self.session
+        if ses.project is None:
             return
-        scans = list(self.session.stacks_of())
-        if not scans:
+        holders = {k: list(ses.stacks_of(k)) for k in keys if ses.stacks_of(k)}
+        if not holders:
             return
-        project, session = self.session.project, self.session
+        project = ses.project
+        n_scans = sum(len(v) for v in holders.values())
 
         def job(cb):
-            rates = {}
-            for i, s in enumerate(scans):
-                cb(i, len(scans) + len(scans), f"count rate {s.name}")
-                rates[session.stack_id(s)] = count_rate_probe(project, s)
-            for i, s in enumerate(scans):
-                cb(len(scans) + i, 2 * len(scans), f"loading {s.name}")
-                try:
-                    session.stack(session.stack_id(s))
-                except Exception:
-                    rates.setdefault(session.stack_id(s), None)
-                    continue
-            return rates
+            total = n_scans * (2 if load else 1) + 1
+            res = qc.probe_holders(project, holders, ses.stack_id,
+                                   progress=lambda i, n, m: cb(i, total, m))
+            if load:
+                for i, s in enumerate(s for v in holders.values() for s in v):
+                    cb(n_scans + 1 + i, total, f"loading {s.name}")
+                    try:
+                        ses.stack(ses.stack_id(s))
+                    except Exception as err:                    # noqa: BLE001  a damaged stack: listed without I0
+                        log.warning("%s not loaded for the good-I0 list (%s)", s.name, err)
+            return res
 
-        jobs.of(self).submit(f"check:{self.session.current_holder}", job, on_done=self._done,
+        jobs.of(self).submit(job_key, job, on_done=lambda res: self._probed(res, load),
                              on_failed=lambda t: self.day_label.setText(t.strip().splitlines()[-1]),
                              on_end=lambda _s: self.update_actions(), label="running the checks", taskbar=self.taskbar)
         self.update_actions()
 
-    def _done(self, rates: dict) -> None:
-        self._rates = {k: v for k, v in rates.items() if v is not None}
-        self.compute()
-        self.session.touch()        # memberships for the stacks loaded here
+    def run_checks(self) -> None:
+        """'Run the checks on holder N5': probe and load every stack of the current holder."""
+        if self.session.project is None or not self.session.stacks_of():
+            return
+        self._probe([self.session.current_holder], f"check:{self.session.current_holder}", load=True)
+
+    def run_every_holder(self) -> None:
+        """'Run the checks on every holder': one job over every holder's stacks (probe only), with progress and Cancel."""
+        if self.session.project is None:
+            return
+        self._probe(list(self.session.holder_keys), "check:every", load=False)
+
+    def _probed(self, results: dict, loaded: bool) -> None:
+        self._results.update(results)
+        self._save_results(results)
+        self._fill_table(); self._fill_i0(); self._update_sdd()
+        self.day_label.setText(self._day_text())
+        self._row_cache.clear()
+        self._refresh_queue()
+        if loaded:
+            self.session.touch()        # memberships for the stacks loaded here
+        self.update_actions()
 
     def compute(self) -> None:
-        """Per scan: saturation against the day's other scans, I0 validity against the day's other scans."""
-        self._results.clear()
-        scans = list(self.session.stacks_of())
-        for s in scans:
-            sid = self.session.stack_id(s)
-            cr = self._rates.get(sid)
-            if cr is None:
+        """The verdicts of the current holder from self._rates (count-rate probes done elsewhere): saturation and I0
+        validity against the energy-local reference of the holder's other scans, stored in qc.json."""
+        scans = {self.session.stack_id(s): s for s in self.session.stacks_of()}
+        rates = {sid: cr for sid, cr in self._rates.items() if sid in scans}
+        mtimes = {}
+        for sid in rates:
+            try:
+                mtimes[sid] = qc.scan_mtime(scans[sid])
+            except OSError:
                 continue
-            others = [r for k, r in self._rates.items() if k != sid]
-            day_kcps, day_i0 = day_reference(others)
-            sat = saturation_check(cr, day_kcps, s.n_points)
-            i0r = i0_check(cr.i0_level, day_i0)
-            self._results[sid] = dict(rate=cr, sat=sat, i0=i0r, day_kcps=day_kcps, day_i0=day_i0)
-        day_kcps, day_i0 = day_reference(list(self._rates.values()))
-        self.day_label.setText("median over the holder's scans: " + ", ".join(f"{d} {k:.0f} kcps" for d, k in zip(DET_LABELS, day_kcps) if np.isfinite(k))
-                               + (f" · I0 level {day_i0:.3g}" if np.isfinite(day_i0) else ""))
-        self._fill_table(); self._fill_i0(); self._update_sdd()
-        self.update_actions()
+        res = qc.verdicts(rates, scans, self.session.current_holder or "", mtimes)
+        self._probed(res, loaded=False)
 
     # ------------------------------------------------------------------ table
     def _fill_table(self) -> None:
@@ -275,16 +546,14 @@ class CheckPerspective(QWidget):
             res = self._results.get(sid)
             summ = s.summary or {}
             vals = [s.time, s.label, s.edge_text, s.status, "", "", "", "", "", "", "", "", ""]
-            if res:
-                cr, sat, i0r = res["rate"], res["sat"], res["i0"]
-                k = cr.top_kcps
-                vals[4] = f"{i0r.level:.3g}"
-                vals[5] = "invalid" if i0r.bad else "ok"
+            if res is not None:
+                vals[4] = f"{res.i0_level:.3g}" if res.i0_level is not None else "?"
+                vals[5] = "invalid" if res.i0_bad else "ok"
                 for j in range(4):
-                    vals[6 + j] = f"{k[j]:.0f}" if np.isfinite(k[j]) else "?"
-                vals[10] = ", ".join(d.upper() for d in sat.saturated) or ""
-                vals[11] = ", ".join(d.upper() for d in sat.high_rate) or ""
-                vals[12] = " ".join(sat.notes + ([i0r.note] if i0r.note else []))[:300]
+                    vals[6 + j] = f"{res.kcps[j]:.0f}" if res.kcps[j] is not None else "?"
+                vals[10] = ", ".join(d.upper() for d in res.saturated)
+                vals[11] = ", ".join(d.upper() for d in res.high_rate)
+                vals[12] = " ".join(res.notes)[:300]
             elif summ:
                 vals[5] = "invalid" if summ.get("i0_bad") else ""
                 vals[10] = ", ".join(summ.get("sdd_saturated") or []).upper()
@@ -297,6 +566,9 @@ class CheckPerspective(QWidget):
                     set_item_tone(it, "bad" if v == "invalid" else "ok")
                 elif c in (10, 11) and v:
                     set_item_tone(it, "bad" if c == 10 else "warn")
+                if c == 12 and res is not None:
+                    it.setToolTip(" ".join(res.notes) + (f"\nchecked {res.probed_at} with AURORA {res.aurora_version}; "
+                                                         f"reference: {res.n_ref} scan(s) within ±150 eV"))
                 self.table.setItem(r, c, it)
         self.table.resizeColumnsToContents()
 
@@ -398,7 +670,7 @@ class CheckPerspective(QWidget):
             return
         res = self._results.get(sid)
         scan = self.session.scan_of(sid)                  # None for a stitched stack
-        sat = res["sat"].saturated if res else (((scan.summary or {}) if scan is not None else {}).get("sdd_saturated") or [])
+        sat = list(res.saturated) if res is not None else (((scan.summary or {}) if scan is not None else {}).get("sdd_saturated") or [])
         c = sdd_consistency(t, sat)
         self.sdd_note.setText(f"{z.label} · {split_stack_id(sid)[1]} · {t.n_pix} px, line {t.line}: {c.note}")
         if c.normalised is not None:
@@ -412,3 +684,459 @@ class CheckPerspective(QWidget):
         sp = spike_summary(t)
         self.spike_note.setText(("spikes interpolated (k = %g): " % st.k + ", ".join(f"{k} {v}" for k, v in sp.items())) if sp else
                                 ("de-spiking off" if not st.despike else "no spikes found"))
+
+    # ------------------------------------------------------------------ the 'Spectra to check' queue
+    def _zone_of(self, item: CheckItem):
+        hz = self.session.zones.holders.get(item.holder)
+        return next((z for z in hz.zones if z.id == item.zone_id), None) if hz else None
+
+    def _zones_changed(self) -> None:
+        """A zone edit: queued rows whose zone or settings are gone leave the queue at once; the others are recomputed
+        now when the page is shown, else when it is shown next (a brush stroke in Reduce is an edit too)."""
+        ses = self.session
+        if not ses.check_queue:
+            return
+        gone = [it for it in ses.check_queue
+                if (z := self._zone_of(it)) is None or it.sid not in z.settings]
+        if gone and not self._filling:
+            ses.unqueue_for_check(gone)                 # check_queue_changed refreshes the rows
+            return
+        if self._defer or self._filling or not self.isVisible():
+            self._queue_dirty = True
+            return
+        self._refresh_queue()
+
+    def _refresh_if_dirty(self) -> None:
+        if self._queue_dirty:
+            self._refresh_queue()
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if self._queue_dirty:
+            self._refresh_queue()
+
+    def _row_key(self, it: CheckItem, zone, st, sd, flags) -> tuple:
+        geo = json.dumps({k: v for k, v in zone.to_json().items() if k in ("rects", "erects", "paint", "erase", "polys")},
+                         sort_keys=True)
+        good = tuple(sorted(k for k, v in self.session.zones.good_i0.items() if v)) if st.i0_source == "good" else ()
+        return (it, id(sd), geo, json.dumps(st.to_json(), sort_keys=True, default=str), good,
+                tuple(str(f) for f in flags))
+
+    def _row_for(self, it: CheckItem, zone, st) -> QueueRow:
+        ses = self.session
+        sd = ses.stack_loaded(it.sid)
+        row = QueueRow(item=it, zone=zone, settings=st)
+        if sd is None:
+            if ses.scan_of(it.sid) is None:
+                row.state, row.error = "error", "the scan of this row is not in the project"
+                return row
+            if it.sid in self._load_errors:
+                row.state, row.error = "error", f"the stack could not be read: {self._load_errors[it.sid]}"
+                return row
+            row.state = "loading"
+            jobs.of(self).submit(f"stack:{it.sid}", lambda cb, s=it.sid: ses.stack(s, progress=cb),
+                                 on_done=lambda _sd: self._refresh_queue(),
+                                 on_failed=lambda t, s=it.sid: self._stack_failed(s, t), label="reading the stack",
+                                 taskbar=self.taskbar)
+            return row
+        row.n_total = sd.n_pix
+        scan = ses.scan_of(it.sid)
+        flags = ses.flags_of(scan) if scan is not None else []
+        key = self._row_key(it, zone, st, sd, flags)
+        hit = self._row_cache.get(key)
+        if hit is not None:
+            row.frame, row.messages = hit
+            return row
+        good = ses.good_curve_for(sd.E) if st.i0_source == "good" else None
+        args = dict(project=ses.project, scan=scan, good_curve=good)
+        if st.roi:                                     # per-detector windows: read from the raw folders, off the GUI thread
+            row.state = "loading"
+            z2, st2 = copy.deepcopy(zone), copy.deepcopy(st)
+            jobs.of(self).submit(f"checkrow:{it.holder}:{it.zone_id}:{it.sid}",
+                                 lambda cb: export.john_frame(z2, it.sid, sd, st2, progress=cb, **args),
+                                 on_done=lambda fr, k=key, f=flags, s=sd: self._frame_done(k, fr, s, f),
+                                 label="reading the detector windows", taskbar=self.taskbar)
+            return row
+        try:
+            fr = export.john_frame(zone, it.sid, sd, st, **args)
+        except (OSError, ValueError) as err:
+            row.state, row.error = "error", str(err)
+            return row
+        row.frame, row.messages = fr, qc.check_zone(fr.traces, sd, flags)
+        self._row_cache[key] = (row.frame, row.messages)
+        return row
+
+    def _stack_failed(self, sid: str, details: str) -> None:
+        lines = [ln for ln in (details or "").strip().splitlines() if ln.strip()]
+        self._load_errors[sid] = lines[-1] if lines else "unknown error"
+        self._refresh_queue()
+
+    def _frame_done(self, key, fr, sd, flags) -> None:
+        self._row_cache[key] = (fr, qc.check_zone(fr.traces, sd, flags))
+        self._refresh_queue()
+
+    def _refresh_queue(self) -> None:
+        """Rebuild the queue rows from session.check_queue: frames and messages (cached), the first verdict of a new
+        row (a 'bad' one starts unticked), the table, the preview. Rows whose zone or settings are gone leave."""
+        if self._filling:
+            self._queue_dirty = True
+            return
+        self._filling = True
+        self._queue_dirty = False
+        try:
+            ses = self.session
+            rows, gone = [], []
+            for it in list(ses.check_queue):
+                z = self._zone_of(it)
+                st = z.settings.get(it.sid) if z is not None else None
+                if z is None or st is None:
+                    gone.append(it)
+                    continue
+                rows.append(self._row_for(it, z, st))
+            if gone:
+                ses.unqueue_for_check(gone)
+            self._rows = rows
+            first_bad = [r for r in rows if r.state == "ready" and r.item not in self._seen and r.level == "bad"
+                         and r.settings.include]
+            for r in rows:
+                if r.state == "ready":
+                    self._seen.add(r.item)
+        finally:
+            self._filling = False
+        if first_bad:
+            with ses.edit(f"untick {len(first_bad)} spectra to check with a problem"):
+                for r in first_bad:
+                    r.settings.include = False
+        self._fill_queue()
+        self.update_actions()
+        self._auto_probe()
+
+    def _auto_probe(self) -> None:
+        """A queued scan whose holder was never checked (no sgm_report summary, no qc.json entry): run the holder's
+        count-rate probe once in the background, so the messages name saturated SDDs and an invalid I0."""
+        ses = self.session
+        if ses.project is None:
+            return
+        todo = set()
+        for r in self._rows:
+            scan = ses.scan_of(r.item.sid)
+            if scan is None or (scan.summary or {}) or r.item.sid in self._results:
+                continue
+            if r.item.holder in ses.holder_keys and r.item.holder not in self._probed_holders:
+                todo.add(r.item.holder)
+        for key in sorted(todo):
+            if self._holder_busy(key):
+                continue
+            self._probed_holders.add(key)
+            self._probe([key], f"check:{key}", load=False)
+
+    def _scan_text(self, sid: str) -> str:
+        scan = self.session.scan_of(sid)
+        t = short_time(sid)
+        return f"{t} {scan.label}" if scan is not None else (t or split_stack_id(sid)[1])
+
+    def _messages_widget(self, row: QueueRow) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(4, 1, 4, 1)
+        lay.setSpacing(4)
+        if row.state == "loading":
+            chip = Chip(f"{status_text('muted')[0]} reading", "muted")
+            chip.setToolTip("the stack is being read")
+            lay.addWidget(chip)
+            text = "reading the stack …"
+        elif row.state == "error":
+            chip = Chip(" ".join(status_text("bad")), "bad")
+            chip.setToolTip(row.error)
+            lay.addWidget(chip)
+            text = row.error
+        else:
+            for level in ("bad", "warn", "ok"):
+                msgs = [m for lv, m in row.messages if lv == level]
+                if not msgs:
+                    continue
+                icon, word = status_text(level)
+                chip = Chip(f"{icon} {word}", level)
+                chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                chip.setToolTip("\n".join(msgs))
+                chip.setAccessibleName(f"{word}: " + "; ".join(msgs))
+                lay.addWidget(chip)
+            first = next((m for lv, m in row.messages if lv == "bad"), None) or \
+                next((m for lv, m in row.messages if lv == "warn"), None) or "no problem found"
+            text = first
+        lab = ElidedLabel(text, Qt.ElideRight)
+        lab.setObjectName("muted")
+        lay.addWidget(lab, 1)
+        w.setToolTip("\n".join(f"{status_text(lv)[0]} {m}" for lv, m in row.messages) or text)
+        return w
+
+    def _fill_queue(self) -> None:
+        sel = self._selected_item()
+        self.queue.blockSignals(True)
+        self.queue.setRowCount(len(self._rows))
+        for r, row in enumerate(self._rows):
+            it, z, st = row.item, row.zone, row.settings
+            fr = row.frame
+            pts = f"{fr.n} / {fr.N}" if fr is not None else "…"
+            bad = str(int(fr.bad.sum())) if fr is not None else "…"
+            vals = [z.label, self._scan_text(it.sid), pts, bad, "", ""]
+            for c, v in enumerate(vals):
+                cell = QTableWidgetItem(v)
+                if c == 0:
+                    cell.setData(Qt.UserRole, r)
+                    cell.setToolTip(f"{z.label} · holder {it.holder} · zone {z.id}")
+                if c == 1:
+                    cell.setToolTip(split_stack_id(it.sid)[1])
+                if c == 3 and fr is not None:
+                    cell.setToolTip(self._bad_tip(fr))
+                if c == Q_OK:
+                    cell.setFlags((cell.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+                    cell.setCheckState(Qt.Checked if st.include else Qt.Unchecked)
+                    cell.setText("looks OK" if st.include else "")
+                    cell.setToolTip("Looks OK: the spectrum is saved and goes to the report (the scan's include tick)")
+                self.queue.setItem(r, c, cell)
+            self.queue.setCellWidget(r, Q_MSG, self._messages_widget(row))
+        self.queue.blockSignals(False)
+        for c in (0, 1, 2, 3, Q_OK):
+            self.queue.resizeColumnToContents(c)
+        if self._rows:
+            idx = next((i for i, row in enumerate(self._rows) if row.item == sel), 0)
+            self.queue.selectRow(idx)
+        self._draw_preview()
+
+    @staticmethod
+    def _bad_tip(fr: export.JohnFrame) -> str:
+        parts = []
+        if fr.spikes_ev:
+            parts.append("spikes: " + "; ".join(f"{k.upper() if k.startswith('sdd') else k} {', '.join(f'{e:.2f}' for e in v)} eV"
+                                                 for k, v in fr.spikes_ev.items()))
+        if fr.low_ev:
+            parts.append("I0 below 20 % of its median: " + ", ".join(f"{e:.2f}" for e in fr.low_ev) + " eV")
+        if fr.incomplete_ev:
+            parts.append("incomplete: " + ", ".join(f"{e:.2f}" for e in fr.incomplete_ev) + " eV")
+        return "\n".join(parts) or "no bad points"
+
+    def _selected_item(self) -> CheckItem | None:
+        rows = self.queue.selectionModel().selectedRows() if self.queue.selectionModel() else []
+        if rows and 0 <= rows[0].row() < len(self._rows):
+            return self._rows[rows[0].row()].item
+        return None
+
+    def _selected_row(self) -> QueueRow | None:
+        it = self._selected_item()
+        return next((r for r in self._rows if r.item == it), None) if it is not None else None
+
+    def _queue_item_changed(self, cell: QTableWidgetItem) -> None:
+        if cell.column() != Q_OK or not 0 <= cell.row() < len(self._rows):
+            return
+        row = self._rows[cell.row()]
+        on = cell.checkState() == Qt.Checked
+        if bool(row.settings.include) != on:
+            # the edit notifies zones_changed; the rows are rebuilt after this signal, never inside it (the item that
+            # emitted it would be deleted under Qt)
+            self._defer = True
+            try:
+                with self.session.edit(f"mark {short_time(row.item.sid) or row.item.sid} in zone {row.zone.id} as "
+                                       f"{'looks OK' if on else 'not OK'}", holder=row.item.holder):
+                    row.settings.include = on
+            finally:
+                self._defer = False
+            self._queue_dirty = True
+            QTimer.singleShot(0, self, self._refresh_if_dirty)
+        self.update_actions()
+
+    def set_all_ok(self, on: bool) -> None:
+        """Tick all / Untick all: every row's 'Looks OK' in one edit."""
+        rows = [r for r in self._rows if bool(r.settings.include) != on]
+        if rows:
+            with self.session.edit(f"{'tick' if on else 'untick'} all {len(self._rows)} spectra to check"):
+                for r in rows:
+                    r.settings.include = on
+        self._fill_queue()
+        self.update_actions()
+
+    def queue_rows(self) -> list[dict]:
+        """The rows as data (tests, self-test): sample, scan, points, bad points, levels, looks_ok."""
+        out = []
+        for r in self._rows:
+            out.append({"sample": r.zone.label, "sid": r.item.sid, "state": r.state,
+                        "points": (r.frame.n, r.frame.N) if r.frame is not None else None,
+                        "bad": int(r.frame.bad.sum()) if r.frame is not None else None,
+                        "levels": sorted({lv for lv, _ in r.messages}), "messages": list(r.messages),
+                        "looks_ok": bool(r.settings.include)})
+        return out
+
+    def _queue_menu(self, pos: QPoint) -> None:
+        cell = self.queue.itemAt(pos)
+        if cell is None or not 0 <= cell.row() < len(self._rows):
+            return
+        row = self._rows[cell.row()]
+        m = QMenu(self)
+        m.addAction("Show the region in Reduce", lambda: nav.go(self, "reduce", holder=row.item.holder,
+                                                                zone=row.item.zone_id, sid=row.item.sid))
+        m.addAction("Remove from the queue", lambda: self.session.unqueue_for_check([row.item]))
+        m.exec(self.queue.viewport().mapToGlobal(pos))
+
+    # ------------------------------------------------------------------ preview (John's five views)
+    def _draw_preview(self) -> None:
+        p = self.qplot
+        p.clear()
+        if p.plotItem.legend is not None:
+            p.plotItem.legend.clear()
+        row = self._selected_row()
+        fr = row.frame if row is not None else None
+        if fr is None:
+            set_plot_hint(p, "select a spectrum in the queue" if self._rows else "the spectra sent from Reduce appear here")
+            self.msg_label.setText(row.error if row is not None and row.state == "error" else "")
+            self._fit_messages()
+            return
+        set_plot_hint(p, None)
+        view = self.view_combo.currentData()
+        E = fr.E
+        ticked = [DETS.index(d) for d in fr.dets_in_total]
+        ys = []
+
+        def line(y, colour, name, style=Qt.SolidLine, width=1.6):
+            y = np.asarray(y, float)
+            p.plot(E, y, pen=pg.mkPen(colour, width=width, style=style), connect="finite", name=name)
+            ys.append(y)
+
+        with np.errstate(all="ignore"):
+            if view == "signals":
+                for k in range(len(DETS)):
+                    on = k in ticked
+                    line(fr.det[:, k], curve(k), DET_LABELS[k] + ("" if on else " (off)"), dash(k), 1.6 if on else 0.8)
+                ylab = "mean counts" if fr.mode == "mean" else "summed counts"
+            elif view == "sum":
+                line(fr.total, pc("sum"), "sum of the ticked SDDs", width=2.0)
+                bad = fr.bad & np.isfinite(fr.total)
+                measured = np.nansum(fr.det_measured[:, ticked], axis=1) if ticked else fr.total
+                if bad.any():
+                    p.addItem(pg.ScatterPlotItem(E[bad], measured[bad], size=8, symbol="x", brush=pg.mkBrush(pc("spike")),
+                                                 pen=pg.mkPen(pc("spike"), width=1.4), name="bad points (as measured)"))
+                    ys.append(measured[bad])
+                ylab = "counts"
+            elif view == "i0tey":
+                line(_by_max(fr.i0), pc("i0"), "I0 / max")
+                line(_by_max(fr.tey), pc("tey"), "TEY / max", Qt.DashLine)
+                ylab = "/ maximum"
+            elif view == "ratio":
+                line(_by_max(fr.total / fr.i0), pc("sum"), "sum / I0 (÷ max)", width=2.0)
+                line(_by_max(fr.tey / fr.i0), pc("tey"), "TEY / I0 (÷ max)", Qt.DashLine)
+                ylab = "/ I0, divided by the maximum"
+            else:
+                line(_minmax(fr.total / fr.i0), pc("sum"), "sum / I0", width=2.0)
+                line(_minmax(fr.tey / fr.i0), pc("tey"), "TEY / I0", Qt.DashLine)
+                ylab = "/ I0, min-max scaled"
+        p.plotItem.setLabel("left", ylab)
+        vals = np.concatenate([y[np.isfinite(y)] for y in ys]) if ys else np.array([])
+        if vals.size:
+            lo, hi = float(vals.min()), float(vals.max())
+            p.getViewBox().setRange(xRange=(float(E[0]), float(E[-1])) if len(E) > 1 else None,
+                                    yRange=(lo, hi if hi > lo else lo + 1), padding=0.05, disableAutoRange=True)
+        self.msg_label.setText(f"{row.zone.label} · {self._scan_text(row.item.sid)} · {fr.n} of {fr.N} points · "
+                               f"{fr.source}\n" + "\n".join(f"{status_text(lv)[0]} {m}" for lv, m in row.messages))
+        self._fit_messages()
+
+    def _fit_messages(self) -> None:
+        """The message box as tall as its text, up to six lines (it scrolls beyond)."""
+        width = max(self.msg_scroll.viewport().width(), 200)
+        line_h = self.fontMetrics().lineSpacing()
+        need = self.msg_label.heightForWidth(width) if self.msg_label.text() else line_h
+        self.msg_scroll.setFixedHeight(min(max(need, line_h) + 6, line_h * 6 + 6))
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._fit_messages()
+
+    # ------------------------------------------------------------------ save ticked -> Compare
+    def ask_overwrite(self, paths: list[Path]) -> str:
+        """'yes' (overwrite), 'no' (skip those spectra) or 'cancel'. Tests replace this method."""
+        names = ", ".join(p.name for p in paths[:4]) + (f" and {len(paths) - 4} more" if len(paths) > 4 else "")
+        b = QMessageBox.question(self, "Files already exist",
+                                 f"{len(paths)} file(s) already exist ({names}). Overwrite them?\n"
+                                 "No skips those spectra.", QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                                 QMessageBox.No)
+        return {QMessageBox.Yes: "yes", QMessageBox.No: "no"}.get(b, "cancel")
+
+    def save_ticked(self) -> None:
+        """John's 'Save ticked scans' then 'Add saved scans to the Compare tab': every ticked row without a problem is
+        written in his formats to <project>/processed/reduced/<sample>/ (write_john), then each folder is added to
+        the Compare library."""
+        ses = self.session
+        if ses.project is None:
+            return
+        ticked = [r for r in self._rows if r.state == "ready" and r.settings.include and r.frame is not None]
+        if not ticked:
+            self.queue_note.setText("Tick 'Looks OK' for the spectra to save.")
+            return
+        bad = [r for r in ticked if r.level == "bad"]
+        good = [r for r in ticked if r.level != "bad"]
+        counts: dict[str, int] = {}
+        for r in good:
+            counts[export.safe_label(r.zone.label)] = counts.get(export.safe_label(r.zone.label), 0) + 1
+        plan = []
+        for r in good:
+            label = r.zone.label
+            if counts[export.safe_label(label)] > 1:            # one sample on two scans (or two holders): unique names
+                label = f"{label}_{r.item.holder}_{(short_time(r.item.sid) or '').replace(':', '')}"
+            sd = ses.stack_loaded(r.item.sid)
+            out = export.default_folder(ses.project, label)
+            plan.append((r, label, out, export.target_paths(out, label, r.zone, getattr(sd, "pitch", None)), sd))
+        existing = [p for *_x, targets, _sd in plan for p in targets if p.exists()]
+        if existing:
+            ans = self.ask_overwrite(existing)
+            if ans == "cancel":
+                self.queue_note.setText("nothing saved")
+                return
+            if ans == "no":
+                plan = [x for x in plan if not any(p.exists() for p in x[3])]
+        notes = [f"'{r.zone.label}' ({self._scan_text(r.item.sid)}) has a problem and was not saved" for r in bad]
+        if not plan:
+            self.queue_note.setText("; ".join(notes) or "nothing to save")
+            return
+        project = ses.project
+        tasks = []
+        for r, label, out, _targets, sd in plan:
+            scan = ses.scan_of(r.item.sid)
+            survey = None
+            h = ses.holder(r.item.holder)
+            if h is not None and h.survey is not None:
+                survey = h.survey.h5
+            good_curve = ses.good_curve_for(sd.E) if r.settings.i0_source == "good" else None
+            tasks.append(dict(zone=copy.deepcopy(r.zone), sid=r.item.sid, stack=sd, settings=copy.deepcopy(r.settings),
+                              out_dir=out, label=label, project=project, scan=scan, survey_h5=survey, overwrite=True,
+                              good_curve=good_curve, holder=r.item.holder,
+                              frame=r.frame))
+
+        def job(cb):
+            written = []
+            for i, t in enumerate(tasks):
+                cb(i, len(tasks), f"writing {t['label']}")
+                written.append(export.write_john(**t))
+            return written
+
+        def done(written):
+            folders = []
+            for paths in written:
+                if paths and paths[0].parent not in folders:
+                    folders.append(paths[0].parent)
+            n_added = 0
+            if self.library is not None:
+                for f in folders:
+                    n_added += len(self.library.add_folder(f))
+            flat = [p for paths in written for p in paths]
+            msg = f"{len(written)} spectrum(s) saved in John Bussey's format and added to Compare ({n_added} rows)" + (
+                "; " + "; ".join(notes) if notes else "")
+            if flat:
+                notify_saved(self.queue_note, flat)                 # 'wrote … → folder · Open folder' (rich text)
+                self.queue_note.setText(html.escape(msg) + "<br>" + self.queue_note.text())
+            else:
+                self.queue_note.setText(msg)
+            self.update_actions()
+
+        jobs.of(self).submit("check:save", job, on_done=done,
+                             on_failed=lambda t: self.queue_note.setText("not saved: " + t.strip().splitlines()[-1]),
+                             on_end=lambda _s: self.update_actions(), label="saving the ticked spectra",
+                             taskbar=self.taskbar)
+        self.update_actions()
