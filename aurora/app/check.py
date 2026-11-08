@@ -23,16 +23,16 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
-                               QMenu, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget,
+                               QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain_all, header_tips, labelled
 from aurora.app.mode import mark_advanced, on_mode_changed
 from aurora.app.session import CheckItem, Session
-from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, role_pen, set_item_tone,
-                              status_text)
+from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
+                              set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, set_enabled,
                                 set_plot_hint)
@@ -165,12 +165,22 @@ class CheckPerspective(QWidget):
         self.view_combo.currentIndexChanged.connect(lambda _i: self._draw_preview())
         vrow.addWidget(labelled("view", self.view_combo, "check.view")); vrow.addWidget(self.view_combo, 1)
         pcard.body.addLayout(vrow)
-        self.qplot = make_plot(x="energy (eV)", y="counts (zone mean)", legend="inside")
+        self.qplot = make_plot(x="energy (eV)", y="mean counts")
+        self.qplot.addLegend(offset=(-10, -10))         # bottom right: rising XAS curves leave that corner free
+        restyle_plot(self.qplot)                          # theme the legend now (make_plot's hook restyles it later)
         self.qplot.getViewBox().disableAutoRange()
+        self.qplot.setMinimumHeight(170)
         pcard.body.addWidget(self.qplot, 1)
         self.msg_label = QLabel(""); self.msg_label.setWordWrap(True); self.msg_label.setObjectName("muted")
         self.msg_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        pcard.body.addWidget(self.msg_label)
+        self.msg_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.msg_scroll = QScrollArea()                 # the messages scroll instead of squeezing the plot
+        self.msg_scroll.setWidget(self.msg_label)
+        self.msg_scroll.setWidgetResizable(True)
+        self.msg_scroll.setFrameShape(QFrame.NoFrame)
+        self.msg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.msg_scroll.setFixedHeight(self.fontMetrics().lineSpacing() + 6)
+        pcard.body.addWidget(self.msg_scroll)
         top.addWidget(pcard)
         top.setSizes([640, 520])
         split.addWidget(top)
@@ -234,8 +244,16 @@ class CheckPerspective(QWidget):
         self.x_note = QLabel(""); self.x_note.setObjectName("muted"); self.x_note.setWordWrap(True); i0x.body.addWidget(self.x_note)
         bottom.addWidget(i0x)
         split.addWidget(bottom)
+        self.split = split
         split.setSizes([400, 300, 420])
-        self.body = overlay_host(split)
+        # Advanced at 1200 x 760 needs more height than the window has: the page scrolls vertically instead of
+        # squeezing the cards below their minimum (never sideways)
+        self.page_scroll = QScrollArea()
+        self.page_scroll.setWidget(split)
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState("No project open: the quality checks of each holder's scans appear here.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
@@ -272,12 +290,16 @@ class CheckPerspective(QWidget):
         # the I0 explorer (the four cards of the earlier versions, unchanged)
         self.i0_card, self.sdd_card, self.explorer_card = i0c, sddc, i0x
         mark_advanced(self.table_card, self.i0_card, self.sdd_card, self.explorer_card, self.bottom)
+        for plot in (self.i0_plot, self.sdd_plot, self.x_plot):     # readable in Advanced (the page scrolls if needed)
+            plot.setMinimumHeight(140)
         on_mode_changed(self, self._mode_changed)
         self.update_actions()
         self._draw_i0(); self._update_sdd(); self._draw_x(); self._draw_preview()
 
     # ------------------------------------------------------------------ state
     def _mode_changed(self, adv: bool) -> None:
+        if adv:                                 # room for the queue, the holder table and the three cards
+            self.split.setSizes([430, 170, 300])
         self.sub.setText("spectra to check · Looks OK · save to Compare" + (
             " · count rate, saturation, I0 validity per scan · good I0 · the four detectors on a zone" if adv else ""))
 
@@ -823,7 +845,8 @@ class CheckPerspective(QWidget):
                 if not msgs:
                     continue
                 icon, word = status_text(level)
-                chip = Chip(f"{icon} {word}" + (f" ×{len(msgs)}" if len(msgs) > 1 and level != "ok" else ""), level)
+                chip = Chip(f"{icon} {word}", level)
+                chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 chip.setToolTip("\n".join(msgs))
                 chip.setAccessibleName(f"{word}: " + "; ".join(msgs))
                 lay.addWidget(chip)
@@ -954,6 +977,7 @@ class CheckPerspective(QWidget):
         if fr is None:
             set_plot_hint(p, "select a spectrum in the queue" if self._rows else "the spectra sent from Reduce appear here")
             self.msg_label.setText(row.error if row is not None and row.state == "error" else "")
+            self._fit_messages()
             return
         set_plot_hint(p, None)
         view = self.view_combo.currentData()
@@ -971,7 +995,7 @@ class CheckPerspective(QWidget):
                 for k in range(len(DETS)):
                     on = k in ticked
                     line(fr.det[:, k], curve(k), DET_LABELS[k] + ("" if on else " (off)"), dash(k), 1.6 if on else 0.8)
-                ylab = "counts (zone mean)" if fr.mode == "mean" else "counts (zone sum)"
+                ylab = "mean counts" if fr.mode == "mean" else "summed counts"
             elif view == "sum":
                 line(fr.total, pc("sum"), "sum of the ticked SDDs", width=2.0)
                 bad = fr.bad & np.isfinite(fr.total)
@@ -1001,6 +1025,18 @@ class CheckPerspective(QWidget):
                                     yRange=(lo, hi if hi > lo else lo + 1), padding=0.05, disableAutoRange=True)
         self.msg_label.setText(f"{row.zone.label} · {self._scan_text(row.item.sid)} · {fr.n} of {fr.N} points · "
                                f"{fr.source}\n" + "\n".join(f"{status_text(lv)[0]} {m}" for lv, m in row.messages))
+        self._fit_messages()
+
+    def _fit_messages(self) -> None:
+        """The message box as tall as its text, up to six lines (it scrolls beyond)."""
+        width = max(self.msg_scroll.viewport().width(), 200)
+        line_h = self.fontMetrics().lineSpacing()
+        need = self.msg_label.heightForWidth(width) if self.msg_label.text() else line_h
+        self.msg_scroll.setFixedHeight(min(max(need, line_h) + 6, line_h * 6 + 6))
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._fit_messages()
 
     # ------------------------------------------------------------------ save ticked -> Compare
     def ask_overwrite(self, paths: list[Path]) -> str:
