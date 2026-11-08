@@ -1,6 +1,11 @@
-"""Settings dialog: the few defaults that are not per-scan, stored in QSettings (see aurora.app.settings)."""
+"""Settings dialog: the few defaults that are not per-scan, stored in QSettings (see aurora.app.settings).
+
+get(key) reads a setting with its default. on_settings_changed(owner, fn) calls fn() after the dialog is accepted
+(for example every MapView re-reads map_colormap).
+"""
 from __future__ import annotations
 
+from PySide6.QtCore import QCoreApplication, QObject, Signal, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLabel,
                                QLineEdit, QVBoxLayout, QWidget)
 
@@ -18,6 +23,7 @@ DEFAULTS = {
     "text_size": "normal",           # normal / large / larger
     "advanced_mode": False,          # Easy mode on first start
 }
+COLORMAPS = ["viridis", "magma", "inferno", "plasma", "cividis"]
 
 
 def get(key: str):
@@ -33,25 +39,50 @@ def get(key: str):
     return str(v)
 
 
+class SettingsNotifier(QObject):
+    changed = Signal()
+
+
+def notifier() -> SettingsNotifier | None:
+    """Lives as a child of the QApplication (never at module level)."""
+    app = QCoreApplication.instance()
+    if app is None:
+        return None
+    n = app.findChild(SettingsNotifier, "aurora_settings_notifier")
+    if n is None:
+        n = SettingsNotifier(app)
+        n.setObjectName("aurora_settings_notifier")
+    return n
+
+
+class _Hook(QObject):
+    def __init__(self, owner: QObject, fn):
+        super().__init__(owner)
+        self._fn = fn
+
+    @Slot()
+    def fire(self) -> None:
+        try:
+            self._fn()
+        except RuntimeError:            # the owner's C++ side is already gone
+            pass
+
+
+def on_settings_changed(owner: QObject, fn) -> None:
+    """Call fn() each time the Settings dialog is accepted, for as long as `owner` lives."""
+    n = notifier()
+    if n is not None:
+        n.changed.connect(_Hook(owner, fn).fire)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("AURORA settings")
         lay = QVBoxLayout(self)
         form = QFormLayout()
-        self.k = QDoubleSpinBox(); self.k.setRange(1, 50); self.k.setValue(get("despike_k"))
-        form.addRow("de-spike threshold k (new zone settings)", self.k)
-        self.fn = QComboBox(); self.fn.addItems(["raw", "i0", "i0pre", "i0jump", "area", "max"]); self.fn.setCurrentText(get("fluo_norm"))
-        form.addRow("default fluorescence normalisation", self.fn)
-        self.tn = QComboBox(); self.tn.addItems(["raw", "i0", "i0pre", "i0jump", "area", "max"]); self.tn.setCurrentText(get("tey_norm"))
-        form.addRow("default TEY normalisation", self.tn)
-        self.cmap = QComboBox(); self.cmap.addItems(["viridis", "magma", "inferno", "plasma", "cividis"]); self.cmap.setCurrentText(get("map_colormap"))
-        form.addRow("map colour map", self.cmap)
-        self.author = QLineEdit(get("report_author"))
-        form.addRow("report author", self.author)
-        self.ref_dir = QLineEdit(get("reference_dir")); form.addRow("reference spectra folder", self.ref_dir)
-        self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
-        form.addRow("", self.open_last)
+        self.form = form
+        # Easy rows
         self.appearance = QComboBox()
         for key, label in (("system", "follow the system"), ("light", "light"), ("dark", "dark")):
             self.appearance.addItem(label, key)
@@ -62,9 +93,23 @@ class SettingsDialog(QDialog):
             self.text_size.addItem(label, key)
         self.text_size.setCurrentIndex(max(0, self.text_size.findData(get("text_size"))))
         form.addRow("text size", self.text_size)
+        self.author = QLineEdit(get("report_author"))
+        form.addRow("report author", self.author)
+        self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
+        form.addRow("", self.open_last)
         self.advanced = QCheckBox("advanced mode (every option; Easy mode shows the basic workflow)")
         self.advanced.setChecked(get("advanced_mode"))
         form.addRow("", self.advanced)
+        # Advanced rows
+        self.k = QDoubleSpinBox(); self.k.setRange(1, 50); self.k.setValue(get("despike_k"))
+        form.addRow("de-spike threshold k (new zone settings)", self.k)
+        self.fn = QComboBox(); self.fn.addItems(["raw", "i0", "i0pre", "i0jump", "area", "max"]); self.fn.setCurrentText(get("fluo_norm"))
+        form.addRow("default fluorescence normalisation", self.fn)
+        self.tn = QComboBox(); self.tn.addItems(["raw", "i0", "i0pre", "i0jump", "area", "max"]); self.tn.setCurrentText(get("tey_norm"))
+        form.addRow("default TEY normalisation", self.tn)
+        self.cmap = QComboBox(); self.cmap.addItems(COLORMAPS); self.cmap.setCurrentText(get("map_colormap"))
+        form.addRow("map colour map", self.cmap)
+        self.ref_dir = QLineEdit(get("reference_dir")); form.addRow("reference spectra folder", self.ref_dir)
         lay.addLayout(form)
         note = QLabel("Per-scan choices (detectors, lines, normalisation, I0 source) live with each zone in the session file, "
                       "not here.")
@@ -73,6 +118,8 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
+        from aurora.app.mode import mark_advanced_row
+        mark_advanced_row(form, self.k, self.fn, self.tn, self.cmap, self.ref_dir)
 
     def accept(self) -> None:
         s = settings()
@@ -91,4 +138,7 @@ class SettingsDialog(QDialog):
         apply_theme()
         if self.advanced.isChecked() != is_advanced():
             set_advanced(self.advanced.isChecked())
+        n = notifier()
+        if n is not None:
+            n.changed.emit()
         super().accept()

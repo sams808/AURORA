@@ -31,11 +31,13 @@ def test_text_contrast(name):
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_plot_colours_contrast(scheme):
-    pal = theme.PAL_DARK if scheme == "dark" else theme.PAL_LIGHT
-    bg = (theme.DARK if scheme == "dark" else theme.LIGHT)["plot_bg"]
-    assert all(theme.contrast(c, bg) >= 3.0 for c in pal), [(c, round(theme.contrast(c, bg), 2)) for c in pal]
-    roles = theme.ROLES[scheme]
-    assert all(theme.contrast(c, bg) >= 3.0 for c in roles.values()), {k: round(theme.contrast(c, bg), 2) for k, c in roles.items()}
+    t = theme.DARK if scheme == "dark" else theme.LIGHT
+    bg = t["plot_bg"]
+    assert all(theme.contrast(c, bg) >= 3.0 for c in theme.CURVES), [(c, round(theme.contrast(c, bg), 2)) for c in theme.CURVES]
+    for role, (src, _style) in theme.ROLES.items():          # every semantic plot colour reads on its background
+        c = theme.CURVES[int(src[6:])] if src.startswith("curve:") else t[src]
+        on = t["map_bg"] if role == "roi" else bg
+        assert theme.contrast(c, on) >= 3.0, (role, c, round(theme.contrast(c, on), 2))
 
 
 def test_readable_adjusts_both_ways():
@@ -54,11 +56,12 @@ def test_apply_theme_switches_palette_and_plots(qapp, monkeypatch):
         assert theme.apply_theme(qapp, appearance=sch) == sch
         assert qapp.palette().color(QPalette.Active, QPalette.Text).name().upper() == t["ink"].upper()
         assert qapp.palette().color(QPalette.Active, QPalette.Base).name().upper() == t["card"].upper()
-        assert theme.TOKENS["plot_bg"] == t["plot_bg"] and theme.PAL[0] == (theme.PAL_DARK if sch == "dark" else theme.PAL_LIGHT)[0]
+        assert theme.TOKENS["plot_bg"] == t["plot_bg"] and theme.PAL[0] == theme.CURVES[0]          # one palette
+        assert theme.LABELS[0] == (theme.LABELS_DARK if sch == "dark" else theme.LABELS_LIGHT)[0]
         ax = w.getPlotItem().getAxis("bottom")
         assert ax.labelStyle["color"] == t["plot_fg"] and ax.textPen().color().name().upper() == t["plot_fg"].upper()
         assert w.getPlotItem().titleLabel.opts["color"] == t["plot_fg"]
-        assert theme.pc("ink") == theme.ROLES[sch]["ink"]
+        assert theme.pc("ink") == t["plot_ink"] and theme.pc("fit") == theme.CURVES[1]
     w.deleteLater()
 
 

@@ -8,6 +8,7 @@ from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QProgressBar, QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget)
 
+from aurora.app.mode import mark_advanced, mark_easy
 from aurora.app.session import Session
 from aurora.app.widgets import Card, Worker
 from aurora.core.report import GROUP_ORDER, UNGROUPED, ReportBuilder, ReportResult
@@ -41,17 +42,22 @@ class ReportPerspective(QWidget):
         self.out_dir = QLineEdit(); r2.addWidget(self.out_dir, 1)
         b = QPushButton("…"); b.setMaximumWidth(36); b.clicked.connect(self._choose_out); r2.addWidget(b)
         left.body.addLayout(r2)
+        self.scope_box = QWidget()                     # appendices and groups: Advanced
+        sl = QVBoxLayout(self.scope_box); sl.setContentsMargins(0, 0, 0, 0)
         self.appendix = QCheckBox("Appendix A: the four detectors per zone"); self.appendix.setChecked(True)
         self.maps = QCheckBox("Appendix B: plate maps with the zones"); self.maps.setChecked(True)
-        left.body.addWidget(self.appendix); left.body.addWidget(self.maps)
-        left.body.addWidget(QLabel("Groups to include (sample-sheet groups found in the zones):"))
+        sl.addWidget(self.appendix); sl.addWidget(self.maps)
+        sl.addWidget(QLabel("Groups to include (sample-sheet groups found in the zones):"))
         self.groups = QListWidget()
-        left.body.addWidget(self.groups, 1)
+        sl.addWidget(self.groups, 1)
         gb = QHBoxLayout()
         self.all_btn = QPushButton("All"); self.all_btn.clicked.connect(lambda: self._tick(True))
         self.none_btn = QPushButton("None"); self.none_btn.clicked.connect(lambda: self._tick(False))
         gb.addWidget(self.all_btn); gb.addWidget(self.none_btn); gb.addStretch(1)
-        left.body.addLayout(gb)
+        sl.addLayout(gb)
+        left.body.addWidget(self.scope_box, 1)
+        self.scope_line = QLabel(""); self.scope_line.setObjectName("muted"); self.scope_line.setWordWrap(True)
+        left.body.addWidget(self.scope_line)          # Easy mode: what the report contains, read-only
         self.build_btn = QPushButton("Build the report"); self.build_btn.setObjectName("primary")
         self.build_btn.clicked.connect(self.build)
         left.body.addWidget(self.build_btn)
@@ -59,6 +65,7 @@ class ReportPerspective(QWidget):
         left.body.addWidget(self.progress)
         self.status = QLabel(""); self.status.setObjectName("muted"); self.status.setWordWrap(True)
         left.body.addWidget(self.status)
+        left.body.addStretch(0)                        # takes the room of the hidden options in Easy mode only
         split.addWidget(left)
 
         right = Card("Pages")
@@ -74,7 +81,7 @@ class ReportPerspective(QWidget):
             nav.addWidget(w)
         nav.addStretch(1); nav.addWidget(self.open_btn); nav.addWidget(self.pdf_btn)
         right.body.addLayout(nav)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setObjectName("pageview")
         self.page_view = QLabel(); self.page_view.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.scroll.setWidget(self.page_view)
         right.body.addWidget(self.scroll, 1)
@@ -84,6 +91,22 @@ class ReportPerspective(QWidget):
         root.addWidget(split, 1)
         session.project_changed.connect(self._project_changed)
         session.zones_changed.connect(self._fill_groups)
+        self.groups.itemChanged.connect(self._scope_text)
+        self.appendix.toggled.connect(self._scope_text)
+        self.maps.toggled.connect(self._scope_text)
+        # Easy mode: all groups and both appendices, stated read-only; the choices are Advanced
+        mark_advanced(self.scope_box)
+        mark_easy(self.scope_line)
+        self._scope_text()
+
+    def _scope_text(self, *_) -> None:
+        """What the next build contains, from the (possibly hidden) options in force."""
+        n = self.groups.count()
+        ticked = len(self.selected_groups())
+        groups = "all groups" if ticked == n else f"{ticked} of {n} groups (chosen in Advanced mode)"
+        apps = [name for name, box in (("Appendix A (the four detectors)", self.appendix), ("Appendix B (plate maps)", self.maps))
+                if box.isChecked()]
+        self.scope_line.setText(f"The report covers {groups}" + (", with " + " and ".join(apps) if apps else ", without appendices") + ".")
 
     # ------------------------------------------------------------------ options
     def _project_changed(self, project) -> None:
@@ -99,6 +122,7 @@ class ReportPerspective(QWidget):
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if ticked.get(g, True) else Qt.Unchecked)
             self.groups.addItem(it)
+        self._scope_text()
 
     def _tick(self, on: bool) -> None:
         for i in range(self.groups.count()):

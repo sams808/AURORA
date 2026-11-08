@@ -9,13 +9,15 @@ from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QHeaderView, QLabel, QP
                                QTextBrowser, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app.icons import icon
+from aurora.app.mode import is_advanced, mark_advanced_column, on_mode_changed
 from aurora.app.settings import recent_projects, remember_project
-from aurora.app.theme import MONO_FONT, STATUS_COLOURS, TOKENS
+from aurora.app.theme import MONO_FONT, TOKENS, on_theme_changed, refill_tones, set_item_tone, tone_of
 from aurora.app.widgets import Card, Worker
 from aurora.core.constants import sdd_geometry
 from aurora.core.model import Project, ScanInfo
 
 COLS = ("Scan", "Time", "Kind", "Edge", "Status", "Energies", "Points", "Flags")
+KIND_COL, STATUS_COL, FLAGS_COL = 2, 4, 7
 
 
 class HomePerspective(QWidget):
@@ -27,6 +29,7 @@ class HomePerspective(QWidget):
         super().__init__(parent)
         self.project: Project | None = None
         self._worker: Worker | None = None
+        self._shown: ScanInfo | None = None           # the scan in the detail panel (re-rendered on a mode / theme change)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -82,6 +85,22 @@ class HomePerspective(QWidget):
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 2)
         root.addWidget(split, 1)
+        on_theme_changed(self, lambda _s: self._theme_changed())
+        # Easy mode: the Kind column, the full h5 attribute table, the SDD geometry and the sgm_report notes are Advanced
+        mark_advanced_column(self.tree, KIND_COL)
+        on_mode_changed(self, lambda _adv: self._render_details(), call_now=False)
+
+    def _theme_changed(self) -> None:
+        self.open_btn.setIcon(icon("folder", TOKENS["ink"]))
+        self.reload_btn.setIcon(icon("refresh", TOKENS["ink"]))
+        refill_tones(self.tree)
+        self._render_details()
+
+    def _render_details(self) -> None:
+        if self._shown is not None:
+            self.details.setHtml(self._scan_html(self._shown))
+        elif self.project is None and self.path_label.text() == "no project open":
+            self.details.setHtml(self._welcome_html())
 
     # ------------------------------------------------------------------ opening
     def choose_project(self) -> None:
@@ -141,6 +160,7 @@ class HomePerspective(QWidget):
 
     # ------------------------------------------------------------------ tree
     def _fill_tree(self, project: Project) -> None:
+        self._shown = None
         self.tree.clear()
         for day in project.days:
             d_item = QTreeWidgetItem([day.date or day.path.name, "", f"{len(day.holders)} holders", "", "",
@@ -164,11 +184,9 @@ class HomePerspective(QWidget):
         it = QTreeWidgetItem([s.name, s.time, s.kind, s.edge_text, s.status.replace("_", " "), s.energy_text,
                               str(s.n_points) if s.n_points else "", ", ".join(s.flags) + (f"  {s.error}" if s.error else "")])
         it.setData(0, Qt.UserRole, s)
-        bg, fg = STATUS_COLOURS.get(s.status, ("muted_bg", "muted"))
-        from PySide6.QtGui import QBrush, QColor
-        it.setForeground(4, QBrush(QColor(TOKENS[fg])))
+        set_item_tone(it, tone_of(s.status), STATUS_COL)          # word plus icon, colour from the tokens
         if s.flags or s.error:
-            it.setForeground(7, QBrush(QColor(TOKENS["warn_fg"])))
+            set_item_tone(it, "warn", FLAGS_COL)
         if s.status_reason:
             it.setToolTip(4, s.status_reason)
         return it
@@ -176,6 +194,7 @@ class HomePerspective(QWidget):
     def _on_select(self, cur: QTreeWidgetItem | None, _prev=None) -> None:
         s = cur.data(0, Qt.UserRole) if cur is not None else None
         if isinstance(s, ScanInfo):
+            self._shown = s
             self.details.setHtml(self._scan_html(s))
             self.scan_selected.emit(s)
 
@@ -201,6 +220,8 @@ class HomePerspective(QWidget):
         geo = sdd_geometry(date)
         body = "".join(f"<tr><td style='color:{TOKENS['muted']};padding:2px 10px 2px 0'>{e(k)}</td>"
                        f"<td style='font-family:{MONO_FONT}'>{e(v)}</td></tr>" for k, v in rows if v)
+        if not is_advanced():                     # Easy: the scan summary only
+            return f"<h3>{e(s.name)}</h3><table>{body}</table>"
         md = "".join(f"<tr><td style='color:{TOKENS['muted']};padding:1px 10px 1px 0'>{e(k)}</td>"
                      f"<td style='font-family:{MONO_FONT}'>{e(v[:160])}</td></tr>" for k, v in sorted(s.md.items()))
         flags = ""

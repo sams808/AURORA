@@ -11,12 +11,14 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QVBoxLayout, QWidget)
 
 from aurora.app.library import Library
-from aurora.app.preview import DASH
+from aurora.app.mode import mark_advanced, mark_advanced_column
+from aurora.app.theme import curve, dash, label_for, make_plot, on_theme_changed, role_pen, swatch_icon
 from aurora.app.widgets import Card
 from aurora.core.compare import NORMS, derivative, difference, export_wide_csv, local_peaks, stack_offsets
 
 COLS = ("Show", "Label", "Signal", "Shift eV", "Norm", "Pre lo", "Pre hi", "Post lo", "Post hi", "Flatten", "Spacing", "Scale", "Fit", "Diag")
 BOOL_COLS = (0, 9, 12, 13)
+ADVANCED_COLS = (4, 5, 6, 7, 8, 9, 10, 11, 13)      # Norm, Pre / Post windows, Flatten, Spacing, Scale, Diag
 
 
 class ComparePerspective(QWidget):
@@ -31,14 +33,17 @@ class ComparePerspective(QWidget):
         h1 = QLabel("Compare"); h1.setObjectName("h1")
         sub = QLabel("normalise, shift, stack and compare reduced spectra"); sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub); head.addStretch(1)
+        self.head_buttons: dict[str, QPushButton] = {}
         for text, fn in (("Add reduced folder…", self._add_folder), ("Add CSV…", self._add_csv),
                          ("References…", self._references), ("Save config…", self._save_config), ("Load config…", self._load_config), ("Export…", self._export)):
             b = QPushButton(text); b.clicked.connect(fn); head.addWidget(b)
+            self.head_buttons[text] = b
         root.addLayout(head)
 
         split = QSplitter(Qt.Horizontal)
         left = Card("Library")
         ops = QHBoxLayout()
+        self.op_buttons: dict[str, QPushButton] = {}
         for text, fn in (("Remove row", self._remove_rows), ("Remove sample", self._remove_sample), ("Rename", self._rename),
                          ("Duplicate", lambda: self._row_op(self.lib.duplicate)), ("▲", lambda: self._row_op(lambda r: self.lib.move(r, -1))),
                          ("▼", lambda: self._row_op(lambda r: self.lib.move(r, 1))), ("Show all", lambda: self.lib.set_all("show", True)),
@@ -47,6 +52,7 @@ class ComparePerspective(QWidget):
             if len(text) == 1:
                 b.setMaximumWidth(34)
             ops.addWidget(b)
+            self.op_buttons[text] = b
         ops.addStretch(1)
         left.body.addLayout(ops)
         self.table = QTableWidget(0, len(COLS))
@@ -55,7 +61,8 @@ class ComparePerspective(QWidget):
         self.table.itemChanged.connect(self._item_changed)
         self.table.itemSelectionChanged.connect(self._draw_diagnostics)
         left.body.addWidget(self.table, 1)
-        rng = QHBoxLayout()
+        self.range_row = QWidget()                     # set pre / post on the selection: Advanced
+        rng = QHBoxLayout(self.range_row); rng.setContentsMargins(0, 0, 0, 0)
         rng.addWidget(QLabel("set pre/post (eV from E0) on selected rows:"))
         self.pre_lo = QDoubleSpinBox(); self.pre_lo.setRange(-200, 200); self.pre_lo.setValue(-20)
         self.pre_hi = QDoubleSpinBox(); self.pre_hi.setRange(-200, 200); self.pre_hi.setValue(-5)
@@ -65,7 +72,7 @@ class ComparePerspective(QWidget):
             rng.addWidget(w)
         b = QPushButton("Apply"); b.clicked.connect(self._apply_ranges); rng.addWidget(b)
         rng.addStretch(1)
-        left.body.addLayout(rng)
+        left.body.addWidget(self.range_row)
         split.addWidget(left)
 
         right = QSplitter(Qt.Vertical)
@@ -75,18 +82,22 @@ class ComparePerspective(QWidget):
         self.x_lo = QLineEdit(); self.x_lo.setPlaceholderText("auto"); self.x_lo.setMaximumWidth(70)
         self.x_hi = QLineEdit(); self.x_hi.setPlaceholderText("auto"); self.x_hi.setMaximumWidth(70)
         opts.addWidget(self.x_lo); opts.addWidget(self.x_hi)
-        opts.addWidget(QLabel("spacing"))
+        self.plot_opts = QWidget()                     # spacing, labels, derivative, difference: Advanced
+        po = QHBoxLayout(self.plot_opts); po.setContentsMargins(0, 0, 0, 0)
+        po.addWidget(QLabel("spacing"))
         self.spacing = QDoubleSpinBox(); self.spacing.setRange(0, 100); self.spacing.setSingleStep(0.1); self.spacing.setValue(0.6)
-        opts.addWidget(self.spacing)
-        self.labels_on = QCheckBox("labels"); self.labels_on.setChecked(True); opts.addWidget(self.labels_on)
-        self.signal_in_label = QCheckBox("signal in label"); opts.addWidget(self.signal_in_label)
-        self.deriv = QCheckBox("first derivative"); opts.addWidget(self.deriv)
+        po.addWidget(self.spacing)
+        self.labels_on = QCheckBox("labels"); self.labels_on.setChecked(True); po.addWidget(self.labels_on)
+        self.signal_in_label = QCheckBox("signal in label"); po.addWidget(self.signal_in_label)
+        self.deriv = QCheckBox("first derivative"); po.addWidget(self.deriv)
         self.deriv_smooth = QDoubleSpinBox(); self.deriv_smooth.setRange(1, 51); self.deriv_smooth.setDecimals(0); self.deriv_smooth.setValue(3)
-        self.deriv_smooth.setPrefix("smooth "); self.deriv_smooth.setSuffix(" pts"); opts.addWidget(self.deriv_smooth)
-        self.diff_btn = QPushButton("Difference of the two selected rows"); self.diff_btn.clicked.connect(self._difference); opts.addWidget(self.diff_btn)
+        self.deriv_smooth.setPrefix("smooth "); self.deriv_smooth.setSuffix(" pts"); po.addWidget(self.deriv_smooth)
+        self.diff_btn = QPushButton("Difference of the two selected rows"); self.diff_btn.clicked.connect(self._difference); po.addWidget(self.diff_btn)
+        opts.addWidget(self.plot_opts)
         opts.addStretch(1)
         pc.body.addLayout(opts)
-        pk = QHBoxLayout()
+        self.peaks_row = QWidget()                     # mark peaks with prominence and distance: Advanced
+        pk = QHBoxLayout(self.peaks_row); pk.setContentsMargins(0, 0, 0, 0)
         self.show_peaks = QCheckBox("mark peaks"); pk.addWidget(self.show_peaks)
         pk.addWidget(QLabel("min prominence"))
         self.prominence = QDoubleSpinBox(); self.prominence.setRange(0, 100); self.prominence.setDecimals(3); self.prominence.setSingleStep(0.01); self.prominence.setValue(0.05)
@@ -95,18 +106,16 @@ class ComparePerspective(QWidget):
         self.distance = QDoubleSpinBox(); self.distance.setRange(1, 500); self.distance.setDecimals(0); self.distance.setValue(5)
         pk.addWidget(self.distance)
         pk.addStretch(1)
-        pc.body.addLayout(pk)
-        self.plot = pg.PlotWidget(background="w")
-        self.plot.setLabel("bottom", "incident energy (eV)"); self.plot.setLabel("left", "normalised, offset")
+        pc.body.addWidget(self.peaks_row)
+        self.plot = make_plot(x="incident energy (eV)", y="normalised, offset")
         self.plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.plot, 1)
         self.status = QLabel(""); self.status.setObjectName("muted"); self.status.setWordWrap(True)
         pc.body.addWidget(self.status)
         right.addWidget(pc)
         dc = Card("Diagnostics of the selected row")
-        self.diag = pg.PlotWidget(background="w")
-        self.diag.setLabel("bottom", "incident energy (eV)"); self.diag.setLabel("left", "raw signal")
-        self.diag.addLegend(offset=(10, 10)); self.diag.getViewBox().disableAutoRange()
+        self.diag = make_plot(x="incident energy (eV)", y="raw signal", legend="inside")
+        self.diag.getViewBox().disableAutoRange()
         dc.body.addWidget(self.diag, 1)
         self.peaks_label = QLabel(""); self.peaks_label.setObjectName("muted"); self.peaks_label.setWordWrap(True)
         dc.body.addWidget(self.peaks_label)
@@ -124,6 +133,12 @@ class ComparePerspective(QWidget):
         self.deriv_smooth.valueChanged.connect(self.replot)
         library.changed.connect(self._fill_table)
         library.changed.connect(self.replot)
+        on_theme_changed(self, lambda _s: (self._fill_table(), self.replot(), self._draw_diagnostics()))
+        # Easy mode: John Bussey's Compare (saved spectra, show / fit / label / signal / shift, x range, export)
+        h, o = self.head_buttons, self.op_buttons
+        mark_advanced(h["Add CSV…"], h["References…"], h["Save config…"], h["Load config…"], o["Remove sample"],
+                      o["Rename"], o["Duplicate"], self.range_row, self.plot_opts, self.peaks_row)
+        mark_advanced_column(self.table, *ADVANCED_COLS)
 
     # ------------------------------------------------------------------ table
     def _fill_table(self) -> None:
@@ -137,9 +152,8 @@ class ComparePerspective(QWidget):
                 if c in BOOL_COLS:
                     it.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                     it.setCheckState(Qt.Checked if v else Qt.Unchecked)
-                if c == 1:
-                    from PySide6.QtGui import QBrush, QColor
-                    it.setForeground(QBrush(QColor(r.colour or "#000000")))
+                if c == 1:                                 # ink text plus the series swatch (never coloured text)
+                    it.setIcon(swatch_icon(r.colour or curve(i), dash(i)))
                 self.table.setItem(i, c, it)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -301,25 +315,28 @@ class ComparePerspective(QWidget):
         offsets = stack_offsets([r for r, _, _ in items], self.spacing.value())
         xr = self._xrange()
         xs, ys, failed, peaks_txt = [], [], [], []
-        for i, ((r, s, nr), off) in enumerate(zip(items, offsets)):
+        rows = {id(r): k for k, r in enumerate(self.lib.requests)}
+        for (r, s, nr), off in zip(items, offsets):
+            i = rows.get(id(r), 0)                      # the table row: same colour and dash as its swatch
             E = s.E + r.shift
             base = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
             y = base + off
             if not np.isfinite(base).any():
                 failed.append(r.label); continue
-            pen = pg.mkPen(r.colour or "#000000", width=1.4, style=DASH[i % len(DASH)])
+            colour = r.colour or curve(i)
+            pen = pg.mkPen(colour, width=1.4, style=dash(i))
             self.plot.plot(E, y, pen=pen, connect="finite")
             sel = np.isfinite(y) & ((E >= xr[0]) & (E <= xr[1]) if xr else True)
             if sel.any():
                 xs += [float(E[sel].min()), float(E[sel].max())]; ys.append(y[sel])
                 if self.labels_on.isChecked():
-                    t = pg.TextItem(r.label + (f" ({r.signal})" if self.signal_in_label.isChecked() else ""), color=r.colour or "#000000", anchor=(1, 0.5))
+                    t = pg.TextItem(r.label + (f" ({r.signal})" if self.signal_in_label.isChecked() else ""), color=label_for(colour), anchor=(1, 0.5))
                     t.setPos(float(E[sel].max()), float(y[sel][-1]))
                     self.plot.addItem(t, ignoreBounds=True)
             if self.show_peaks.isChecked():
                 pk = local_peaks(E, base, self.prominence.value(), int(self.distance.value()))
                 if pk:
-                    self.plot.addItem(pg.ScatterPlotItem([p[0] for p in pk], [p[1] + off for p in pk], size=7, brush=pg.mkBrush(r.colour or "#000"), pen=None), ignoreBounds=True)
+                    self.plot.addItem(pg.ScatterPlotItem([p[0] for p in pk], [p[1] + off for p in pk], size=7, brush=pg.mkBrush(colour), pen=None), ignoreBounds=True)
                     peaks_txt.append(f"{r.label}: " + ", ".join(f"{p[0]:.1f}" for p in pk))
         if xs and ys:
             v = np.concatenate(ys)
@@ -357,13 +374,13 @@ class ComparePerspective(QWidget):
         from aurora.core.compare import process
         nr = process(s, r)
         E = s.E + r.shift
-        self.diag.plot(E, s.y, pen=pg.mkPen("#15213B", width=1.4), connect="finite", name="raw signal")
+        self.diag.plot(E, s.y, pen=role_pen("raw", 1.4), connect="finite", name="raw signal")
         if nr.pre_line is not None:
-            self.diag.plot(E, nr.pre_line, pen=pg.mkPen("#E69F00", style=Qt.DashLine), name="pre-edge line")
+            self.diag.plot(E, nr.pre_line, pen=role_pen("pre", 1.2), name="pre-edge line")
         if nr.post_line is not None:
-            self.diag.plot(E, nr.post_line, pen=pg.mkPen("#0072B2", style=Qt.DashLine), name="post-edge line")
+            self.diag.plot(E, nr.post_line, pen=role_pen("post", 1.2), name="post-edge line")
         if np.isfinite(nr.e0):
-            self.diag.addItem(pg.InfiniteLine(nr.e0, angle=90, pen=pg.mkPen("#A78BFA", style=Qt.DotLine)), ignoreBounds=True)
+            self.diag.addItem(pg.InfiniteLine(nr.e0, angle=90, pen=role_pen("e0", 1.2)), ignoreBounds=True)
         fin = np.isfinite(s.y)
         if fin.any():
             self.diag.getViewBox().setRange(xRange=(float(E[fin].min()), float(E[fin].max())),

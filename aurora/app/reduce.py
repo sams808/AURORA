@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBo
                                QVBoxLayout, QWidget)
 
 from aurora.app.mapview import MapView, TOOLS
-from aurora.app.preview import PAL, PreviewPlot
+from aurora.app.mode import mark_advanced
+from aurora.app.preview import PreviewPlot
 from aurora.app.session import Session
-from aurora.app.theme import TOKENS
+from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.widgets import Card, Worker
 from aurora.core.constants import DETS
 from aurora.core.io.config import ScanSettings, Zone
@@ -107,6 +108,7 @@ class ScanSettingsCard(Card):
 
     def _changed(self, *_) -> None:
         s = self.s
+        before = s.to_json()
         s.include = self.inc.isChecked()
         s.sdd = [c.isChecked() for c in self.sdd]
         s.line = self.line.currentText()
@@ -118,7 +120,8 @@ class ScanSettingsCard(Card):
         s.i0_source = self.i0src.currentData()
         s.pre = self._parse(self.pre.text())
         s.post = self._parse(self.post.text())
-        self.session.touch()
+        if s.to_json() != before:              # a focus-out with nothing changed (e.g. hidden by a mode switch) writes nothing
+            self.session.touch()
 
 
 class ReducePerspective(QWidget):
@@ -171,19 +174,25 @@ class ReducePerspective(QWidget):
         centre = Card("Stack map")
         tools = QHBoxLayout()
         self.tool_group = QButtonGroup(self)
+        self.tool_buttons: dict[str, QToolButton] = {}
         for i, t in enumerate(TOOLS):
             b = QToolButton(); b.setText(t); b.setCheckable(True); b.setChecked(i == 1)
             b.setToolTip({"navigate": "zoom / pan", "rect+": "drag a rectangle to add to the zone (a new zone if none is selected)",
                           "rect-": "drag a rectangle to remove from the zone", "brush+": "click / drag to paint pixels",
                           "brush-": "click / drag to erase pixels"}[t])
             self.tool_group.addButton(b, i); tools.addWidget(b)
+            self.tool_buttons[t] = b
         self.tool_group.idClicked.connect(lambda i: self.map.set_tool(TOOLS[i]))
-        tools.addWidget(QLabel("brush"))
-        self.brush_n = QSpinBox(); self.brush_n.setRange(1, 9); self.brush_n.setValue(1); tools.addWidget(self.brush_n)
-        self.target_new = QCheckBox("rect+ starts a new zone"); tools.addWidget(self.target_new)
+        self.brush_box = QWidget()                      # brush size and 'rect+ starts a new zone': Advanced
+        bl = QHBoxLayout(self.brush_box); bl.setContentsMargins(0, 0, 0, 0)
+        bl.addWidget(QLabel("brush"))
+        self.brush_n = QSpinBox(); self.brush_n.setRange(1, 9); self.brush_n.setValue(1); bl.addWidget(self.brush_n)
+        self.target_new = QCheckBox("rect+ starts a new zone"); bl.addWidget(self.target_new)
+        tools.addWidget(self.brush_box)
         tools.addStretch(1)
         centre.body.addLayout(tools)
-        show = QHBoxLayout()
+        self.show_row = QWidget()                       # map line / SDD / mode / energy / I0 / log: Advanced
+        show = QHBoxLayout(self.show_row); show.setContentsMargins(0, 0, 0, 0)
         show.addWidget(QLabel("show"))
         self.map_line = QComboBox(); self.map_line.setMinimumWidth(90); show.addWidget(self.map_line)
         self.map_sdd = QComboBox(); self.map_sdd.addItems(["sum", "SDD1", "SDD2", "SDD3", "SDD4"]); show.addWidget(self.map_sdd)
@@ -195,7 +204,7 @@ class ReducePerspective(QWidget):
         self.map_i0 = QCheckBox("/ I0"); self.map_i0.setChecked(True); show.addWidget(self.map_i0)
         self.map_log = QCheckBox("log"); show.addWidget(self.map_log)
         show.addStretch(1)
-        centre.body.addLayout(show)
+        centre.body.addWidget(self.show_row)
         self.map = MapView()
         self.map.set_tool("rect+")
         self.map.rect_drawn.connect(self._rect)
@@ -213,13 +222,17 @@ class ReducePerspective(QWidget):
         zr.addWidget(QLabel("label"))
         self.z_label = QComboBox(); self.z_label.setEditable(True); self.z_label.setMinimumWidth(160)
         zr.addWidget(self.z_label, 1)
-        zr.addWidget(QLabel("group"))
-        self.z_group = QComboBox(); self.z_group.setEditable(True); zr.addWidget(self.z_group, 1)
+        self.group_box = QWidget()                      # group and comment fields: Advanced
+        gl = QHBoxLayout(self.group_box); gl.setContentsMargins(0, 0, 0, 0)
+        gl.addWidget(QLabel("group"))
+        self.z_group = QComboBox(); self.z_group.setEditable(True); gl.addWidget(self.z_group, 1)
+        zr.addWidget(self.group_box, 1)
         self.zone_card.body.addLayout(zr)
-        zr2 = QHBoxLayout()
+        self.comment_box = QWidget()
+        zr2 = QHBoxLayout(self.comment_box); zr2.setContentsMargins(0, 0, 0, 0)
         zr2.addWidget(QLabel("comment"))
         self.z_comment = QLineEdit(); zr2.addWidget(self.z_comment, 1)
-        self.zone_card.body.addLayout(zr2)
+        self.zone_card.body.addWidget(self.comment_box)
         self.z_info = QLabel(""); self.z_info.setObjectName("muted"); self.z_info.setWordWrap(True)
         self.zone_card.body.addWidget(self.z_info)
         zb2 = QHBoxLayout()
@@ -262,6 +275,11 @@ class ReducePerspective(QWidget):
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(self._zone_selected)
         session.stack_selected.connect(self._stack_selected)
+        on_theme_changed(self, lambda _s: (self.redraw_map(), refill_tones(self.scan_list)))
+        # Easy mode: John Bussey's basic path (scan, region, preview); everything else is Advanced
+        mark_advanced(self.load_all_btn, self.propose_btn, self.stitch_btn, self.tool_buttons["rect-"],
+                      self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.show_row,
+                      self.group_box, self.comment_box, self.send_btn, self.cards_area)
 
     # ------------------------------------------------------------------ holder / scans
     def _holder_changed(self, key: str) -> None:
@@ -272,7 +290,7 @@ class ReducePerspective(QWidget):
             it = QListWidgetItem(f"{s.time}  {s.label}  ·  {s.edge_text}  {s.energy_text}" + (f"   [{flags}]" if flags else ""))
             it.setData(Qt.UserRole, self.session.stack_id(s))
             if flags:
-                it.setForeground(Qt.darkYellow)
+                set_item_tone(it, "warn")
             self.scan_list.addItem(it)
         self.scan_list.blockSignals(False)
         self._fill_zone_list()
@@ -379,10 +397,10 @@ class ReducePerspective(QWidget):
         hz = self.session.holder_zones(create=False)
         for i, z in enumerate(hz.zones if hz else []):
             sel = z.id == self.session.current_zone
-            self.map.draw_zone(z, PAL[i % len(PAL)], selected=sel)
+            self.map.draw_zone(z, curve(i), selected=sel)
             if sel:
                 pix = members(z, sd.x, sd.y, sd.pitch)
-                self.map.draw_pixels(sd.x[pix], sd.y[pix], sd.pitch, PAL[i % len(PAL)])
+                self.map.draw_pixels(sd.x[pix], sd.y[pix], sd.pitch, curve(i))
         self.map_hint.setText(f"{sd.name}: {sd.n_energies} energies x {sd.n_pix} px, pitch {sd.pitch[0]:.3f} x {sd.pitch[1]:.3f} mm, "
                               f"main line {sd.main}" + (f", edge {sd.edge_text} {sd.edge_ev:.1f} eV" if sd.edge_ev else "") + f" · {sd.source}")
 
@@ -548,6 +566,7 @@ class ReducePerspective(QWidget):
         z = self.session.zone()
         if z is None:
             return
+        before = (z.label, z.group, z.comment)
         z.label = self.z_label.currentText().strip() or z.label
         z.group = self.z_group.currentText().strip()
         z.comment = self.z_comment.text().strip()
@@ -556,7 +575,8 @@ class ReducePerspective(QWidget):
             if m:
                 z.group = m.group
                 self.z_group.setEditText(z.group)
-        self.session.touch()
+        if (z.label, z.group, z.comment) != before:     # nothing changed: nothing written
+            self.session.touch()
 
     # ------------------------------------------------------------------ per-scan settings
     def _clear_cards(self) -> None:

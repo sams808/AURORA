@@ -24,7 +24,7 @@ from aurora.app.settings import recent_projects
 from aurora.app.settings_dialog import SettingsDialog, get as setting
 from aurora.app.survey import SurveyPerspective
 from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
-from aurora.app.theme import TOKENS, apply_theme, follow_system
+from aurora.app.theme import TOKENS, apply_theme, follow_system, on_theme_changed
 from aurora.app import mode as ui_mode
 
 PERSPECTIVES = [
@@ -33,6 +33,7 @@ PERSPECTIVES = [
 ]
 # perspectives shown only in Advanced mode (Easy mode = John Bussey's basic path: reduce, check, compare, fit, report)
 ADVANCED_PERSPECTIVES = {"maps"}
+MODE_STATUS = {False: "Easy mode: the basic path of John Bussey's GUI", True: "Advanced mode: every option"}
 
 
 class Placeholder(QWidget):
@@ -112,7 +113,11 @@ class MainWindow(QMainWindow):
 
         self._menus()
         self._help = None
+        for key in sorted(ADVANCED_PERSPECTIVES):
+            ui_mode.mark_advanced_perspective(key)
+        self._mode_seen: bool | None = None
         ui_mode.on_mode_changed(self, self._mode_changed)
+        on_theme_changed(self, lambda _s: self._rail_icons())
         self.show_perspective("home")
 
     # ------------------------------------------------------------------ chrome
@@ -154,7 +159,8 @@ class MainWindow(QMainWindow):
             b = QToolButton()
             b.setObjectName("railbtn")
             b.setText(title)
-            b.setIcon(two_state_icon(key, TOKENS["rail_text"], TOKENS["night"]))
+            b.setProperty("aurora_icon", key)
+            b.setIcon(two_state_icon(key, TOKENS["rail_text"], TOKENS["on_accent"]))
             b.setIconSize(QSize(22, 22))
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             b.setCheckable(True)
@@ -166,7 +172,9 @@ class MainWindow(QMainWindow):
         b = QToolButton()
         b.setObjectName("railbtn")
         b.setText("Settings")
-        b.setIcon(two_state_icon("settings", TOKENS["rail_text"], TOKENS["night"]))
+        b.setProperty("aurora_icon", "settings")
+        b.setIcon(two_state_icon("settings", TOKENS["rail_text"], TOKENS["on_accent"]))
+        self.settings_rail_btn = b
         b.setIconSize(QSize(22, 22))
         b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         b.clicked.connect(self.show_settings)
@@ -269,6 +277,23 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.pages[key])
         self.rail_buttons[key].setChecked(True)
 
+    def go_to(self, key: str) -> bool:
+        """Open a perspective from a shortcut or a link: one hidden in Easy mode answers with a status hint."""
+        if ui_mode.perspective_hidden(key):
+            self.statusBar().showMessage(self.perspective_hint(key), 6000)
+            return False
+        self.show_perspective(key)
+        return True
+
+    @staticmethod
+    def perspective_hint(key: str) -> str:
+        title = dict(PERSPECTIVES).get(key, key)
+        return f"{title} is part of Advanced mode (Ctrl+Shift+A)"
+
+    def _rail_icons(self) -> None:
+        for b in list(self.rail_buttons.values()) + [self.settings_rail_btn]:
+            b.setIcon(two_state_icon(b.property("aurora_icon"), TOKENS["rail_text"], TOKENS["on_accent"]))
+
     def toggle_fullscreen(self) -> None:
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
 
@@ -288,14 +313,19 @@ class MainWindow(QMainWindow):
         self.mode_action.blockSignals(True)
         self.mode_action.setChecked(advanced)
         self.mode_action.blockSignals(False)
-        for key in ADVANCED_PERSPECTIVES:
+        hidden = ui_mode.advanced_perspectives() | ADVANCED_PERSPECTIVES
+        for key in hidden:
             if key in self.rail_buttons:
                 self.rail_buttons[key].setVisible(advanced)
+            a = getattr(self, "goto_actions", {}).get(key)       # View > Go to (when the menu has it)
+            if a is not None:
+                a.setVisible(advanced)
         current = next((k for k, w in self.pages.items() if w is self.stack.currentWidget()), "home")
-        if not advanced and current in ADVANCED_PERSPECTIVES:
+        if not advanced and current in hidden:
             self.show_perspective("home")
-        self.statusBar().showMessage("Advanced mode: every option" if advanced else
-                                     "Easy mode: the basic path (Advanced mode in the top bar shows every option)", 5000)
+        if self._mode_seen is not None and self._mode_seen != advanced:
+            self.statusBar().showMessage(MODE_STATUS[advanced], 5000)
+        self._mode_seen = advanced
 
     def _sync_view_actions(self) -> None:
         from aurora.app.settings_dialog import get

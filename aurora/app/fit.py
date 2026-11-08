@@ -11,9 +11,15 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QTabWidget, QVBoxLayout, QWidget)
 
 from aurora.app.library import Library
-from aurora.app.preview import DASH, PAL
+from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
+from aurora.app.theme import curve, dash, make_plot, on_theme_changed, role_pen
 from aurora.app.widgets import Card
 from aurora.core.fit import LcfResult, McrResult, PcaResult, itfa, lcf, mcr_als, pca, prepare_matrix
+
+
+def _component_index(i: int) -> int:
+    """Series index of fitted component i: CURVES[1] (dashed) is the fit itself, so components skip it."""
+    return i if i == 0 else i + 1
 
 
 def _set_range(plot, xs, ys) -> None:
@@ -33,6 +39,9 @@ class FitPerspective(QWidget):
         self.mcr_result: McrResult | None = None
         self.itfa_result: McrResult | None = None
         self._mcr_labels: list[str] = []
+        self._lcf_names = None
+        self._mcr_E = None
+        self._comp_name = "MCR-ALS"
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -42,12 +51,41 @@ class FitPerspective(QWidget):
         head.addWidget(h1); head.addWidget(sub); head.addStretch(1)
         root.addLayout(head)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._lcf_tab(), "LCF")
-        self.tabs.addTab(self._mcr_tab(), "PCA / MCR-ALS")
-        self.tabs.addTab(self._itfa_tab(), "ITFA")
-        self.tabs.addTab(self._peaks_tab(), "Peaks")
+        self.lcf_page, self.mcr_page, self.itfa_page, self.peaks_page = (self._lcf_tab(), self._mcr_tab(), self._itfa_tab(),
+                                                                         self._peaks_tab())
+        self.tabs.addTab(self.lcf_page, "LCF")
+        self.tabs.addTab(self.mcr_page, "PCA / MCR-ALS")
+        self.tabs.addTab(self.itfa_page, "ITFA")
+        self.tabs.addTab(self.peaks_page, "Peaks")
         root.addWidget(self.tabs, 1)
         library.changed.connect(self.refresh)
+        on_theme_changed(self, lambda _s: self.redraw())
+        # Easy mode: the LCF tab of John Bussey's GUI with fixed options shown read-only; MCR-ALS (his tab 5), ITFA
+        # (his tab 6), Peaks and the LCF options are Advanced
+        for page in (self.mcr_page, self.itfa_page, self.peaks_page):
+            mark_advanced_tab(self.tabs, page)
+        mark_advanced(self.lcf_options)
+        mark_easy(self.lcf_fixed)
+        for w in (self.sum_one, self.allow_neg):
+            w.toggled.connect(self._fixed_text)
+        self.bootstrap.valueChanged.connect(self._fixed_text)
+        self._fixed_text()
+
+    def _fixed_text(self, *_) -> None:
+        """The LCF options in force, shown read-only in Easy mode (the hidden widgets keep their values)."""
+        n = self.bootstrap.value()
+        parts = ["coefficients sum to 1" if self.sum_one.isChecked() else "coefficients free to sum to any value",
+                 "negative coefficients allowed" if self.allow_neg.isChecked() else "no negative coefficients",
+                 f"± from {n} bootstrap draws" if n else "no bootstrap"]
+        self.lcf_fixed.setText(" · ".join(parts))
+
+    def redraw(self) -> None:
+        """Draw every result again with the current colours (after a theme change)."""
+        self._draw_lcf()
+        self._draw_pca()
+        self._draw_components()
+        self._draw_itfa()
+        self._draw_peaks()
 
     # ------------------------------------------------------------------ data
     def fit_rows(self):
@@ -94,19 +132,24 @@ class FitPerspective(QWidget):
         rng = QHBoxLayout(); rng.addWidget(QLabel("fit range (eV)"))
         self.lcf_lo = QLineEdit(); self.lcf_lo.setPlaceholderText("auto"); self.lcf_hi = QLineEdit(); self.lcf_hi.setPlaceholderText("auto")
         rng.addWidget(self.lcf_lo); rng.addWidget(self.lcf_hi); left.body.addLayout(rng)
-        self.sum_one = QCheckBox("force coefficients to sum to 1"); self.sum_one.setChecked(True); left.body.addWidget(self.sum_one)
-        self.allow_neg = QCheckBox("allow negative coefficients"); left.body.addWidget(self.allow_neg)
+        self.lcf_options = QWidget()                   # sum to 1, negatives, bootstrap count: Advanced
+        ol = QVBoxLayout(self.lcf_options); ol.setContentsMargins(0, 0, 0, 0)
+        self.sum_one = QCheckBox("force coefficients to sum to 1"); self.sum_one.setChecked(True); ol.addWidget(self.sum_one)
+        self.allow_neg = QCheckBox("allow negative coefficients"); ol.addWidget(self.allow_neg)
         bs = QHBoxLayout(); bs.addWidget(QLabel("bootstrap draws")); self.bootstrap = QSpinBox(); self.bootstrap.setRange(0, 5000); self.bootstrap.setValue(200); bs.addWidget(self.bootstrap); bs.addStretch(1)
-        left.body.addLayout(bs)
+        ol.addLayout(bs)
+        left.body.addWidget(self.lcf_options)
+        self.lcf_fixed = QLabel(""); self.lcf_fixed.setObjectName("muted"); self.lcf_fixed.setWordWrap(True)
+        left.body.addWidget(self.lcf_fixed)
         b = QPushButton("Run LCF"); b.setObjectName("primary"); b.clicked.connect(self.run_lcf); left.body.addWidget(b)
+        self.lcf_btn = b
         self.lcf_table = QTableWidget(0, 3); self.lcf_table.setHorizontalHeaderLabels(["component", "coefficient", "± (bootstrap)"])
         left.body.addWidget(self.lcf_table, 1)
         self.lcf_info = QLabel(""); self.lcf_info.setObjectName("muted"); self.lcf_info.setWordWrap(True); left.body.addWidget(self.lcf_info)
         eb = QPushButton("Export figure + coefficients…"); eb.clicked.connect(self._export_lcf); left.body.addWidget(eb)
         lay.addWidget(left, 1)
         pc = Card("Target, fit and residual")
-        self.lcf_plot = pg.PlotWidget(background="w"); self.lcf_plot.addLegend(offset=(10, 10)); self.lcf_plot.getViewBox().disableAutoRange()
-        self.lcf_plot.setLabel("bottom", "energy (eV)")
+        self.lcf_plot = make_plot(x="energy (eV)", legend="inside"); self.lcf_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.lcf_plot, 1)
         lay.addWidget(pc, 2)
         return w
@@ -132,13 +175,21 @@ class FitPerspective(QWidget):
         self.lcf_table.resizeColumnsToContents()
         self.lcf_info.setText(f"RMSE {r.rmse:.4g} · R-factor {r.r_factor:.3g} · sum of coefficients {r.total:.3f} · {r.n_points} points · "
                               f"{r.E[0]:.1f}-{r.E[-1]:.1f} eV")
+        self._draw_lcf()
+
+    def _draw_lcf(self) -> None:
+        r = self.lcf_result
         self.lcf_plot.clear(); self.lcf_plot.plotItem.legend.clear()
-        self.lcf_plot.plot(r.E, r.target, pen=pg.mkPen("#15213B", width=2), name=f"target {tname}")
-        self.lcf_plot.plot(r.E, r.fit, pen=pg.mkPen("#D55E00", width=1.6, style=Qt.DashLine), name="linear combination")
+        if r is None or self._lcf_names is None:
+            return
+        tname, comps = self._lcf_names
+        self.lcf_plot.plot(r.E, r.target, pen=role_pen("target", 2), name=f"target {tname}")
+        self.lcf_plot.plot(r.E, r.fit, pen=role_pen("fit", 1.6), name="linear combination")
         for i, c in enumerate(comps):
-            self.lcf_plot.plot(r.E, r.coefficients[i] * r.components[i], pen=pg.mkPen(PAL[i % len(PAL)], width=1, style=DASH[i % len(DASH)]), name=f"{r.coefficients[i]:.2f} x {c}")
+            k = _component_index(i)
+            self.lcf_plot.plot(r.E, r.coefficients[i] * r.components[i], pen=pg.mkPen(curve(k), width=1, style=dash(k)), name=f"{r.coefficients[i]:.2f} x {c}")
         resid = r.target - r.fit - 0.2 * (np.nanmax(r.target) - np.nanmin(r.target))
-        self.lcf_plot.plot(r.E, resid, pen=pg.mkPen("#5B6B8C", width=1), name="residual (offset)")
+        self.lcf_plot.plot(r.E, resid, pen=role_pen("resid", 1), name="residual (offset)")
         _set_range(self.lcf_plot, [float(r.E[0]), float(r.E[-1])], [r.target, r.fit, resid])
 
     def _export_lcf(self) -> None:
@@ -183,15 +234,14 @@ class FitPerspective(QWidget):
         b2 = QPushButton("Run MCR-ALS"); b2.setObjectName("primary"); b2.clicked.connect(self.run_mcr); bb.addWidget(b2)
         b3 = QPushButton("Export…"); b3.clicked.connect(self._export_mcr); bb.addWidget(b3)
         left.body.addLayout(bb)
-        self.scree = pg.PlotWidget(background="w"); self.scree.setLabel("bottom", "PCA component"); self.scree.setLabel("left", "explained variance (%)")
+        self.scree = make_plot(x="PCA component", y="explained variance (%)")
         self.scree.getViewBox().disableAutoRange()
         left.body.addWidget(self.scree, 1)
         self.prop_table = QTableWidget(0, 1); left.body.addWidget(self.prop_table, 1)
         self.mcr_status = QLabel(""); self.mcr_status.setObjectName("muted"); self.mcr_status.setWordWrap(True); left.body.addWidget(self.mcr_status)
         lay.addWidget(left, 1)
         pc = Card("Component spectra")
-        self.comp_plot = pg.PlotWidget(background="w"); self.comp_plot.addLegend(offset=(10, 10)); self.comp_plot.getViewBox().disableAutoRange()
-        self.comp_plot.setLabel("bottom", "energy (eV)")
+        self.comp_plot = make_plot(x="energy (eV)", legend="inside"); self.comp_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.comp_plot, 1)
         lay.addWidget(pc, 2)
         return w
@@ -210,12 +260,18 @@ class FitPerspective(QWidget):
             self.mcr_status.setText(str(err)); return
         p = pca(D)
         self.pca_result = p
-        self.scree.clear()
-        k = np.arange(1, len(p.explained) + 1)
-        self.scree.plot(k, 100 * p.explained, pen=pg.mkPen("#0072B2", width=1.5), symbol="o", symbolBrush="#0072B2", symbolSize=7)
-        self.scree.plot(k, 100 * p.cumulative, pen=pg.mkPen("#E69F00", width=1.2, style=Qt.DashLine), symbol="s", symbolBrush="#E69F00", symbolSize=6)
-        self.scree.getViewBox().setRange(xRange=(0.5, len(k) + 0.5), yRange=(0, 100), padding=0.05, disableAutoRange=True)
+        self._draw_pca()
         self.mcr_status.setText("PCA: " + ", ".join(f"PC{i + 1} {100 * v:.1f} %" for i, v in enumerate(p.explained[:6])))
+
+    def _draw_pca(self) -> None:
+        self.scree.clear()
+        p = self.pca_result
+        if p is None:
+            return
+        k = np.arange(1, len(p.explained) + 1)
+        self.scree.plot(k, 100 * p.explained, pen=pg.mkPen(curve(0), width=1.5), symbol="o", symbolBrush=curve(0), symbolSize=7)
+        self.scree.plot(k, 100 * p.cumulative, pen=pg.mkPen(curve(1), width=1.2, style=Qt.DashLine), symbol="s", symbolBrush=curve(1), symbolSize=6)
+        self.scree.getViewBox().setRange(xRange=(0.5, len(k) + 0.5), yRange=(0, 100), padding=0.05, disableAutoRange=True)
 
     def run_mcr(self) -> None:
         try:
@@ -229,12 +285,19 @@ class FitPerspective(QWidget):
         self.mcr_status.setText(f"MCR-ALS: {len(labels)} spectra, {k} components, RMSE {m.rmse:.4g}, {m.n_iter} iterations"
                                 + ("" if m.converged else " (max iterations reached, not converged)"))
 
-    def _show_components(self, m: McrResult, E, labels, name: str) -> None:
+    def _draw_components(self) -> None:
         self.comp_plot.clear(); self.comp_plot.plotItem.legend.clear()
-        k = m.ST.shape[0]
-        for i in range(k):
-            self.comp_plot.plot(E, m.ST[i], pen=pg.mkPen(PAL[i % len(PAL)], width=1.6, style=DASH[i % len(DASH)]), name=f"{name} component {i + 1}")
+        m, E = self.mcr_result, self._mcr_E
+        if m is None or E is None:
+            return
+        for i in range(m.ST.shape[0]):
+            self.comp_plot.plot(E, m.ST[i], pen=pg.mkPen(curve(i), width=1.6, style=dash(i)), name=f"{self._comp_name} component {i + 1}")
         _set_range(self.comp_plot, [float(E[0]), float(E[-1])], [m.ST])
+
+    def _show_components(self, m: McrResult, E, labels, name: str) -> None:
+        self._comp_name = name
+        self._draw_components()
+        k = m.ST.shape[0]
         props = m.proportions
         self.prop_table.setRowCount(len(labels)); self.prop_table.setColumnCount(k)
         self.prop_table.setHorizontalHeaderLabels([f"comp {i + 1} %" for i in range(k)])
@@ -290,7 +353,7 @@ class FitPerspective(QWidget):
         self.itfa_status = QLabel(""); self.itfa_status.setObjectName("muted"); self.itfa_status.setWordWrap(True); left.body.addWidget(self.itfa_status)
         lay.addWidget(left, 1)
         pc = Card("ITFA targeted component spectra")
-        self.itfa_plot = pg.PlotWidget(background="w"); self.itfa_plot.addLegend(offset=(10, 10)); self.itfa_plot.getViewBox().disableAutoRange()
+        self.itfa_plot = make_plot(x="energy (eV)", legend="inside"); self.itfa_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.itfa_plot, 1)
         self.itfa_table = QTableWidget(0, 1); pc.body.addWidget(self.itfa_table, 1)
         lay.addWidget(pc, 2)
@@ -332,10 +395,7 @@ class FitPerspective(QWidget):
             self.itfa_status.setText("add at least one anchored target"); return
         r = itfa(self._mcr_E * 0 + self._D_cache() if False else self._D_cache(), m, fixed, self.max_iter.value(), self.tol.value())
         self.itfa_result = r
-        self.itfa_plot.clear(); self.itfa_plot.plotItem.legend.clear()
-        for i in range(k):
-            self.itfa_plot.plot(self._mcr_E, r.ST[i], pen=pg.mkPen(PAL[i % len(PAL)], width=1.6, style=DASH[i % len(DASH)]), name=f"ITFA component {i + 1}")
-        _set_range(self.itfa_plot, [float(self._mcr_E[0]), float(self._mcr_E[-1])], [r.ST])
+        self._draw_itfa()
         props = r.proportions
         self.itfa_table.setRowCount(len(self._mcr_labels)); self.itfa_table.setColumnCount(k)
         self.itfa_table.setHorizontalHeaderLabels([f"comp {i + 1} %" for i in range(k)]); self.itfa_table.setVerticalHeaderLabels(self._mcr_labels)
@@ -343,6 +403,15 @@ class FitPerspective(QWidget):
             for c in range(k):
                 self.itfa_table.setItem(rr, c, QTableWidgetItem(f"{props[rr, c]:.1f}"))
         self.itfa_status.setText(f"ITFA: {r.n_iter} iterations, RMSE {r.rmse:.4g}, {len(fixed)} anchored sample(s)")
+
+    def _draw_itfa(self) -> None:
+        self.itfa_plot.clear(); self.itfa_plot.plotItem.legend.clear()
+        r = self.itfa_result
+        if r is None or self._mcr_E is None:
+            return
+        for i in range(r.ST.shape[0]):
+            self.itfa_plot.plot(self._mcr_E, r.ST[i], pen=pg.mkPen(curve(i), width=1.6, style=dash(i)), name=f"ITFA component {i + 1}")
+        _set_range(self.itfa_plot, [float(self._mcr_E[0]), float(self._mcr_E[-1])], [r.ST])
 
     # ------------------------------------------------------------------ peaks
     def _peaks_tab(self) -> QWidget:
@@ -365,8 +434,7 @@ class FitPerspective(QWidget):
         eb = QPushButton("Export…"); eb.clicked.connect(self._export_peaks); left.body.addWidget(eb)
         lay.addWidget(left, 1)
         pc = Card("Data, fit, components and residual")
-        self.pk_plot = pg.PlotWidget(background="w"); self.pk_plot.addLegend(offset=(10, 10)); self.pk_plot.getViewBox().disableAutoRange()
-        self.pk_plot.setLabel("bottom", "energy (eV)")
+        self.pk_plot = make_plot(x="energy (eV)", legend="inside"); self.pk_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.pk_plot, 1)
         lay.addWidget(pc, 2)
         self.peak_result = None
@@ -397,13 +465,20 @@ class FitPerspective(QWidget):
             self.pk_table.setItem(i, 2, QTableWidgetItem(f"{r.errors[k]:.2g}" if np.isfinite(r.errors[k]) else "-"))
         self.pk_table.resizeColumnsToContents()
         self.pk_info.setText(f"{'converged' if r.converged else 'NOT converged: ' + r.message} · RMSE {r.rmse:.4g} · {len(r.E)} points")
+        self._draw_peaks()
+
+    def _draw_peaks(self) -> None:
         self.pk_plot.clear(); self.pk_plot.plotItem.legend.clear()
-        self.pk_plot.plot(r.E, r.y, pen=pg.mkPen("#15213B", width=1.6), name=name)
-        self.pk_plot.plot(r.E, r.fit, pen=pg.mkPen("#D55E00", width=1.6, style=Qt.DashLine), name="fit")
+        r = self.peak_result
+        if r is None:
+            return
+        self.pk_plot.plot(r.E, r.y, pen=role_pen("ink", 1.6), name=self._pk_name)
+        self.pk_plot.plot(r.E, r.fit, pen=role_pen("fit", 1.6), name="fit")
         for i, (k, c) in enumerate(r.components.items()):
-            self.pk_plot.plot(r.E, c, pen=pg.mkPen(PAL[i % len(PAL)], width=1, style=DASH[i % len(DASH)]), name=k)
+            j = _component_index(i)
+            self.pk_plot.plot(r.E, c, pen=pg.mkPen(curve(j), width=1, style=dash(j)), name=k)
         resid = r.y - r.fit - 0.15 * (np.nanmax(r.y) - np.nanmin(r.y))
-        self.pk_plot.plot(r.E, resid, pen=pg.mkPen("#5B6B8C", width=1), name="residual (offset)")
+        self.pk_plot.plot(r.E, resid, pen=role_pen("resid", 1), name="residual (offset)")
         _set_range(self.pk_plot, [float(r.E[0]), float(r.E[-1])], [r.y, r.fit, resid])
 
     def _export_peaks(self) -> None:

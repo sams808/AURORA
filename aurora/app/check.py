@@ -8,9 +8,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QProgressBar,
                                QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from aurora.app.preview import PAL
+from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
-from aurora.app.theme import TOKENS
+from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, role_pen, set_item_tone,
+                              status_text)
 from aurora.app.widgets import Card, Worker
 from aurora.core.constants import DETS
 from aurora.core.qc import (CountRate, count_rate_probe, day_reference, i0_candidates, i0_check, saturation_check,
@@ -27,6 +28,7 @@ class CheckPerspective(QWidget):
         self._worker: Worker | None = None
         self._rates: dict[str, CountRate] = {}
         self._results: dict[str, dict] = {}
+        self._x_curves = None                 # last I0-explorer read (scan name, curves), redrawn on a theme change
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -65,17 +67,14 @@ class CheckPerspective(QWidget):
         self.i0_list = QListWidget()
         self.i0_list.itemChanged.connect(self._good_toggled)
         i0c.body.addWidget(self.i0_list, 1)
-        self.i0_plot = pg.PlotWidget(background="w")
-        self.i0_plot.setLabel("bottom", "energy (eV)"); self.i0_plot.setLabel("left", "I0")
+        self.i0_plot = make_plot(x="energy (eV)", y="I0")
         self.i0_plot.getViewBox().disableAutoRange()
         i0c.body.addWidget(self.i0_plot, 2)
         bottom.addWidget(i0c)
         sddc = Card("The four detectors on the selected zone")
         self.sdd_note = QLabel("select a zone in Reduce and a scan above"); self.sdd_note.setObjectName("muted"); self.sdd_note.setWordWrap(True)
         sddc.body.addWidget(self.sdd_note)
-        self.sdd_plot = pg.PlotWidget(background="w")
-        self.sdd_plot.setLabel("bottom", "energy (eV)"); self.sdd_plot.setLabel("left", "normalised (own range)")
-        self.sdd_plot.addLegend(offset=(10, 10))
+        self.sdd_plot = make_plot(x="energy (eV)", y="normalised (own range)", legend="inside")
         self.sdd_plot.getViewBox().disableAutoRange()
         sddc.body.addWidget(self.sdd_plot, 1)
         self.spike_note = QLabel(""); self.spike_note.setObjectName("muted"); self.spike_note.setWordWrap(True)
@@ -86,8 +85,8 @@ class CheckPerspective(QWidget):
         self.x_scan = QComboBox(); xrow.addWidget(self.x_scan, 1)
         xb = QPushButton("Read"); xb.clicked.connect(self.explore_i0); xrow.addWidget(xb)
         i0x.body.addLayout(xrow)
-        self.x_plot = pg.PlotWidget(background="w"); self.x_plot.setLabel("bottom", "energy (eV)"); self.x_plot.setLabel("left", "normalised to the median")
-        self.x_plot.addLegend(offset=(10, 10)); self.x_plot.getViewBox().disableAutoRange()
+        self.x_plot = make_plot(x="energy (eV)", y="normalised to the median", legend="inside")
+        self.x_plot.getViewBox().disableAutoRange()
         i0x.body.addWidget(self.x_plot, 1)
         self.x_note = QLabel(""); self.x_note.setObjectName("muted"); self.x_note.setWordWrap(True); i0x.body.addWidget(self.x_note)
         bottom.addWidget(i0x)
@@ -98,6 +97,18 @@ class CheckPerspective(QWidget):
         session.zone_selected.connect(lambda z: self._update_sdd())
         session.stack_selected.connect(lambda sd: self._update_sdd())
         session.zones_changed.connect(self._update_sdd)
+        on_theme_changed(self, lambda _s: self._theme_changed())
+        # Easy mode (until the 'Spectra to check' queue lands): the checks of the holder and the four-detector card;
+        # the good-I0 picker and the I0 explorer are Advanced
+        self.i0_card, self.sdd_card, self.explorer_card = i0c, sddc, i0x
+        mark_advanced(self.i0_card, self.explorer_card)
+
+    def _theme_changed(self) -> None:
+        refill_tones(self.table)
+        refill_tones(self.i0_list)
+        self._draw_i0()
+        self._update_sdd()
+        self._draw_x()
 
     # ------------------------------------------------------------------ run
     def _holder_changed(self, key: str) -> None:
@@ -117,22 +128,10 @@ class CheckPerspective(QWidget):
             return
         from aurora.core.qc import mcc_curves
         c = mcc_curves(self.session.project, scan)
-        self.x_plot.clear(); self.x_plot.plotItem.legend.clear()
+        self._x_curves = c
+        self._draw_x()
         if not c.E.size:
             self.x_note.setText("no mcc data read"); return
-
-        def med(a):
-            m = np.nanmedian(a) if np.isfinite(a).any() else 1.0
-            return m if m else 1.0
-
-        curves = [("mesh mcc1 (I0)", c.mesh / med(c.mesh), "#C8501E", Qt.SolidLine), ("photodiode mcc2", c.diode / med(c.diode), "#7f4fc9", Qt.DashLine),
-                  ("diode / mesh", c.ratio, "#2a8a4a", Qt.DotLine), ("TEY mcc4", c.tey / med(c.tey), "#444444", Qt.DashDotLine)]
-        ys = []
-        for label, y, col, st in curves:
-            self.x_plot.plot(c.E, y, pen=pg.mkPen(col, width=1.4, style=st), connect="finite", name=label); ys.append(y)
-        v = np.concatenate(ys); v = v[np.isfinite(v)]
-        if v.size:
-            self.x_plot.getViewBox().setRange(xRange=(float(c.E[0]), float(c.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
         r = c.ratio[np.isfinite(c.ratio)]
         if r.size:
             self.x_note.setText(f"{scan.name}: mesh level {np.nanmedian(c.mesh):.3g}, diode level {np.nanmedian(c.diode):.3g}; diode/mesh spans "
@@ -140,6 +139,27 @@ class CheckPerspective(QWidget):
                                 + (" (the mesh has its own spectral response: consider the diode or a good-I0 mean)" if r.max() - r.min() > 0.05 else ""))
         else:
             self.x_note.setText(f"{scan.name}: no finite ratio")
+
+    def _draw_x(self) -> None:
+        """The I0 explorer curves, with their colours read now (they follow a theme change)."""
+        self.x_plot.clear(); self.x_plot.plotItem.legend.clear()
+        c = self._x_curves
+        if c is None or not c.E.size:
+            return
+
+        def med(a):
+            m = np.nanmedian(a) if np.isfinite(a).any() else 1.0
+            return m if m else 1.0
+
+        curves = [("mesh mcc1 (I0)", c.mesh / med(c.mesh), pc("i0"), Qt.SolidLine),
+                  ("photodiode mcc2", c.diode / med(c.diode), pc("diode"), Qt.DashLine),
+                  ("diode / mesh", c.ratio, pc("ratio"), Qt.DotLine), ("TEY mcc4", c.tey / med(c.tey), pc("tey"), Qt.DashDotLine)]
+        ys = []
+        for label, y, col, st in curves:
+            self.x_plot.plot(c.E, y, pen=pg.mkPen(col, width=1.4, style=st), connect="finite", name=label); ys.append(y)
+        v = np.concatenate(ys); v = v[np.isfinite(v)]
+        if v.size:
+            self.x_plot.getViewBox().setRange(xRange=(float(c.E[0]), float(c.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
 
     def run_checks(self) -> None:
         if self.session.project is None or (self._worker is not None and self._worker.isRunning()):
@@ -224,8 +244,10 @@ class CheckPerspective(QWidget):
                 it = QTableWidgetItem(v)
                 if c == 0:
                     it.setData(Qt.UserRole, sid)
-                if (c == 5 and v == "invalid") or (c in (10, 11) and v):
-                    it.setForeground(Qt.red if c != 11 else Qt.darkYellow)
+                if c == 5 and v:                      # I0 verdict: icon plus word, never colour alone
+                    set_item_tone(it, "bad" if v == "invalid" else "ok")
+                elif c in (10, 11) and v:
+                    set_item_tone(it, "bad" if c == 10 else "warn")
                 self.table.setItem(r, c, it)
         self.table.resizeColumnsToContents()
 
@@ -245,12 +267,13 @@ class CheckPerspective(QWidget):
         self.i0_list.blockSignals(True)
         self.i0_list.clear()
         for c in self._cands:
+            tone = "ok" if c.looks_good else "warn"
             it = QListWidgetItem(f"{c.label}   level {c.level:.3g} · step {100 * c.max_step:.1f} % · rough {100 * c.rough:.1f} % · "
-                                 f"≤0: {c.nonpos}   {'looks good' if c.looks_good else 'check'}")
+                                 f"≤0: {c.nonpos}   {status_text(tone)[0]} {'looks good' if c.looks_good else 'check'}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if self.session.zones.good_i0.get(c.sid) else Qt.Unchecked)
             it.setData(Qt.UserRole, c.sid)
-            it.setForeground(Qt.darkGreen if c.looks_good else Qt.darkYellow)
+            set_item_tone(it, tone, icon=False)       # the check box sits where an icon would
             self.i0_list.addItem(it)
         self.i0_list.blockSignals(False)
         self._draw_i0()
@@ -276,7 +299,7 @@ class CheckPerspective(QWidget):
         for i, c in enumerate(cands):
             y = c.curve / c.level if (self.i0_norm.isChecked() and c.level) else c.curve
             good = bool(self.session.zones.good_i0.get(c.sid))
-            pen = pg.mkPen("#2a8a4a" if good else PAL[i % len(PAL)], width=2 if good else 1, style=Qt.SolidLine if good else Qt.DashLine)
+            pen = pg.mkPen(pc("good") if good else curve(i), width=2 if good else 1, style=Qt.SolidLine if good else Qt.DashLine)
             self.i0_plot.plot(c.E, y, pen=pen, connect="finite")
             xs += [float(c.E[0]), float(c.E[-1])]; ys.append(y)
             if good:
@@ -286,7 +309,7 @@ class CheckPerspective(QWidget):
             from aurora.core.zones import good_i0_curve
             m = good_i0_curve(E, curves)
             if m is not None:
-                self.i0_plot.plot(E, m, pen=pg.mkPen("#000000", width=2.5), connect="finite")
+                self.i0_plot.plot(E, m, pen=role_pen("ink", 2.5), connect="finite")
         vals = np.concatenate(ys); vals = vals[np.isfinite(vals)]
         if vals.size and xs:
             if self.i0_norm.isChecked():
@@ -315,14 +338,15 @@ class CheckPerspective(QWidget):
             self.sdd_note.setText("no pixel of this scan inside the zone")
             return
         res = self._results.get(sid)
-        sat = res["sat"].saturated if res else (sd and self.session.scan_of(sid).summary.get("sdd_saturated") or [])
+        scan = self.session.scan_of(sid)                  # None for a stitched stack
+        sat = res["sat"].saturated if res else (((scan.summary or {}) if scan is not None else {}).get("sdd_saturated") or [])
         c = sdd_consistency(t, sat)
         self.sdd_note.setText(f"{z.label} · {sid[11:]} · {t.n_pix} px, line {t.line}: {c.note}")
         if c.normalised is not None:
             xs = (float(c.energies[0]), float(c.energies[-1]))
             for k in range(4):
                 flagged = any(d == DETS[k] for d, _ in c.flags)
-                pen = pg.mkPen(PAL[k], width=2 if flagged else 1, style=[Qt.SolidLine, Qt.DashLine, Qt.DotLine, Qt.DashDotLine][k])
+                pen = pg.mkPen(curve(k), width=2 if flagged else 1, style=dash(k))
                 self.sdd_plot.plot(c.energies, c.normalised[:, k], pen=pen, name=f"SDD{k + 1}" + (" !" if flagged else ""))
             vals = c.normalised[np.isfinite(c.normalised)]
             self.sdd_plot.getViewBox().setRange(xRange=xs, yRange=(float(vals.min()), float(vals.max())), padding=0.05, disableAutoRange=True)

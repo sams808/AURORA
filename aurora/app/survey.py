@@ -9,13 +9,41 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app.mapview import MapView
-from aurora.app.preview import PAL
+from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
-from aurora.app.theme import TOKENS
+from aurora.app.theme import FOOTPRINTS, curve, on_theme_changed, swatch_icon
 from aurora.app.widgets import Card
 from aurora.core.model import ScanInfo
 
-STATUS_COLOUR = {"complete": "#F2A65A", "aborted": "#ff5555", "in_progress": "#A78BFA", "test": "#5B6B8C"}
+FOOTPRINT_LABELS = {"complete": "complete", "aborted": "aborted", "in_progress": "in progress", "test": "test"}
+
+
+class FootprintLegend(QWidget):
+    """The small legend of the scan footprints: colour and dash per status (never colour alone)."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        cap = QLabel("footprints:"); cap.setObjectName("muted")
+        lay.addWidget(cap)
+        self._icons: dict[str, QLabel] = {}
+        for status, text in FOOTPRINT_LABELS.items():
+            ic = QLabel()
+            self._icons[status] = ic
+            lay.addWidget(ic)
+            t = QLabel(text); t.setObjectName("muted")
+            lay.addWidget(t)
+            lay.addSpacing(6)
+        lay.addStretch(1)
+        self.refresh()
+        on_theme_changed(self, lambda _s: self.refresh())
+
+    def refresh(self) -> None:
+        for status, ic in self._icons.items():
+            colour, style = FOOTPRINTS[status]
+            ic.setPixmap(swatch_icon(colour, style, 12).pixmap(12, 12))
 
 
 class SurveyPerspective(QWidget):
@@ -48,7 +76,8 @@ class SurveyPerspective(QWidget):
 
         split = QSplitter(Qt.Horizontal)
         left = Card("Survey map")
-        opts = QHBoxLayout()
+        self.options_row = QWidget()                   # channel, SDD, / I0, log, invert, clip, overlays: Advanced
+        opts = QHBoxLayout(self.options_row); opts.setContentsMargins(0, 0, 0, 0)
         opts.addWidget(QLabel("channel"))
         self.channel = QComboBox(); opts.addWidget(self.channel)
         opts.addWidget(QLabel("SDD"))
@@ -61,13 +90,15 @@ class SurveyPerspective(QWidget):
         self.show_footprints = QCheckBox("footprints"); self.show_footprints.setChecked(True); opts.addWidget(self.show_footprints)
         self.show_zones = QCheckBox("zones"); self.show_zones.setChecked(True); opts.addWidget(self.show_zones)
         opts.addStretch(1)
-        left.body.addLayout(opts)
+        left.body.addWidget(self.options_row)
         self.map = MapView()
         self.map.hovered.connect(self._hover)
         self.map.clicked.connect(self._clicked)
         left.body.addWidget(self.map, 1)
         self.hint = QLabel(""); self.hint.setObjectName("muted")
         left.body.addWidget(self.hint)
+        self.footprint_legend = FootprintLegend()
+        left.body.addWidget(self.footprint_legend)
         split.addWidget(left)
 
         right = QSplitter(Qt.Vertical)
@@ -108,6 +139,9 @@ class SurveyPerspective(QWidget):
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(lambda z: self._highlight_zone())
+        on_theme_changed(self, lambda _s: self.redraw_map())
+        # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
+        mark_advanced(self.options_row, self.import_btn, self.export_btn)
 
     # ------------------------------------------------------------------ wiring
     def _project_changed(self, project) -> None:
@@ -169,14 +203,14 @@ class SurveyPerspective(QWidget):
                 box = self._bbox(s)
                 if box is None:
                     continue
-                col = STATUS_COLOUR.get(s.status, "#F2A65A")
+                col, style = FOOTPRINTS.get(s.status, FOOTPRINTS["complete"])
                 sel = self.session.stack_id(s) == self.session.current_stack
-                self.map.add_rect(*box, col, 2.5 if sel else 1.2, dashed=s.status != "complete")
+                self.map.add_rect(*box, col, 2.5 if sel else 1.2, style=style)
                 self.map.add_label(box[0], box[3], f"{s.time} {s.label}", col)
         if self.show_zones.isChecked():
             hz = self.session.holder_zones(create=False)
             for i, z in enumerate(hz.zones if hz else []):
-                self.map.draw_zone(z, PAL[i % len(PAL)], selected=(z.id == self.session.current_zone))
+                self.map.draw_zone(z, curve(i), selected=(z.id == self.session.current_zone))
         note = "; ".join(sv.notes)
         self.hint.setText(f"{sv.n} points at {sv.energy:.1f} eV, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm" + (f" · {note}" if note else ""))
 

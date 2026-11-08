@@ -12,8 +12,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QPushButton, QSlider, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from aurora.app.mapview import MapView
-from aurora.app.preview import DASH, PAL
 from aurora.app.session import Session
+from aurora.app.theme import (MAP_OVERLAY, categorical, curve, dash, make_plot, on_theme_changed, pc, restyle_plot,
+                              role_pen, style_plot, with_alpha)
 from aurora.app.widgets import Card, Worker
 from aurora.core.constants import DETS
 from aurora.core.grid import to_grid
@@ -87,6 +88,18 @@ class MapsPerspective(QWidget):
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda z: self._roi_changed())
         session.zones_changed.connect(self._roi_changed)
+        on_theme_changed(self, lambda _s: self._theme_changed())
+
+    def _theme_changed(self) -> None:
+        self._style_band()
+        self.redraw()
+        self._draw_clusters()
+
+    def _style_band(self) -> None:
+        """The emission window band: the action colour at 16 % alpha with an action pen."""
+        self.band.setBrush(pg.mkBrush(with_alpha(pc("band"), 0.16)))
+        for ln in self.band.lines:
+            ln.setPen(role_pen("band", 1.4))
 
     # ------------------------------------------------------------------ tabs
     def _explore_tab(self) -> QWidget:
@@ -99,16 +112,17 @@ class MapsPerspective(QWidget):
         w.addWidget(left)
         right = QSplitter(Qt.Vertical)
         sc = Card("Emission spectrum of the ROI (drag the band to set the window)")
-        self.spec = pg.PlotWidget(background="w"); self.spec.setLabel("bottom", "emission energy (eV)"); self.spec.setLabel("left", "counts")
+        self.spec = make_plot(x="emission energy (eV)", y="counts")
         self.spec.getViewBox().disableAutoRange()
-        self.band = pg.LinearRegionItem(values=[600, 720], brush=pg.mkBrush(56, 224, 194, 40), pen=pg.mkPen("#0E7C6B"))
+        self.band = pg.LinearRegionItem(values=[600, 720])
+        self._style_band()
         self.band.sigRegionChangeFinished.connect(self._band_moved)
         self.spec.addItem(self.band, ignoreBounds=True)
         sc.body.addWidget(self.spec, 1)
         right.addWidget(sc)
         xc = Card("XANES of the ROI in the window")
-        self.xanes = pg.PlotWidget(background="w"); self.xanes.setLabel("bottom", "incident energy (eV)"); self.xanes.setLabel("left", "window counts / I0")
-        self.xanes.addLegend(offset=(10, 10)); self.xanes.getViewBox().disableAutoRange()
+        self.xanes = make_plot(x="incident energy (eV)", y="window counts / I0", legend="inside")
+        self.xanes.getViewBox().disableAutoRange()
         xc.body.addWidget(self.xanes, 1)
         right.addWidget(xc)
         w.addWidget(right)
@@ -122,7 +136,8 @@ class MapsPerspective(QWidget):
         self.el_export = QPushButton("Export PyMca 4D (_Elemental_PyMca.h5)…"); self.el_export.clicked.connect(self._export_4d); row.addWidget(self.el_export)
         row.addStretch(1)
         lay.addLayout(row)
-        self.el_layout = pg.GraphicsLayoutWidget(); self.el_layout.setBackground("#0B1630")
+        self.el_layout = pg.GraphicsLayoutWidget()
+        style_plot(self.el_layout, "map")
         lay.addWidget(self.el_layout, 1)
         return w
 
@@ -136,7 +151,7 @@ class MapsPerspective(QWidget):
         b = QPushButton("Draw the RGB composite"); b.clicked.connect(self.draw_rgb); row.addWidget(b)
         row.addStretch(1)
         lay.addLayout(row)
-        self.rgb_view = MapView(); self.rgb_view.set_tool("navigate")
+        self.rgb_view = MapView(); self.rgb_view.set_tool("navigate"); self.rgb_view.set_lookup(None)   # RGB, no colour map
         lay.addWidget(self.rgb_view, 1)
         return w
 
@@ -151,14 +166,12 @@ class MapsPerspective(QWidget):
         row.addStretch(1)
         left.body.addLayout(row)
         self.cluster_map = MapView(); self.cluster_map.set_tool("navigate")
-        from PySide6.QtGui import QColor
-        self.cluster_map.image.setLookupTable(np.array([QColor(c).getRgb()[:3] for c in PAL], dtype=np.ubyte))   # categorical colours
+        self.cluster_map.set_lookup(self._cluster_lut(self.n_k.value()))       # categorical colours, one per cluster
         left.body.addWidget(self.cluster_map, 1)
         self.cluster_info = QLabel(""); self.cluster_info.setObjectName("muted"); self.cluster_info.setWordWrap(True); left.body.addWidget(self.cluster_info)
         w.addWidget(left)
         right = Card("Cluster mean spectra")
-        self.cluster_plot = pg.PlotWidget(background="w"); self.cluster_plot.addLegend(offset=(10, 10)); self.cluster_plot.getViewBox().disableAutoRange()
-        self.cluster_plot.setLabel("bottom", "incident energy (eV)")
+        self.cluster_plot = make_plot(x="incident energy (eV)", legend="inside"); self.cluster_plot.getViewBox().disableAutoRange()
         right.body.addWidget(self.cluster_plot, 1)
         w.addWidget(right)
         return w
@@ -273,7 +286,7 @@ class MapsPerspective(QWidget):
                                     "lucy" if self.deconv_method.currentIndex() == 0 else "wiener", self.deconv_iter.value())
         self.map.set_grid(g)
         if self._roi is not None and self._roi.size:
-            self.map.draw_pixels(hc.x[self._roi], hc.y[self._roi], hc.pitch, "#38E0C2")
+            self.map.draw_pixels(hc.x[self._roi], hc.y[self._roi], hc.pitch, MAP_OVERLAY["roi"])
         self.map_hint.setText(f"window ch {lo}-{hi - 1} ({self.w_lo.value():.0f}-{self.w_hi.value():.0f} eV) · "
                               + ("averaged over the valid energies" if ei is None else f"E index {ei}") + f" · ROI {len(self._roi) if self._roi is not None else hc.n_pix} px")
         # emission spectrum of the ROI
@@ -282,7 +295,7 @@ class MapsPerspective(QWidget):
         ys = []
         for k in (range(4) if d is None else [d]):
             sp = hc.spectrum(k, self._roi, None if ei is None else [ei])
-            self.spec.plot(hc.channel_axis(k), sp, pen=pg.mkPen(PAL[k], width=1.2, style=DASH[k]))
+            self.spec.plot(hc.channel_axis(k), sp, pen=pg.mkPen(curve(k), width=1.2, style=dash(k)))
             ys.append(sp)
         v = np.concatenate(ys)
         self.spec.getViewBox().setRange(xRange=(float(axis[0]), float(axis[-1])), yRange=(0, float(v.max()) if v.max() > 0 else 1), padding=0.05, disableAutoRange=True)
@@ -293,10 +306,10 @@ class MapsPerspective(QWidget):
         for k in range(4):
             lo_k, hi_k = self.window(k)
             xa = hc.xanes(k, lo_k, hi_k, self._roi, self.per_i0.isChecked())
-            self.xanes.plot(hc.E, xa, pen=pg.mkPen(PAL[k], width=1, style=DASH[k]), connect="finite", name=f"SDD{k + 1}")
+            self.xanes.plot(hc.E, xa, pen=pg.mkPen(curve(k), width=1, style=dash(k)), connect="finite", name=f"SDD{k + 1}")
             xs.append(xa)
         tot = np.nansum(xs, axis=0); tot[np.all(np.isnan(xs), axis=0)] = np.nan
-        self.xanes.plot(hc.E, tot, pen=pg.mkPen("#111111", width=2), connect="finite", name="sum")
+        self.xanes.plot(hc.E, tot, pen=role_pen("sum", 2), connect="finite", name="sum")
         v = np.concatenate(xs + [tot]); v = v[np.isfinite(v)]
         if v.size:
             self.xanes.getViewBox().setRange(xRange=(float(hc.E[0]), float(hc.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
@@ -309,7 +322,11 @@ class MapsPerspective(QWidget):
         self.el_layout.clear()
         d = None if self.det.currentIndex() == 0 else self.det.currentIndex() - 1
         ei = None if self.avg.isChecked() else self.energy.value()
-        cmap = pg.colormap.get("viridis")
+        from aurora.app.settings_dialog import get
+        try:
+            cmap = pg.colormap.get(get("map_colormap"))
+        except Exception:
+            cmap = pg.colormap.get("viridis")
         for i, lab in enumerate(bins.labels):
             b = bins.bounds(lab)
             if d is None:
@@ -323,13 +340,14 @@ class MapsPerspective(QWidget):
             g = to_grid(hc.x, hc.y, m)
             p = self.el_layout.addPlot(row=i // 4, col=i % 4, title=lab)
             p.setAspectLocked(True); p.hideAxis("left"); p.hideAxis("bottom")
-            img = pg.ImageItem(g.img); img.setLookupTable(cmap.getLookupTable(nPts=256))
+            img = pg.ImageItem(g.img, axisOrder="row-major"); img.setLookupTable(cmap.getLookupTable(nPts=256))
             fin = np.isfinite(g.img)
             if fin.any():
                 img.setLevels((float(np.nanmin(g.img)), float(np.nanmax(g.img)) or 1.0))
             img.setRect(pg.QtCore.QRectF(float(g.xs[0]) - g.dx / 2, float(g.ys[0]) - g.dy / 2, len(g.xs) * g.dx, len(g.ys) * g.dy))
             p.addItem(img)
             p.getViewBox().setRange(xRange=(float(g.xs[0]) - g.dx, float(g.xs[-1]) + g.dx), yRange=(float(g.ys[0]) - g.dy, float(g.ys[-1]) + g.dy), padding=0, disableAutoRange=True)
+        restyle_plot(self.el_layout, "map")                       # titles and axes of the new plots
 
     def draw_rgb(self) -> None:
         hc = self.hc
@@ -347,7 +365,7 @@ class MapsPerspective(QWidget):
         g = [to_grid(hc.x, hc.y, rgb[:, k]) for k in range(3)]
         img = np.stack([np.nan_to_num(gg.img) for gg in g], axis=-1)
         self.rgb_view.image.setImage(img, levels=[(0, 1), (0, 1), (0, 1)])
-        self.rgb_view.image.setLookupTable(None)
+        self.rgb_view.set_lookup(None)
         self.rgb_view._data_rect = pg.QtCore.QRectF(float(g[0].xs[0]) - g[0].dx / 2, float(g[0].ys[0]) - g[0].dy / 2, len(g[0].xs) * g[0].dx, len(g[0].ys) * g[0].dy)
         self.rgb_view.image.setRect(self.rgb_view._data_rect)
         self.rgb_view.autorange()
@@ -361,18 +379,33 @@ class MapsPerspective(QWidget):
         M = hc.pixel_matrix(d, lo, hi, self.per_i0.isChecked())
         cr = pca_kmeans(M, hc.E[hc.valid], self.n_pc.value(), self.n_k.value())
         self._cluster = cr
+        n_k = cr.centres.shape[0]
         lab = cr.labels.astype(float); lab[lab < 0] = np.nan
         self.cluster_map.clear_overlays(); self.cluster_map.set_grid(to_grid(hc.x, hc.y, lab))
-        self.cluster_map.image.setLevels((0, len(PAL) - 1))         # one PAL colour per cluster index
+        self.cluster_map.set_lookup(self._cluster_lut(n_k))
+        self.cluster_map.image.setLevels((0, max(n_k - 1, 1)))      # one categorical colour per cluster index
         self.cluster_map.autorange()
+        self._draw_clusters()
+        self.cluster_info.setText(f"{cr.centres.shape[0]} clusters on {int((cr.labels >= 0).sum())} px · PCA explained " + ", ".join(f"{100 * e:.1f} %" for e in cr.explained))
+
+    @staticmethod
+    def _cluster_lut(n: int) -> np.ndarray:
+        from PySide6.QtGui import QColor
+        return np.array([QColor(c).getRgb()[:3] for c in categorical(max(int(n), 2))], dtype=np.ubyte)
+
+    def _draw_clusters(self) -> None:
+        """Cluster mean spectra in the cluster map's categorical colours (legend colour = map colour)."""
         self.cluster_plot.clear(); self.cluster_plot.plotItem.legend.clear()
+        cr = self._cluster
+        if cr is None:
+            return
+        cols = categorical(max(cr.centres.shape[0], 2))
         for k in range(cr.centres.shape[0]):
             n = int((cr.labels == k).sum())
-            self.cluster_plot.plot(cr.E, cr.centres[k], pen=pg.mkPen(PAL[k % len(PAL)], width=1.6, style=DASH[k % len(DASH)]), name=f"cluster {k + 1} ({n} px)")
+            self.cluster_plot.plot(cr.E, cr.centres[k], pen=pg.mkPen(cols[k], width=1.6, style=dash(k)), name=f"cluster {k + 1} ({n} px)")
         v = cr.centres[np.isfinite(cr.centres)]
         if v.size:
             self.cluster_plot.getViewBox().setRange(xRange=(float(cr.E[0]), float(cr.E[-1])), yRange=(float(v.min()), float(v.max()) if v.max() > v.min() else float(v.min()) + 1), padding=0.05, disableAutoRange=True)
-        self.cluster_info.setText(f"{cr.centres.shape[0]} clusters on {int((cr.labels >= 0).sum())} px · PCA explained " + ", ".join(f"{100 * e:.1f} %" for e in cr.explained))
 
     # ------------------------------------------------------------------ exports
     def _export_xanes(self) -> None:

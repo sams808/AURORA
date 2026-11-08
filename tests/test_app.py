@@ -29,6 +29,9 @@ def test_main_window_and_home(qapp, fake_project):
     assert names[0].endswith("_survey")
     tree.setCurrentItem(holder_item.child(1))
     qapp.processEvents()
+    from aurora.app import mode
+    assert "Edge" in win.home.details.toPlainText() and "Metadata" not in win.home.details.toPlainText()  # Easy
+    mode.set_advanced(True)                                  # Advanced: the full h5 attribute table is back
     assert "Metadata" in win.home.details.toPlainText()
     assert "holders" in win.crumb.text()
     win.show_perspective("reduce")

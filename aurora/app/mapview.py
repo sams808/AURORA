@@ -1,4 +1,8 @@
-"""pyqtgraph map of measured points in mm with scan footprints, zone outlines and the zone-editing tools."""
+"""pyqtgraph map of measured points in mm with scan footprints, zone outlines and the zone-editing tools.
+
+The map stays navy in both schemes (theme 'map' kind), so colour maps look the same in light and dark. Overlay
+colours come from theme.MAP_OVERLAY / theme.FOOTPRINTS / theme.CURVES; the colour map follows Settings > map colour map.
+"""
 from __future__ import annotations
 
 import numpy as np
@@ -7,11 +11,9 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsRectItem
 
-from aurora.app.theme import TOKENS, style_plot
+from aurora.app.theme import MAP_OVERLAY, TOKENS, style_plot, with_alpha
 from aurora.core.grid import Grid
 from aurora.core.io.config import Zone
-
-pg.setConfigOptions(imageAxisOrder="row-major")
 
 TOOLS = ("navigate", "rect+", "rect-", "brush+", "brush-")
 
@@ -26,7 +28,7 @@ class _ToolViewBox(pg.ViewBox):
         super().__init__(enableMenu=False)
         self.tool = "navigate"
         self._rubber = QGraphicsRectItem()
-        self._rubber.setPen(QPen(QColor(TOKENS["warn"]), 0, Qt.DashLine))
+        self._rubber.setPen(QPen(QColor(MAP_OVERLAY["rect_add"]), 0, Qt.DashLine))
         self._rubber.setZValue(50)
         self._rubber.hide()
         self.addItem(self._rubber, ignoreBounds=True)
@@ -41,7 +43,8 @@ class _ToolViewBox(pg.ViewBox):
             return
         p0 = self.mapToView(ev.buttonDownPos())
         r = QRectF(QPointF(min(p0.x(), p.x()), min(p0.y(), p.y())), QPointF(max(p0.x(), p.x()), max(p0.y(), p.y())))
-        self._rubber.setPen(QPen(QColor(TOKENS["warn"] if self.tool == "rect+" else "#ff5555"), 0, Qt.DashLine))
+        colour = MAP_OVERLAY["rect_add"] if self.tool == "rect+" else MAP_OVERLAY["erase"]
+        self._rubber.setPen(QPen(QColor(colour), 0, Qt.DashLine))
         self._rubber.setRect(r)
         self._rubber.show()
         if ev.isFinish():
@@ -80,11 +83,14 @@ class MapView(pg.GraphicsLayoutWidget):
         for ax in ("bottom", "left"):
             self.plot.getAxis(ax).enableAutoSIPrefix(False)      # never "x (mm) (x0.001)"
         self.plot.showGrid(False, False)
-        self.image = pg.ImageItem()
+        self.image = pg.ImageItem(axisOrder="row-major")
         self.image.setZValue(-10)
         self.plot.addItem(self.image)
-        self._cmap = pg.colormap.get("viridis")
-        self.image.setLookupTable(self._cmap.getLookupTable(nPts=256))
+        self._fixed_lut = False                                  # True: categorical / RGB, never the colour map
+        self._cmap = None
+        self.apply_colormap_setting()
+        from aurora.app.settings_dialog import on_settings_changed
+        on_settings_changed(self, self.apply_colormap_setting)
         self._overlays: list = []
         self._data_rect: QRectF | None = None
         self.vb.disableAutoRange()          # ranges are set from the data: pyqtgraph's auto-range of an ImageItem is
@@ -99,8 +105,25 @@ class MapView(pg.GraphicsLayoutWidget):
         self.vb.setMouseEnabled(x=tool == "navigate", y=tool == "navigate")
 
     def set_colormap(self, name: str) -> None:
-        self._cmap = pg.colormap.get(name)
-        self.image.setLookupTable(self._cmap.getLookupTable(nPts=256))
+        try:
+            self._cmap = pg.colormap.get(name)
+        except Exception:                                        # an unknown name in the settings: keep viridis
+            self._cmap = pg.colormap.get("viridis")
+        if not self._fixed_lut:
+            self.image.setLookupTable(self._cmap.getLookupTable(nPts=256))
+
+    def apply_colormap_setting(self) -> None:
+        """Settings > map colour map (at creation and each time the Settings dialog is accepted)."""
+        from aurora.app.settings_dialog import get
+        self.set_colormap(get("map_colormap"))
+
+    def colormap_name(self) -> str:
+        return getattr(self._cmap, "name", "") or ""
+
+    def set_lookup(self, lut) -> None:
+        """A fixed lookup table (categorical clusters) or None (RGB images): the colour-map setting no longer applies."""
+        self._fixed_lut = True
+        self.image.setLookupTable(lut)
 
     def set_grid(self, g: Grid | None) -> None:
         if g is None or g.img.size == 0:
@@ -129,21 +152,27 @@ class MapView(pg.GraphicsLayoutWidget):
         self._overlays.clear()
 
     def add_rect(self, x0: float, x1: float, y0: float, y1: float, colour: str, width: float = 1.5,
-                 dashed: bool = False, fill: str | None = None, z: int = 10) -> QGraphicsRectItem:
+                 dashed: bool = False, fill=None, z: int = 10, style=None) -> QGraphicsRectItem:
+        """An outlined rectangle in mm. `fill` is a QColor (with alpha) or a colour string; `style` a Qt pen style."""
         it = QGraphicsRectItem(QRectF(x0, y0, x1 - x0, y1 - y0))
         pen = QPen(QColor(colour), width)
         pen.setCosmetic(True)
-        if dashed:
+        if style is not None:
+            pen.setStyle(style)
+        elif dashed:
             pen.setStyle(Qt.DashLine)
         it.setPen(pen)
-        it.setBrush(QBrush(QColor(fill)) if fill else QBrush(Qt.NoBrush))
+        it.setBrush(QBrush(fill if isinstance(fill, QColor) else QColor(fill)) if fill is not None else QBrush(Qt.NoBrush))
         it.setZValue(z)
         self.plot.addItem(it, ignoreBounds=True)          # overlays never drive the auto-range: the image does
         self._overlays.append(it)
         return it
 
     def add_label(self, x: float, y: float, text: str, colour: str, anchor=(0, 1)) -> pg.TextItem:
-        t = pg.TextItem(text, color=colour, anchor=anchor)
+        """A zone or footprint label: map_fg text on a map_bg plate (80 %), bordered in the zone's colour, so it reads
+        whatever the colour (12:1)."""
+        t = pg.TextItem(text, color=TOKENS["map_fg"], anchor=anchor, fill=pg.mkBrush(with_alpha(TOKENS["map_bg"], 0.8)),
+                        border=pg.mkPen(colour, width=1))
         t.setPos(x, y)
         t.setZValue(20)
         self.plot.addItem(t, ignoreBounds=True)
@@ -152,15 +181,16 @@ class MapView(pg.GraphicsLayoutWidget):
 
     def draw_zone(self, zone: Zone, colour: str, selected: bool = False, label: bool = True) -> None:
         w = 2.5 if selected else 1.2
+        erase = MAP_OVERLAY["erase"]
         for r in zone.rects:
-            self.add_rect(r[0], r[1], r[2], r[3], colour, w, fill=(colour + "30") if selected else None)
+            self.add_rect(r[0], r[1], r[2], r[3], colour, w, fill=with_alpha(colour, 0.19) if selected else None)
         for r in zone.erects:
-            self.add_rect(r[0], r[1], r[2], r[3], "#ff5555", 1.0, dashed=True)
+            self.add_rect(r[0], r[1], r[2], r[3], erase, 1.0, dashed=True)
         for s in zone.paint:
             self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, colour, w,
-                          fill=(colour + "50") if selected else (colour + "25"))
+                          fill=with_alpha(colour, 0.31 if selected else 0.15))
         for s in zone.erase:
-            self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, "#ff5555", 1.0, dashed=True)
+            self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, erase, 1.0, dashed=True)
         if label:
             pts = [(r[0], r[3]) for r in zone.rects] + [(s[0] - s[2] / 2, s[1] + s[3] / 2) for s in zone.paint]
             if pts:
@@ -177,3 +207,4 @@ class MapView(pg.GraphicsLayoutWidget):
         if self.plot.sceneBoundingRect().contains(pos):
             p = self.vb.mapSceneToView(pos)
             self.hovered.emit(float(p.x()), float(p.y()))
+
