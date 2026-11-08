@@ -194,7 +194,8 @@ class MapsPerspective(QWidget):
         erow = QHBoxLayout()
         self.energy = QSlider(Qt.Horizontal); self.energy.setRange(0, 0)
         erow.addWidget(labelled("energy", self.energy, "maps.energy")); erow.addWidget(self.energy, 1)
-        self.energy_label = QLabel("-"); self.energy_label.setMinimumWidth(110); erow.addWidget(self.energy_label)
+        self.energy_label = QLabel("-"); erow.addWidget(self.energy_label)
+        self._fix_energy_label()
         self.avg = QCheckBox("average over energies"); erow.addWidget(self.avg)
         root.addLayout(erow)
 
@@ -314,7 +315,14 @@ class MapsPerspective(QWidget):
                            (self.merged_plot, "the merged spectra of the ticked clusters appear here")):
             set_plot_hint(plot, text)
 
+    def _fix_energy_label(self) -> None:
+        """A fixed-size energy label: its text changes at every slider step, and a label whose size may change makes
+        Qt lay out the whole window again each time (about 7 ms a step)."""
+        fm = self.energy_label.fontMetrics()
+        self.energy_label.setFixedSize(fm.horizontalAdvance("00000.00 eV (skipped)") + 8, fm.height() + 6)
+
     def _theme_changed(self) -> None:
+        self._fix_energy_label()                     # the text size may have changed
         self._style_band()
         for k, c in enumerate(self._spec_curves):
             c.setPen(pg.mkPen(curve(k), width=1.2, style=dash(k)))
@@ -515,7 +523,7 @@ class MapsPerspective(QWidget):
         self._reset_cube(hc)
         self.energy.blockSignals(True); self.energy.setRange(0, hc.n_energies - 1); self.energy.setValue(hc.n_energies // 2); self.energy.blockSignals(False)
         bins = self.session.project.roi_bins if self.session.project else None
-        self.line.blockSignals(True); self.line.clear(); self.line.addItem("custom (eV below)", None)
+        self.line.blockSignals(True); self.line.clear(); self.line.addItem("custom (eV)", None)
         for lab in (bins.labels if bins else []):
             ev = bins.line_ev(lab)
             self.line.addItem(f"{lab}" + (f" {ev:.0f} eV" if ev else ""), lab)
@@ -776,7 +784,7 @@ class MapsPerspective(QWidget):
         what = (lab if lab else f"{self.w_lo.value():.0f}-{self.w_hi.value():.0f} eV")
         ei = self._ei()
         parts = [f"{what}: {describe_windows({d: w[d] for d in dets})}" if dets else NO_SDD,
-                 "averaged over the valid energies" if ei is None else f"at {hc.E[ei]:.2f} eV",
+                 "averaged over the valid energies" if ei is None else "at the energy of the slider",
                  f"ROI {len(self._roi) if self._roi is not None else hc.n_pix} px"]
         if note:
             parts.append(note)
