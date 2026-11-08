@@ -222,7 +222,7 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
         from aurora.core.report import ReportBuilder
         res = ReportBuilder(ctx["proj"], ctx["zones"], base / "report é", title="Self-test", png_dpi=120).build()
         assert res.pdf.exists() and res.pdf.stat().st_size > 10_000 and res.pages >= 3
-        svgs = list((base / "report é" / "figures").glob("*.svg"))
+        svgs = list((res.pdf.parent / "figures").glob("*.svg"))          # each build has its own folder (I39)
         assert svgs and res.csvs
         return f"{res.pages} pages, {len(res.figures)} PNG + {len(svgs)} SVG figures, {len(res.csvs)} CSV"
     r.check("report (PDF, PNG, SVG, CSV)", report)

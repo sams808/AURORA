@@ -492,7 +492,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                              "the cluster map as PNG next to it.", "Export the clusters", "8-maps"),
     # ------------------------------------------------------------------ report
     "report.title": ("The report title (default 'AURORA report · <project>').", "report title", "9-report"),
-    "report.out": ("The output folder (default <project>/reports/aurora).", "output folder", "9-report"),
+    "report.out": ("The reports folder (default <project>/reports/aurora). Each build gets its own folder in it, "
+                   "named by date, time and scope; nothing earlier is overwritten.", "output folder", "9-report"),
     "report.browse": ("Choose the output folder.", "Browse for the output folder", "9-report"),
     "report.appendix": ("Appendix A: the four detectors per zone and scan.", "Appendix A", "9-report"),
     "report.maps": ("Appendix B: plate maps with the zones.", "Appendix B", "9-report"),
@@ -503,8 +504,31 @@ HELP: dict[str, tuple[str, str, str]] = {
                      "Build the report", "9-report"),
     "report.prev": ("Previous page of the preview.", "Previous page", "9-report"),
     "report.next": ("Next page of the preview.", "Next page", "9-report"),
-    "report.open_folder": ("Open the report folder.", "Open folder", "9-report"),
+    "report.open_folder": ("Open the folder of the last build.", "Open folder", "9-report"),
     "report.open_pdf": ("Open the PDF.", "Open PDF", "9-report"),
+    "report.preset": ("Final: every holder, Appendix A and B, figures at 600 dpi. Draft: the current holder, no "
+                      "Appendix A or B, figures at 110 dpi. The options below can still be changed.", "preset",
+                      "9-report"),
+    "report.dpi": ("Resolution of the figure PNGs (the SVG copies are vector).", "PNG figure resolution", "9-report"),
+    "report.holders": ("The holders the report covers, by day: tick a day for all its holders.", "holders",
+                       "9-report"),
+    "report.current_holder": ("Cover only the holder shown in the top bar.", "Current holder only", "9-report"),
+    "report.all_holders": ("Cover every holder of the project.", "All holders", "9-report"),
+    "report.check": ("What to check before building: zones without a group or an included scan, labels not in the "
+                     "sample sheet, stacks covered by no zone, scans covering a zone without settings, saturated "
+                     "detectors still ticked. Show opens the zone in Reduce; Ignore keeps a finding out of the count.",
+                     "check before building", "9-report"),
+    "report.contents": ("What the next build contains: group, holder, zone, with the edge and the number of included "
+                        "scans. A zone that will be left out carries a warning icon; its tooltip says why.",
+                        "report contents", "9-report"),
+    "report.jump": ("Show this zone (or scan) in Reduce.", "Show in Reduce", "9-report"),
+    "report.col.finding": ("The finding, in the words of the check.", "Finding", "9-report"),
+    "report.col.ignore": ("Ticked: ignored, not counted in the warnings, remembered with the session.", "Ignore",
+                          "9-report"),
+    "report.col.show": ("Show the zone in Reduce.", "Show", "9-report"),
+    "report.col.zone": ("Sample group, then holder (with its day), then zone.", "Group / holder / zone", "9-report"),
+    "report.col.edge": ("The absorption edge of the zone's included scans.", "Edge", "9-report"),
+    "report.col.scans": ("Included scans that give a spectrum of the zone.", "Scans", "9-report"),
     # ------------------------------------------------------------------ settings and dialogs
     "settings.appearance": ("Follow the system, light or dark. Applied at once.", "appearance", "10-settings"),
     "settings.text_size": ("Normal, large or larger text (13, 15 or 17 px). Applied at once.", "text size",

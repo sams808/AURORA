@@ -24,7 +24,8 @@ def test_report_on_fake_project(fake_project, tmp_path):
     assert res.entries == 2 and res.pages >= 5                # cover, 2 group figures, appendix, map, QC
     assert len(res.figures) == 2 and all(f.exists() for f in res.figures)
     assert {f.stem for f in res.figures} == {"Minerals_F_K_p1", "Ungrouped_F_K_p1"}
-    assert all((out / "figures" / f"{f.stem}.svg").exists() for f in res.figures)
+    assert res.folder.parent == out and res.pdf.parent == res.folder        # one folder per build (I39)
+    assert all((res.folder / "figures" / f"{f.stem}.svg").exists() for f in res.figures)
     assert len(res.csvs) == 2
     csv = next(c for c in res.csvs if "1_alpha" in c.name)
     header = [l for l in csv.read_text(encoding="utf-8").splitlines() if l.startswith("#")]
