@@ -103,7 +103,8 @@ def test_lcf_recovers_mixture():
     assert np.allclose(r.coefficients, [0.6, 0.3, 0.1], atol=0.02) and abs(r.total - 1) < 1e-6
     assert r.rmse < 0.01 and r.r_factor < 1e-3 and np.all(r.uncertainties < 0.05)
     r2 = lcf((E, target), [(E, a), (E, b), (E, c)], sum_to_one=False, allow_negative=False, bootstrap=0)
-    assert np.allclose(r2.coefficients, [0.6, 0.3, 0.1], atol=0.02) and np.isnan(r2.uncertainties).all()
+    assert np.allclose(r2.coefficients, [0.6, 0.3, 0.1], atol=0.02) and r2.method == "covariance"
+    assert np.all(np.isfinite(r2.uncertainties)) and np.allclose(r2.uncertainties, r2.cov_uncertainties)   # Larch: covariance x sqrt(redchi)
     r3 = lcf((E, target), [(E, a), (E, b)], fit_range=(685, 720), sum_to_one=False, allow_negative=True, bootstrap=0)
     assert r3.E[0] >= 685 and r3.E[-1] <= 720
 

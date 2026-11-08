@@ -290,7 +290,7 @@ def test_demo_window_light_dark_light(qapp, tmp_path):
         assert target.opts["pen"].color().name().upper() == ink
     assert snaps[0] == snaps[2] and snaps[0] != snaps[1]
     # compare: the Label column is ink text plus a swatch, never a coloured text
-    lab = win.compare.table.item(0, 1)
+    lab = win.compare.table.item(0, win.compare.col("Label"))          # the column order of WP5 I29
     assert lab.data(Qt.ForegroundRole) is None and not lab.icon().isNull()
     # every MapView follows Settings > map colour map (the categorical cluster map keeps its own colours)
     from aurora.app.mapview import MapView

@@ -1,29 +1,118 @@
-"""Compare perspective (John Bussey's tab 3): the library table, the stacked plot, normalisation diagnostics, peaks."""
+"""Compare perspective (John Bussey's tab 3): the library table, the stacked plot, normalisation diagnostics, peaks.
+
+Every cell shows the state in force: typed editors per column (a combo for Norm, Signal and E0, spin boxes with units
+for the energies), and a cell that cannot be read is put back with the reason in the message line under the table.
+The figure export draws the shown traces again at a fixed size (aurora.core.figures), never a screen grab.
+"""
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-                               QLineEdit, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
+                               QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
+                               QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
 
-from aurora.app.help_text import explain, header_tips, labelled
+from aurora.app import mode
+from aurora.app.help_text import HELP, explain, header_tips, labelled
 from aurora.app.library import Library
-from aurora.app.mode import mark_advanced, mark_advanced_column
-from aurora.app.theme import curve, dash, label_for, make_plot, on_theme_changed, role_pen, swatch_icon
+from aurora.app.mode import mark_advanced, mark_advanced_column, on_mode_changed
+from aurora.app.theme import CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, on_theme_changed, role_pen, set_tone, swatch_icon
 from aurora.app.vocab import plural, unit_suffix
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path, guarded_write,
                                 notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
-from aurora.core.compare import NORMS, derivative, difference, export_wide_csv, local_peaks, stack_offsets
+from aurora.core.compare import (E0_MODE_TEXT, E0_MODES, NORMS, derivative, difference, export_wide_csv,
+                                 legacy_auto_windows, local_peaks, sidecar_path, stack_offsets)
 
-COLS = ("Show", "Label", "Signal", "Shift eV", "Norm", "Pre lo", "Pre hi", "Post lo", "Post hi", "Flatten", "Spacing", "Scale", "Fit", "Diag")
-COL_HELP = ("show", "label", "signal", "shift", "norm", "pre_lo", "pre_hi", "post_lo", "post_hi", "flatten", "spacing",
-            "scale", "fit", "diag")
-BOOL_COLS = (0, 9, 12, 13)
-ADVANCED_COLS = (4, 5, 6, 7, 8, 9, 10, 11, 13)      # Norm, Pre / Post windows, Flatten, Spacing, Scale, Diag
+# (header, help key) per column, in John Bussey's order with Fit next to Show so it is always in view
+COLUMNS = (("Show", "show"), ("Fit", "fit"), ("Label", "label"), ("Signal", "signal"), ("Norm", "norm"),
+           ("Shift eV", "shift"), ("Pre lo", "pre_lo"), ("Pre hi", "pre_hi"), ("Post lo", "post_lo"),
+           ("Post hi", "post_hi"), ("E0", "e0_mode"), ("E0 eV", "e0"), ("Flatten", "flatten"), ("Spacing", "spacing"),
+           ("Scale", "scale"), ("Diag", "diag"), ("Colour", "colour"))
+COLS = tuple(h for h, _k in COLUMNS)
+COL = {k: i for i, (_h, k) in enumerate(COLUMNS)}
+COL_HELP = tuple(k for _h, k in COLUMNS)
+BOOL_COLS = (COL["show"], COL["fit"], COL["flatten"], COL["diag"])
+EASY_COLS = (COL["show"], COL["fit"], COL["label"], COL["signal"], COL["shift"], COL["colour"])
+ADVANCED_COLS = tuple(i for i in range(len(COLUMNS)) if i not in EASY_COLS)
+LABEL_MIN_PX = 170                  # the Label column in Advanced: at least this wide, the table scrolls sideways
+AUTO_PRE, AUTO_POST = "auto 15 %", "auto 20 %"
+
+
+def pick_colour(parent: QWidget, initial: str, title: str) -> str | None:
+    """A colour chosen in QColorDialog ('#RRGGBB'), None when cancelled."""
+    d = QColorDialog(QColor(initial), parent)
+    d.setWindowTitle(title)
+    ok = d.exec()
+    out = d.currentColor().name().upper() if ok else None
+    d.deleteLater()
+    return out
+
+
+def colour_name(c: str) -> str:
+    c = (c or "").upper()
+    return CURVE_NAMES[CURVES.index(c)] if c in CURVES else c
+
+
+class _ComboDelegate(QStyledItemDelegate):
+    """A combo box editor; items_fn(row) gives the items."""
+
+    def __init__(self, items_fn, name: str, parent=None):
+        super().__init__(parent)
+        self.items_fn = items_fn
+        self.name = name
+
+    def items(self, row: int) -> list[str]:
+        return list(self.items_fn(row))
+
+    def createEditor(self, parent, option, index):
+        cb = QComboBox(parent)
+        cb.addItems(self.items(index.row()))
+        cb.setAccessibleName(self.name)
+        return cb
+
+    def setEditorData(self, editor, index):
+        i = editor.findText(str(index.data() or ""))
+        editor.setCurrentIndex(max(0, i))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText())
+
+
+class _SpinDelegate(QStyledItemDelegate):
+    """A spin box editor with a unit; spec_fn(row) -> (lo, hi, decimals, step, suffix, special text or '')."""
+
+    def __init__(self, spec_fn, name: str, parent=None):
+        super().__init__(parent)
+        self.spec_fn = spec_fn
+        self.name = name
+
+    def createEditor(self, parent, option, index):
+        lo, hi, dec, step, suffix, special = self.spec_fn(index.row())
+        sp = QDoubleSpinBox(parent)
+        sp.setRange(lo, hi)
+        sp.setDecimals(dec)
+        sp.setSingleStep(step)
+        sp.setSuffix(suffix)
+        if special:
+            sp.setSpecialValueText(special)
+        sp.setAccessibleName(self.name)
+        return sp
+
+    def setEditorData(self, editor, index):
+        try:
+            editor.setValue(float(str(index.data() or "").split()[0]))
+        except (ValueError, IndexError):
+            editor.setValue(editor.minimum())
+
+    def setModelData(self, editor, model, index):
+        v = editor.value()
+        special = editor.specialValueText()
+        model.setData(index, "" if special and v <= editor.minimum() else f"{v:g}")
 
 
 class ComparePerspective(QWidget):
@@ -31,6 +120,7 @@ class ComparePerspective(QWidget):
         super().__init__(parent)
         self.lib = library
         self._filling = False
+        self._missing_seen: set = set()
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -42,11 +132,13 @@ class ComparePerspective(QWidget):
         for text, fn, key in (("Add saved spectra…", self._add_folder, "add_folder"), ("Add CSV…", self._add_csv, "add_csv"),
                               ("References…", self._references, "references"),
                               ("Save config…", self._save_config, "save_config"),
-                              ("Load config…", self._load_config, "load_config"), ("Export…", self._export, "export")):
+                              ("Load config…", self._load_config, "load_config"),
+                              ("Figure size…", self._figure_options, "figure_size"), ("Export…", self._export, "export")):
             b = QPushButton(text); b.clicked.connect(fn); head.addWidget(b)
             explain(b, f"compare.{key}")
             self.head_buttons[text] = b
         self.export_btn = self.head_buttons["Export…"]
+        self.figure_btn = self.head_buttons["Figure size…"]
         root.addLayout(head)
 
         split = QSplitter(Qt.Horizontal)
@@ -64,15 +156,45 @@ class ComparePerspective(QWidget):
             explain(b, f"compare.{key}")
             ops.addWidget(b)
             self.op_buttons[text] = b
+        self.default_shift = QDoubleSpinBox(); self.default_shift.setRange(-100, 100); self.default_shift.setDecimals(2)
+        self.default_shift.setSingleStep(0.1); self.default_shift.setSuffix(unit_suffix("eV"))
+        self.default_shift.setValue(self.lib.default_shift)
+        self.default_shift_pair = pair(labelled("default shift for new rows", self.default_shift, "compare.default_shift"),
+                                       self.default_shift)
+        ops.addWidget(self.default_shift_pair)
         left.body.addWidget(ops_box)
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.setAccessibleName("library of spectra")
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
         self.table.itemChanged.connect(self._item_changed)
         self.table.itemSelectionChanged.connect(self._draw_diagnostics)
         self.table.itemSelectionChanged.connect(self.update_actions)
+        self.delegates = {
+            COL["norm"]: _ComboDelegate(lambda _r: NORMS, "normalisation", self.table),
+            COL["signal"]: _ComboDelegate(self._signals_of_row, "signal", self.table),
+            COL["e0_mode"]: _ComboDelegate(self._e0_modes_of_row, "E0 choice", self.table),
+            COL["shift"]: _SpinDelegate(lambda _r: (-100.0, 100.0, 3, 0.1, unit_suffix("eV"), ""), "shift", self.table),
+            COL["e0"]: _SpinDelegate(lambda _r: (0.0, 30000.0, 2, 0.1, unit_suffix("eV"), "derivative"), "E0", self.table),
+            COL["spacing"]: _SpinDelegate(lambda _r: (-0.1, 100.0, 2, 0.1, " (signal units)", "common"), "spacing", self.table),
+            COL["scale"]: _SpinDelegate(lambda _r: (0.001, 1000.0, 3, 0.1, " ×", ""), "scale", self.table),
+        }
+        for key in ("pre_lo", "pre_hi", "post_lo", "post_hi"):
+            self.delegates[COL[key]] = _SpinDelegate(lambda r, k=key: self._window_spec(r, k), key.replace("_", " "), self.table)
+        for c, d in self.delegates.items():
+            self.table.setItemDelegateForColumn(c, d)
         left.body.addWidget(self.table, 1)
+        # the message line: what could not be read, missing files (with Locate…), what was written; replot keeps it
+        self.message_row = QWidget()
+        ml = QHBoxLayout(self.message_row); ml.setContentsMargins(0, 0, 0, 0)
+        self.message = QLabel(""); self.message.setWordWrap(True)
+        ml.addWidget(self.message, 1)
+        self.locate_btn = QPushButton("Locate…"); self.locate_btn.clicked.connect(self._locate); ml.addWidget(self.locate_btn)
+        self.dismiss_btn = QPushButton("Dismiss"); self.dismiss_btn.clicked.connect(self.clear_message); ml.addWidget(self.dismiss_btn)
+        explain(self.locate_btn, "compare.locate")
+        explain(self.dismiss_btn, "compare.dismiss")
+        self.message_row.hide()
+        left.body.addWidget(self.message_row)
         self.range_row = QWidget()                     # set pre / post on the selection: Advanced
         rng = FlowLayout(self.range_row, spacing=6)
         rng.addWidget(QLabel("windows of the selected rows, eV from E0:"))
@@ -87,6 +209,10 @@ class ComparePerspective(QWidget):
         pre_label.setBuddy(self.pre_lo); post_label.setBuddy(self.post_lo)
         rng.addWidget(pair(pre_label, self.pre_lo, self.pre_hi))
         rng.addWidget(pair(post_label, self.post_lo, self.post_hi))
+        from aurora.core.compare import E0_SMOOTH_EV
+        self.e0_smooth = QDoubleSpinBox(); self.e0_smooth.setRange(0.0, 20.0); self.e0_smooth.setDecimals(2)
+        self.e0_smooth.setSingleStep(0.1); self.e0_smooth.setValue(E0_SMOOTH_EV); self.e0_smooth.setSuffix(unit_suffix("eV"))
+        rng.addWidget(pair(labelled("E0 derivative smoothing", self.e0_smooth, "compare.e0_smooth"), self.e0_smooth))
         self.apply_btn = b = QPushButton("Apply"); b.clicked.connect(self._apply_ranges); rng.addWidget(b)
         explain(b, "compare.apply")
         left.body.addWidget(self.range_row)
@@ -105,6 +231,9 @@ class ComparePerspective(QWidget):
         spacing_pair = pair(labelled("spacing (signal units)", self.spacing, "compare.spacing"), self.spacing)
         self.labels_on = QCheckBox("labels"); self.labels_on.setChecked(True)
         self.signal_in_label = QCheckBox("signal in label")
+        self.label_inset = QDoubleSpinBox(); self.label_inset.setRange(0, 200); self.label_inset.setDecimals(1)
+        self.label_inset.setSingleStep(0.5); self.label_inset.setSuffix(unit_suffix("eV"))
+        inset_pair = pair(labelled("labels in from the right edge", self.label_inset, "compare.label_inset"), self.label_inset)
         self.deriv = QCheckBox("first derivative")
         self.deriv_smooth = QDoubleSpinBox(); self.deriv_smooth.setRange(1, 51); self.deriv_smooth.setDecimals(0); self.deriv_smooth.setValue(3)
         self.deriv_smooth.setPrefix("smooth "); self.deriv_smooth.setSuffix(unit_suffix("points"))
@@ -115,8 +244,9 @@ class ComparePerspective(QWidget):
         self.distance = QDoubleSpinBox(); self.distance.setRange(1, 500); self.distance.setDecimals(0); self.distance.setValue(5)
         self.distance.setSuffix(unit_suffix("points"))
         dist_pair = pair(labelled("min distance", self.distance, "compare.distance"), self.distance)
-        # Advanced: spacing, labels, derivative, difference; mark peaks with prominence and distance
-        self.plot_opts = (spacing_pair, self.labels_on, self.signal_in_label, self.deriv, self.deriv_smooth, self.diff_btn)
+        # Advanced: spacing, labels, label position, derivative, difference; mark peaks with prominence and distance
+        self.plot_opts = (spacing_pair, self.labels_on, self.signal_in_label, inset_pair, self.deriv, self.deriv_smooth,
+                          self.diff_btn)
         self.peaks_row = (self.show_peaks, prom_pair, dist_pair)
         for w in self.plot_opts + self.peaks_row:
             opts.addWidget(w)
@@ -131,6 +261,8 @@ class ComparePerspective(QWidget):
         self.diag = make_plot(x="incident energy (eV)", y="raw signal", legend="inside")
         self.diag.getViewBox().disableAutoRange()
         dc.body.addWidget(self.diag, 1)
+        self.diag_note = QLabel(""); self.diag_note.setObjectName("muted"); self.diag_note.setWordWrap(True)
+        dc.body.addWidget(self.diag_note)
         self.peaks_label = QLabel(""); self.peaks_label.setObjectName("muted"); self.peaks_label.setWordWrap(True)
         dc.body.addWidget(self.peaks_label)
         right.addWidget(dc)
@@ -153,21 +285,31 @@ class ComparePerspective(QWidget):
             explain(w, f"compare.{key}")
         header_tips(self.table, {i: f"compare.col.{k}" for i, k in enumerate(COL_HELP)})
         for w in (self.x_lo, self.x_hi):
-            w.editingFinished.connect(self.replot)
-        self.spacing.valueChanged.connect(self.replot)
-        for w in (self.labels_on, self.signal_in_label, self.show_peaks, self.deriv):
+            w.editingFinished.connect(self._view_changed)
+        self.spacing.valueChanged.connect(self._view_changed)
+        self.label_inset.valueChanged.connect(self._view_changed)
+        for w in (self.labels_on, self.signal_in_label):
+            w.toggled.connect(self._view_changed)
+        for w in (self.show_peaks, self.deriv):
             w.toggled.connect(self.replot)
         self.prominence.valueChanged.connect(self.replot); self.distance.valueChanged.connect(self.replot)
         self.deriv_smooth.valueChanged.connect(self.replot)
+        self.default_shift.valueChanged.connect(self._default_shift_changed)
         library.changed.connect(self._fill_table)
         library.changed.connect(self.replot)
         library.changed.connect(self.update_actions)
-        on_theme_changed(self, lambda _s: (self._fill_table(), self.replot(), self._draw_diagnostics()))
-        # Easy mode: John Bussey's Compare (saved spectra, show / fit / label / signal / shift, x range, export)
+        library.changed.connect(self._check_missing)
+        library.changed.connect(self._draw_diagnostics)
+        library.restored.connect(self._apply_view)
+        on_theme_changed(self, lambda _s: (self._fill_table(), self.replot(), self._draw_diagnostics(), self._retone()))
+        # Easy mode: John Bussey's Compare (saved spectra, show / fit / label / signal / shift / colour, x range, export)
         h, o = self.head_buttons, self.op_buttons
         mark_advanced(h["Add CSV…"], h["References…"], h["Save config…"], h["Load config…"], o["Remove sample"],
-                      o["Rename"], o["Duplicate"], self.range_row, *self.plot_opts, *self.peaks_row)
+                      o["Rename"], o["Duplicate"], self.default_shift_pair, self.range_row, *self.plot_opts,
+                      *self.peaks_row)
         mark_advanced_column(self.table, *ADVANCED_COLS)
+        on_mode_changed(self, lambda _adv: self._apply_widths(), call_now=False)
+        self._fill_table()
         self.replot()
         self._draw_diagnostics()
         self.update_actions()
@@ -186,62 +328,291 @@ class ComparePerspective(QWidget):
         set_enabled(self.apply_btn, has, "the library is empty")
         self.empty_state.set_shown(not has)
 
+    def col(self, header: str) -> int:
+        """The column index of a header ('Label', 'Fit', ...)."""
+        return COLS.index(header)
+
+    # ------------------------------------------------------------------ message line
+    def say(self, text: str, tone: str = "warn", locate: bool = False) -> None:
+        """Show a message under the table; replot never overwrites it (Dismiss, or the next message, does)."""
+        self.message.setTextFormat(Qt.PlainText)
+        self.message.setText(text)
+        self.message.setProperty("aurora_tone", tone)
+        set_tone(self.message, tone)
+        self.locate_btn.setVisible(locate)
+        self.dismiss_btn.setVisible(not locate)        # a missing-files message stays until the files are found
+        self.message_row.show()
+
+    def notify(self, paths) -> str:
+        set_tone(self.message, "muted")
+        self.message.setProperty("aurora_tone", "muted")
+        self.locate_btn.hide()
+        self.dismiss_btn.show()
+        self.message_row.show()
+        return notify_saved(self.message, paths)
+
+    def clear_message(self) -> None:
+        self.message.setText("")
+        self.message_row.hide()
+
+    def _retone(self) -> None:
+        tone = self.message.property("aurora_tone")
+        if tone:
+            set_tone(self.message, tone)
+
+    def _check_missing(self) -> None:
+        miss = set(self.lib.missing)
+        if miss and miss != self._missing_seen:
+            names = ", ".join(Path(v).name or k for k, v in list(self.lib.missing.items())[:4])
+            more = f" and {len(miss) - 4} more" if len(miss) > 4 else ""
+            self.say(f"{plural(len(miss), 'file')} of the library not found ({names}{more}): their rows stay in the "
+                     f"table without a spectrum. Locate… finds a moved folder.", "warn", locate=True)
+        elif not miss and self.locate_btn.isVisible():
+            self.clear_message()
+        self._missing_seen = miss
+
+    def _locate(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Folder that now holds the missing spectra",
+                                             default_dir("reduced", self.lib))
+        if not d:
+            return
+        remember_dir("reduced", Path(d))
+        found, still = self.lib.relocate(Path(d))
+        if still:
+            self.say(f"{plural(found, 'file')} found under {d}; still missing: {', '.join(still)}", "warn", locate=True)
+        else:
+            self.say(f"{plural(found, 'file')} found under {d}: every row has its spectrum again", "ok")
+
     # ------------------------------------------------------------------ table
+    def _signals_of_row(self, row: int) -> list[str]:
+        if row >= len(self.lib.requests):
+            return []
+        return self.lib.signals_of(self.lib.requests[row].label)
+
+    def _e0_modes_of_row(self, row: int) -> list[str]:
+        if row >= len(self.lib.requests):
+            return list(E0_MODES)
+        me = self.lib.requests[row]
+        return list(E0_MODES) + [f"row:{r.key}" for r in self.lib.requests if r is not me]
+
+    def _window_spec(self, row: int, key: str):
+        r = self.lib.requests[row] if row < len(self.lib.requests) else None
+        if r is not None and r.norm == "legacy":
+            return (0.0, 30000.0, 2, 0.5, unit_suffix("eV"), AUTO_PRE if key.startswith("pre") else AUTO_POST)
+        return (-200.0, 400.0, 2, 0.5, unit_suffix("eV"), "")
+
+    def _cell_values(self, r, nr) -> dict:
+        if r.norm == "legacy":
+            pre = [AUTO_PRE] * 2 if r.legacy_pre is None else [f"{v:g}" for v in r.legacy_pre]
+            post = [AUTO_POST] * 2 if r.legacy_post is None else [f"{v:g}" for v in r.legacy_post]
+        else:
+            pre = [f"{v:g}" for v in r.pre]
+            post = [f"{v:g}" for v in r.post]
+        e0 = "" if nr is None or not np.isfinite(nr.e0) else f"{nr.e0:.2f}"
+        return {"show": r.show, "fit": r.fit, "label": r.label, "signal": r.signal, "norm": r.norm,
+                "shift": f"{r.shift:g}", "pre_lo": pre[0], "pre_hi": pre[1], "post_lo": post[0], "post_hi": post[1],
+                "e0_mode": r.e0_mode, "e0": e0, "flatten": r.flatten,
+                "spacing": "" if r.spacing_after is None else f"{r.spacing_after:g}", "scale": f"{r.scale:g}",
+                "diag": r.diagnostics, "colour": ""}
+
+    def _fill_row(self, i: int, r, nr) -> None:
+        """Write a row's cells. Existing items are updated in place, never replaced, so an edit handled inside the
+        item's own itemChanged signal never deletes the item that emitted it."""
+        vals = self._cell_values(r, nr)
+        editable = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable
+        for c, (_h, key) in enumerate(COLUMNS):
+            v = vals[key]
+            it = self.table.item(i, c)
+            if it is None:
+                it = QTableWidgetItem()
+                self.table.setItem(i, c, it)
+            tip = ""
+            if c in BOOL_COLS:
+                it.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                it.setText("")
+                it.setCheckState(Qt.Checked if v else Qt.Unchecked)
+            else:
+                it.setFlags((Qt.ItemIsEnabled | Qt.ItemIsSelectable) if c == COL["colour"] else editable)
+                it.setText(str(v))
+            if c == COL["label"]:                      # ink text plus the series swatch (never coloured text)
+                it.setIcon(swatch_icon(r.colour or curve(i), dash(i)))
+            if c == COL["e0"]:
+                how = E0_MODE_TEXT.get(r.e0_mode, f"same as row {r.e0_mode[4:]}" if r.e0_mode.startswith("row:") else r.e0_mode)
+                tip = (f"E0 found: {how}." + (f"\n{nr.e0_note}" if nr is not None and nr.e0_note else "")
+                       + "\nType a value to fix E0; empty it for the derivative again.")
+            if c in (COL["pre_lo"], COL["pre_hi"], COL["post_lo"], COL["post_hi"]) and r.norm == "legacy":
+                tip = "legacy: absolute energies in eV; 'auto' = the first 15 % / the last 20 % of the scan"
+            it.setToolTip(tip)
+        b = self.table.cellWidget(i, COL["colour"])
+        if not isinstance(b, QToolButton):             # one button per row, reused (never a stale one left behind)
+            b = QToolButton()
+            b.setAutoRaise(True)
+            explain(b, "compare.colour")
+            b.clicked.connect(lambda _c=False, bb=b: self._choose_colour_at(bb.property("aurora_row")))
+            self.table.setCellWidget(i, COL["colour"], b)
+        b.setProperty("aurora_row", i)
+        b.setIcon(swatch_icon(r.colour or curve(i), dash(i), 14))
+        b.setAccessibleName(f"colour of {r.key}: {colour_name(r.colour or curve(i))}")
+        b.setToolTip(f"{HELP['compare.colour'][0]} Now {colour_name(r.colour or curve(i))}.")
+
     def _fill_table(self) -> None:
         self._filling = True
-        self.table.setRowCount(len(self.lib.requests))
-        for i, r in enumerate(self.lib.requests):
-            vals = [r.show, r.label, r.signal, f"{r.shift:g}", r.norm, f"{r.pre[0]:g}", f"{r.pre[1]:g}", f"{r.post[0]:g}",
-                    f"{r.post[1]:g}", r.flatten, "" if r.spacing_after is None else f"{r.spacing_after:g}", f"{r.scale:g}", r.fit, r.diagnostics]
-            for c, v in enumerate(vals):
-                it = QTableWidgetItem("" if c in BOOL_COLS else str(v))
-                if c in BOOL_COLS:
-                    it.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                    it.setCheckState(Qt.Checked if v else Qt.Unchecked)
-                if c == 1:                                 # ink text plus the series swatch (never coloured text)
-                    it.setIcon(swatch_icon(r.colour or curve(i), dash(i)))
-                self.table.setItem(i, c, it)
+        try:
+            results = {id(r): nr for r, _s, nr in self.lib.processed()}
+            self.table.setRowCount(len(self.lib.requests))
+            for i, r in enumerate(self.lib.requests):
+                self._fill_row(i, r, results.get(id(r)))
+            self._apply_widths()
+        finally:
+            self._filling = False
+        if abs(self.default_shift.value() - self.lib.default_shift) > 1e-12:
+            self.default_shift.blockSignals(True)
+            self.default_shift.setValue(self.lib.default_shift)
+            self.default_shift.blockSignals(False)
+
+    def _apply_widths(self) -> None:
+        """Columns sized to their content; the Label column stretches in Easy and keeps a real width in Advanced (the
+        table scrolls sideways there), so labels stay readable with every column shown."""
+        hdr = self.table.horizontalHeader()
+        lab = COL["label"]
+        hdr.setSectionResizeMode(lab, QHeaderView.Interactive)
         self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self._filling = False
+        if mode.is_advanced():
+            hdr.setSectionResizeMode(lab, QHeaderView.Interactive)
+            self.table.setColumnWidth(lab, max(LABEL_MIN_PX, min(self.table.sizeHintForColumn(lab) + 12, 320)))
+        else:
+            hdr.setSectionResizeMode(lab, QHeaderView.Stretch)
+
+    def _refill_row(self, row: int) -> None:
+        if row >= len(self.lib.requests):
+            return
+        r = self.lib.requests[row]
+        self._filling = True
+        try:
+            self._fill_row(row, r, self.lib.process_row(r))
+        finally:
+            self._filling = False
+
+    def _choose_colour_at(self, row) -> None:
+        if isinstance(row, int) and 0 <= row < len(self.lib.requests):
+            self._choose_colour(self.lib.requests[row])
+
+    def _choose_colour(self, r) -> None:
+        if r not in self.lib.requests:
+            return
+        i = self.lib.requests.index(r)
+        c = pick_colour(self, r.colour or curve(i), f"Colour of {r.key}")
+        if c:
+            r.colour = c
+            self.lib.changed.emit()
+
+    def _apply_cell(self, r, row: int, col: int, it: QTableWidgetItem, txt: str) -> None:
+        """Write one edited cell into its row; ValueError(reason) when the text cannot be used."""
+        key = COLUMNS[col][1]
+        if key in ("show", "fit", "flatten", "diag"):
+            on = it.checkState() == Qt.Checked
+            setattr(r, {"show": "show", "fit": "fit", "flatten": "flatten", "diag": "diagnostics"}[key], on)
+        elif key == "label":
+            if txt and txt != r.label and not self.lib.rename(r.label, txt):
+                raise ValueError(f"a sample named {txt} already exists")
+        elif key == "signal":
+            sigs = self.lib.signals_of(r.label)
+            if txt not in sigs:
+                raise ValueError(f"not a signal of {r.label} ({', '.join(sigs)})")
+            r.signal = txt
+        elif key == "norm":
+            if txt not in NORMS:
+                raise ValueError(f"not one of {', '.join(NORMS)}")
+            r.norm = txt
+        elif key == "shift":
+            r.shift = self._number(txt or "0", "a shift in eV")
+        elif key in ("pre_lo", "pre_hi", "post_lo", "post_hi"):
+            self._apply_window(r, key, txt)
+        elif key == "e0_mode":
+            if txt not in E0_MODES and not (txt.startswith("row:") and self.lib.row_by_key(txt[4:]) not in (None, r)):
+                raise ValueError(f"not one of {', '.join(E0_MODES)} or row:<another row>")
+            if txt == "fixed" and r.e0 is None:
+                nr = self.lib.process_row(r)
+                r.e0 = float(nr.e0) if nr is not None and np.isfinite(nr.e0) else None
+            r.e0_mode = txt
+        elif key == "e0":
+            if not txt:
+                r.e0_mode, r.e0 = "deriv", None
+            else:
+                v = self._number(txt, "an energy in eV")
+                if v <= 0:
+                    raise ValueError("E0 must be a positive energy")
+                r.e0_mode, r.e0 = "fixed", v
+        elif key == "spacing":
+            r.spacing_after = None if not txt else self._number(txt, "an offset")
+        elif key == "scale":
+            v = self._number(txt or "1", "a multiplier")
+            if v == 0:
+                raise ValueError("a scale of 0 hides the trace")
+            r.scale = v
+
+    @staticmethod
+    def _number(txt: str, what: str) -> float:
+        try:
+            v = float(txt.split()[0]) if txt.split() else float(txt)
+        except (ValueError, IndexError):
+            raise ValueError(f"not {what}") from None
+        if not np.isfinite(v):
+            raise ValueError(f"not {what}")
+        return v
+
+    def _apply_window(self, r, key: str, txt: str) -> None:
+        lo_hi = 0 if key.endswith("_lo") else 1
+        pre = key.startswith("pre")
+        if r.norm == "legacy":
+            blank = (not txt) or txt.startswith("auto")
+            s = self.lib.spectrum_of(r)
+            auto = legacy_auto_windows(s.E + r.shift) if s is not None else ((0.0, 0.0), (0.0, 0.0))
+            cur = (r.legacy_pre if pre else r.legacy_post) or (auto[0] if pre else auto[1])
+            if blank:
+                new = None
+            else:
+                v = self._number(txt, "an energy in eV")
+                new = (v, cur[1]) if lo_hi == 0 else (cur[0], v)
+                if new[0] >= new[1]:
+                    raise ValueError("the window must start below its end")
+            if pre:
+                r.legacy_pre = new
+            else:
+                r.legacy_post = new
+            return
+        v = self._number(txt, "eV from E0")
+        cur = r.pre if pre else r.post
+        new = (v, cur[1]) if lo_hi == 0 else (cur[0], v)
+        if new[0] >= new[1]:
+            raise ValueError("the window must start below its end")
+        if pre:
+            r.pre = new
+        else:
+            r.post = new
 
     def _item_changed(self, it: QTableWidgetItem) -> None:
         if self._filling:
             return
         row, col = it.row(), it.column()
-        if row >= len(self.lib.requests):
+        if row >= len(self.lib.requests) or col == COL["colour"]:
             return
         r = self.lib.requests[row]
         txt = it.text().strip()
+        before = r.to_json()
         try:
-            if col == 0:
-                r.show = it.checkState() == Qt.Checked
-            elif col == 1 and txt and txt != r.label:
-                if not self.lib.rename(r.label, txt):
-                    self.status.setText(f"a sample named {txt} already exists")
-                return
-            elif col == 2 and txt in self.lib.signals_of(r.label):
-                r.signal = txt
-            elif col == 3:
-                r.shift = float(txt or 0)
-            elif col == 4 and txt in NORMS:
-                r.norm = txt
-            elif col in (5, 6):
-                r.pre = (float(txt), r.pre[1]) if col == 5 else (r.pre[0], float(txt))
-            elif col in (7, 8):
-                r.post = (float(txt), r.post[1]) if col == 7 else (r.post[0], float(txt))
-            elif col == 9:
-                r.flatten = it.checkState() == Qt.Checked
-            elif col == 10:
-                r.spacing_after = float(txt) if txt else None
-            elif col == 11:
-                r.scale = float(txt or 1)
-            elif col == 12:
-                r.fit = it.checkState() == Qt.Checked
-            elif col == 13:
-                r.diagnostics = it.checkState() == Qt.Checked
-        except ValueError:
-            self.status.setText(f"could not read '{txt}'")
+            self._apply_cell(r, row, col, it, txt)
+        except ValueError as err:
+            self._refill_row(row)
+            shown = self.table.item(row, col).text() if self.table.item(row, col) is not None else ""
+            self.say(f"could not read '{txt}' in {COLS[col]} of {r.key}: {err}; the cell keeps {shown or 'its value'}",
+                     "warn")
+            return
+        if COLUMNS[col][1] == "label":
+            return                                     # rename emitted changed: the table and the plot follow
+        if r.to_json() != before:
+            self.lib.touch()
+        self._fill_table() if COLUMNS[col][1] in ("norm", "e0_mode", "e0", "shift") else self._refill_row(row)
         self.replot()
         self._draw_diagnostics()
         self.update_actions()
@@ -274,17 +645,72 @@ class ComparePerspective(QWidget):
 
     def _apply_ranges(self) -> None:
         rows = self.selected_rows() or None
+        if (self.pre_lo.value() >= self.pre_hi.value()) or (self.post_lo.value() >= self.post_hi.value()):
+            self.say("each window must start below its end; nothing changed", "warn")
+            return
         self.lib.set_all("pre", (self.pre_lo.value(), self.pre_hi.value()), rows)
         self.lib.set_all("post", (self.post_lo.value(), self.post_hi.value()), rows)
+        self.lib.set_all("e0_smooth", self.e0_smooth.value(), rows)
+
+    def _default_shift_changed(self, v: float) -> None:
+        self.lib.default_shift = float(v)
+        self.lib.touch()
+
+    # ------------------------------------------------------------------ view settings kept with the library
+    def view_settings(self) -> dict:
+        return {"x_range": self._xrange(), "spacing": self.spacing.value(), "labels": self.labels_on.isChecked(),
+                "signal_in_label": self.signal_in_label.isChecked(), "label_inset_ev": self.label_inset.value()}
+
+    def _view_changed(self, *_a) -> None:
+        self.lib.extra.update(self.view_settings())
+        self.lib.touch()
+        self.replot()
+
+    def _apply_view(self) -> None:
+        """A project's library or a config was loaded: its x range, spacing and label settings come back."""
+        ex = self.lib.extra
+        ws = (self.x_lo, self.x_hi, self.spacing, self.labels_on, self.signal_in_label, self.label_inset)
+        for w in ws:
+            w.blockSignals(True)
+        try:
+            xr = ex.get("x_range")
+            if isinstance(xr, (list, tuple)) and len(xr) == 2:
+                self.x_lo.setText(f"{float(xr[0]):g}"); self.x_hi.setText(f"{float(xr[1]):g}")
+            elif "x_range" in ex:
+                self.x_lo.clear(); self.x_hi.clear()
+            if "spacing" in ex:
+                self.spacing.setValue(float(ex["spacing"]))
+            if "labels" in ex:
+                self.labels_on.setChecked(bool(ex["labels"]))
+            if "signal_in_label" in ex:
+                self.signal_in_label.setChecked(bool(ex["signal_in_label"]))
+            if "label_inset_ev" in ex:
+                self.label_inset.setValue(float(ex["label_inset_ev"]))
+        except (TypeError, ValueError):
+            pass
+        finally:
+            for w in ws:
+                w.blockSignals(False)
+        self.default_shift.blockSignals(True)
+        self.default_shift.setValue(self.lib.default_shift)
+        self.default_shift.blockSignals(False)
+        self.replot()
 
     # ------------------------------------------------------------------ files
     def _add_folder(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Folder of saved spectra (*_full_reduced.csv, *_xanes.csv, AURORA zone CSVs)",
                                              default_dir("reduced", self.lib))
-        if d:
-            remember_dir("reduced", Path(d))
-            n = len(self.lib.add_folder(Path(d)))
-            self.status.setText(f"{plural(n, 'trace')} added from {d}" if n else f"no reduced CSVs found in {d}")
+        if not d:
+            return
+        remember_dir("reduced", Path(d))
+        easy = not mode.is_advanced()
+        n = len(self.lib.add_folder(Path(d), john_only=easy))
+        skipped = getattr(self.lib, "last_skipped", [])
+        self.status.setText(f"{plural(n, 'trace')} added from {d}" if n else f"no reduced CSVs found in {d}")
+        if easy and skipped:
+            names = ", ".join(p.name for p in skipped[:3]) + (f" and {len(skipped) - 3} more" if len(skipped) > 3 else "")
+            self.say(f"{plural(len(skipped), 'file')} not in John Bussey's format skipped in Easy mode ({names}); "
+                     f"Advanced mode reads them", "muted")
 
     def _add_csv(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Add CSV / text spectra", default_dir("csv", self.lib),
@@ -294,7 +720,7 @@ class ComparePerspective(QWidget):
             try:
                 n += len(self.lib.add_file(Path(f)))
             except ValueError as err:
-                self.status.setText(str(err))
+                self.say(str(err), "warn")
         if files:
             remember_dir("csv", files[0])
         if n:
@@ -310,7 +736,7 @@ class ComparePerspective(QWidget):
                 try:
                     n += len(self.lib.add_file(p, label))
                 except ValueError as err:
-                    self.status.setText(str(err))
+                    self.say(str(err), "warn")
             self.status.setText(f"{plural(n, 'reference trace')} added")
 
     def _save_config(self) -> None:
@@ -318,10 +744,11 @@ class ComparePerspective(QWidget):
                                            "JSON (*.json)")
         if p:
             remember_dir("config", p)
+            out = []
             with guarded_write(self, Path(p).name) as g:
-                self.lib.save(Path(p), {"x_range": self._xrange(), "spacing": self.spacing.value()})
+                out = self.lib.save(Path(p), self.view_settings())
             if g.ok:
-                notify_saved(self.status, [Path(p)])
+                self.notify(out)
 
     def _load_config(self) -> None:
         p, _ = QFileDialog.getOpenFileName(self, "Load compare config", default_path("config", "compare_config.json", self.lib),
@@ -329,40 +756,59 @@ class ComparePerspective(QWidget):
         if p:
             remember_dir("config", p)
             try:
-                missing, extra = self.lib.load(Path(p))
-            except (OSError, ValueError) as err:
+                missing, _extra = self.lib.load(Path(p))
+            except (OSError, ValueError, KeyError, TypeError) as err:
                 QMessageBox.warning(self, "Load config", f"Could not read {Path(p).name}: {err}")
                 return
-            if "spacing" in extra:
-                self.spacing.setValue(float(extra["spacing"]))
-            if missing:
-                QMessageBox.information(self, "Missing files", "Not found:\n" + "\n".join(missing))
+            if not missing:
+                self.say(f"loaded {Path(p).name}: {plural(len(self.lib.requests), 'row')}", "ok")
+
+    def _figure_options(self) -> None:
+        from aurora.app.figure_export import open_dialog, summary
+        if open_dialog(self):
+            self.status.setText(f"figures: {summary()}")
+        self._figure_tip()
+
+    def _figure_tip(self) -> None:
+        from aurora.app.figure_export import summary
+        base = HELP["compare.figure_size"][0]
+        self.figure_btn.setProperty("aurora_tip", f"{base}\nNow: {summary()}")
+        self.figure_btn.setToolTip(f"{base}\nNow: {summary()}")
 
     def _export(self) -> None:
-        p, _ = QFileDialog.getSaveFileName(self, "Export comparison (.csv, .png, .svg next to it)",
+        p, _ = QFileDialog.getSaveFileName(self, "Export comparison (.csv, the figure and the config next to it)",
                                            default_path("compare", "comparison.csv", self.lib), "CSV (*.csv)")
         if not p:
             return
         remember_dir("compare", p)
+        out = []
         with guarded_write(self, Path(p).name) as g:
             out = self.export(Path(p))
         if g.ok:
-            notify_saved(self.status, out)
+            self.notify(out)
 
-    def export(self, path: Path) -> list[Path]:
-        traces = [(r, nr.y * 0 + s.E + r.shift, nr.y) for r, s, nr in self.lib.processed(lambda r: r.show)]
-        export_wide_csv(path, [(r, E, y) for r, E, y in traces])
+    def export(self, path: Path, opts=None) -> list[Path]:
+        """The wide CSV of the shown traces as processed, the figure at the chosen size (PNG / SVG / PDF, drawn again
+        with matplotlib, offsets and x range as on screen), and the config JSON (+ its sidecar of arrays)."""
+        from aurora.app.figure_export import current_options, export_colour, styled
+        from aurora.core.figures import FigureTrace, compare_figure, save_figure
+        path = Path(path)
+        traces = self.plot_traces()
+        export_wide_csv(path, [(t.r, t.E, t.nr.y) for t in traces])
         out = [path]
-        try:
-            from pyqtgraph.exporters import ImageExporter, SVGExporter
-            ImageExporter(self.plot.plotItem).export(str(path.with_suffix(".png")))
-            SVGExporter(self.plot.plotItem).export(str(path.with_suffix(".svg")))
-            out += [path.with_suffix(".png"), path.with_suffix(".svg")]
-        except Exception as err:
-            self.status.setText(f"figure export failed: {err}")
+        xr = self._xrange()
+        o = styled(opts or current_options(), x_range=tuple(xr) if xr else None, ylabel=self._ylabel(units=True),
+                   labels=self.labels_on.isChecked(), label_inset_ev=self.label_inset.value(),
+                   title="", legend=False)
+        o.metadata["Title"] = f"Compare: {plural(len(traces), 'trace')}"
+        fts = []
+        for t in traces:
+            c, lab, dname = export_colour(t.i, t.colour)
+            fts.append(FigureTrace(t.text, t.E, t.y, c, lab, dname))
+        fig = compare_figure(fts, o)
+        out += save_figure(fig, path, o)
         cfg = path.with_name(path.stem + "_config.json")
-        self.lib.save(cfg, {"x_range": self._xrange(), "spacing": self.spacing.value()})
-        out.append(cfg)
+        out += self.lib.save(cfg, self.view_settings())
         self.status.setText("exported " + ", ".join(p.name for p in out))
         return out
 
@@ -373,50 +819,83 @@ class ComparePerspective(QWidget):
         except ValueError:
             return None
 
+    def x_range(self):
+        """The Compare x range (eV) as a tuple, None when automatic (Fit uses it as its default range)."""
+        xr = self._xrange()
+        return (min(xr), max(xr)) if xr and xr[0] != xr[1] else None
+
     def shown(self):
         return self.lib.processed(lambda r: r.show)
 
+    def _ylabel(self, units: bool = False) -> str:
+        if self.deriv.isChecked():
+            return "d/dE of the normalised signal (1/eV), offset" if units else "d/dE of the normalised signal, offset"
+        return "normalised signal (edge step = 1), offset" if units else "normalised, offset"
+
+    def plot_traces(self) -> list:
+        """The shown traces as drawn: row index, colour, shifted energies, offset values, label text."""
+        items = self.shown()
+        offsets = stack_offsets([r for r, _, _ in items], self.spacing.value())
+        rows = {id(r): k for k, r in enumerate(self.lib.requests)}
+        out = []
+        for (r, s, nr), off in zip(items, offsets):
+            i = rows.get(id(r), 0)                      # the table row: same colour and dash as its swatch
+            E = s.E + r.shift
+            base = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
+            out.append(SimpleNamespace(r=r, s=s, nr=nr, i=i, E=E, base=base, y=base + off, off=off,
+                                       colour=r.colour or curve(i),
+                                       text=r.label + (f" ({r.signal})" if self.signal_in_label.isChecked() else "")))
+        return out
+
     def replot(self) -> None:
         self.plot.clear()
-        items = self.shown()
-        if not items:
+        traces = self.plot_traces()
+        if not traces:
             self.status.setText("add saved spectra, or send a zone from Reduce")
             set_plot_hint(self.plot, "tick Show on a row to plot it" if self.lib.requests else "no spectra yet")
             self.update_actions()
             return
         set_plot_hint(self.plot, None)
-        offsets = stack_offsets([r for r, _, _ in items], self.spacing.value())
         xr = self._xrange()
-        xs, ys, failed, peaks_txt = [], [], [], []
-        rows = {id(r): k for k, r in enumerate(self.lib.requests)}
-        for (r, s, nr), off in zip(items, offsets):
-            i = rows.get(id(r), 0)                      # the table row: same colour and dash as its swatch
-            E = s.E + r.shift
-            base = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
-            y = base + off
-            if not np.isfinite(base).any():
-                failed.append(r.label); continue
-            colour = r.colour or curve(i)
-            pen = pg.mkPen(colour, width=1.4, style=dash(i))
-            self.plot.plot(E, y, pen=pen, connect="finite")
-            sel = np.isfinite(y) & ((E >= xr[0]) & (E <= xr[1]) if xr else True)
+        xs, ys, failed, peaks_txt, notes = [], [], [], [], []
+        drawn = []
+        for t in traces:
+            if not np.isfinite(t.base).any():
+                failed.append(t.r.label); continue
+            pen = pg.mkPen(t.colour, width=1.4, style=dash(t.i))
+            self.plot.plot(t.E, t.y, pen=pen, connect="finite")
+            if t.nr.e0_note:
+                notes.append(t.r.key)
+            sel = np.isfinite(t.y) & ((t.E >= xr[0]) & (t.E <= xr[1]) if xr else True)
             if sel.any():
-                xs += [float(E[sel].min()), float(E[sel].max())]; ys.append(y[sel])
-                if self.labels_on.isChecked():
-                    t = pg.TextItem(r.label + (f" ({r.signal})" if self.signal_in_label.isChecked() else ""), color=label_for(colour), anchor=(1, 0.5))
-                    t.setPos(float(E[sel].max()), float(y[sel][-1]))
-                    self.plot.addItem(t, ignoreBounds=True)
+                xs += [float(t.E[sel].min()), float(t.E[sel].max())]; ys.append(t.y[sel])
+                drawn.append(t)
             if self.show_peaks.isChecked():
-                pk = local_peaks(E, base, self.prominence.value(), int(self.distance.value()))
+                pk = local_peaks(t.E, t.base, self.prominence.value(), int(self.distance.value()))
                 if pk:
-                    self.plot.addItem(pg.ScatterPlotItem([p[0] for p in pk], [p[1] + off for p in pk], size=7, brush=pg.mkBrush(colour), pen=None), ignoreBounds=True)
-                    peaks_txt.append(f"{r.label}: " + ", ".join(f"{p[0]:.1f}" for p in pk))
+                    self.plot.addItem(pg.ScatterPlotItem([p[0] for p in pk], [p[1] + t.off for p in pk], size=7,
+                                                         brush=pg.mkBrush(t.colour), pen=None), ignoreBounds=True)
+                    peaks_txt.append(f"{t.r.label}: " + ", ".join(f"{p[0]:.1f}" for p in pk))
         if xs and ys:
+            x0, x1 = (xr[0], xr[1]) if xr else (min(xs), max(xs))
+            if self.labels_on.isChecked():
+                xl = x1 - max(0.0, self.label_inset.value())
+                for t in drawn:
+                    sel = np.isfinite(t.y) & (t.E >= x0) & (t.E <= x1)
+                    e, v = t.E[sel], t.y[sel]
+                    xa = min(max(xl, float(e.min())), float(e.max()))
+                    ti = pg.TextItem(t.text, color=label_for(t.colour), anchor=(1, 1))
+                    ti.setPos(xa, float(np.interp(xa, e, v)))
+                    self.plot.addItem(ti, ignoreBounds=True)
             v = np.concatenate(ys)
-            self.plot.getViewBox().setRange(xRange=(xr[0], xr[1]) if xr else (min(xs), max(xs)),
-                                            yRange=(float(np.nanmin(v)), float(np.nanmax(v))), padding=0.05, disableAutoRange=True)
-        self.plot.setLabel("left", "d/dE of the normalised signal, offset" if self.deriv.isChecked() else "normalised, offset")
-        self.status.setText(f"{plural(len(items) - len(failed), 'trace')} plotted" + (f"; normalisation failed (all NaN) for: {', '.join(failed)} — adjust the ranges" if failed else ""))
+            span = float(np.nanmax(v) - np.nanmin(v)) or 1.0
+            self.plot.getViewBox().setRange(xRange=(x0, x1), yRange=(float(np.nanmin(v)), float(np.nanmax(v)) + 0.06 * span),
+                                            padding=0.05, disableAutoRange=True)
+        self.plot.setLabel("left", self._ylabel())
+        n_ok = len(traces) - len(failed)
+        self.status.setText(f"{plural(n_ok, 'trace')} plotted"
+                            + (f"; normalisation failed (all NaN) for: {', '.join(failed)} — adjust the ranges" if failed else "")
+                            + (f"; E0 note on {', '.join(notes)} (see the E0 eV cell and the diagnostics)" if notes else ""))
         self.peaks_label.setText("peak maxima (shifted energies): " + " · ".join(peaks_txt) if peaks_txt else "")
         self.update_actions()
 
@@ -428,8 +907,7 @@ class ComparePerspective(QWidget):
         sa, sb = self.lib.spectrum_of(ra), self.lib.spectrum_of(rb)
         if sa is None or sb is None:
             return
-        from aurora.core.compare import process
-        d = difference(sa, sb, process(sa, ra).y, process(sb, rb).y, ra.shift, rb.shift)
+        d = difference(sa, sb, self.lib.process_row(ra).y, self.lib.process_row(rb).y, ra.shift, rb.shift)
         self.lib.add_spectra([d], show_signals=("difference",), norm="none")
         self.status.setText(f"added {d.label} (normalised A minus normalised B, no further normalisation)")
 
@@ -442,11 +920,11 @@ class ComparePerspective(QWidget):
         s = self.lib.spectrum_of(r) if r is not None else None
         if s is None:
             self.diag.setTitle("")
+            self.diag_note.setText("")
             set_plot_hint(self.diag, "select a row to see its raw signal and fitted lines")
             return
         set_plot_hint(self.diag, None)
-        from aurora.core.compare import process
-        nr = process(s, r)
+        nr = self.lib.process_row(r)
         E = s.E + r.shift
         self.diag.plot(E, s.y, pen=role_pen("raw", 1.4), connect="finite", name="raw signal")
         if nr.pre_line is not None:
@@ -455,8 +933,16 @@ class ComparePerspective(QWidget):
             self.diag.plot(E, nr.post_line, pen=role_pen("post", 1.2), name="post-edge line")
         if np.isfinite(nr.e0):
             self.diag.addItem(pg.InfiniteLine(nr.e0, angle=90, pen=role_pen("e0", 1.2)), ignoreBounds=True)
+        edge_ev = self.lib.edge_ev_of(s)
+        if edge_ev is not None and np.isfinite(edge_ev) and E[np.isfinite(E)].min() <= edge_ev <= E[np.isfinite(E)].max():
+            self.diag.addItem(pg.InfiniteLine(edge_ev, angle=90, pen=role_pen("edge", 1.0)), ignoreBounds=True)
         fin = np.isfinite(s.y)
         if fin.any():
             self.diag.getViewBox().setRange(xRange=(float(E[fin].min()), float(E[fin].max())),
                                             yRange=(float(s.y[fin].min()), float(s.y[fin].max())), padding=0.05, disableAutoRange=True)
-        self.diag.setTitle(f"{r.label} [{r.signal}] · {r.norm} · E0 {nr.e0:.2f} eV · step {nr.step:.3g}" + (f" · {nr.note}" if nr.note else ""))
+        how = {"deriv": "derivative", "half": "half step", "table": "tabulated", "fixed": "fixed"}.get(
+            r.e0_mode, f"as {r.e0_mode[4:]}" if r.e0_mode.startswith("row:") else r.e0_mode)
+        self.diag.setTitle(f"{r.label} [{r.signal}] · {r.norm} · E0 {nr.e0:.2f} eV ({how}) · step {nr.step:.3g}")
+        edge = f"tabulated {self.lib.edge_text_of(s)} edge {edge_ev:.1f} eV (dashed line)" if edge_ev else "no tabulated edge known"
+        self.diag_note.setText(" · ".join(x for x in (f"E0 {nr.e0:.2f} eV: {E0_MODE_TEXT.get(r.e0_mode, how)}", edge,
+                                                      nr.note, nr.e0_note) if x))
