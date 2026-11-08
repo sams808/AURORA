@@ -96,7 +96,7 @@ class XrfWindowCard(Card):
         self.same_range = QCheckBox("same range for all detectors")
         self.same_range.setChecked(True)
         al.addWidget(self.same_range)
-        self.remember_btn = QPushButton("Remember for the edge")
+        self.remember_btn = QPushButton("Remember windows for the edge")
         al.addWidget(self.remember_btn)
         self.body.addWidget(self.adv_box)
         self.status = QLabel("")
@@ -131,9 +131,10 @@ class XrfWindowCard(Card):
         try:
             self.preset.clear()
             bins = getattr(proj, "roi_bins", None)
-            for lab in self._labels:
-                if xw.bins_windows(bins, lab) is not None:
-                    self.preset.addItem(f"{lab} (fixed bins)", ("line", lab))
+            labs = [lab for lab in self._labels if xw.bins_windows(bins, lab) is not None]
+            labs += [lab for lab in (bins.labels if bins is not None else []) if bins.has(lab) and lab not in labs]
+            for lab in labs:                            # every line of roi_bins.json, and the stack's own lines
+                self.preset.addItem(f"{lab} (fixed bins)", ("line", lab))
             if self._edge_line is not None:
                 self.preset.addItem(f"line of the edge: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV",
                                     ("edge", self._edge_line.label))
@@ -144,7 +145,7 @@ class XrfWindowCard(Card):
             w.setEnabled(sd is not None)
         self.det.setEnabled(sd is not None and not self.same_range.isChecked())
         edge = getattr(sd, "edge_text", "") if sd is not None else ""
-        self.remember_btn.setText(f"Remember for {edge}" if edge else "Remember for the edge")
+        self.remember_btn.setText(f"Remember windows for {edge}" if edge else "Remember windows for the edge")
         self.show_choice(choice)
         self.refresh_spectrum()
 
@@ -173,10 +174,14 @@ class XrfWindowCard(Card):
         self._describe()
 
     def _preset_index(self) -> int:
+        bins = getattr(self.session.project, "roi_bins", None)
         for i in range(self.preset.count()):
             kind, lab = self.preset.itemData(i)
             if not self._custom and kind == "line" and lab == self._line:
                 return i
+            if self._custom and kind == "line" and lab not in self._labels and xw.same(self._windows,
+                                                                                      xw.bins_windows(bins, lab)):
+                return i                                # a roi_bins line the stack was not reduced with
             if self._custom and kind == "edge" and self._edge_line is not None and xw.same(self._windows, self._edge_line.windows):
                 return i
         return max(0, self.preset.count() - 1)          # custom
@@ -201,7 +206,8 @@ class XrfWindowCard(Card):
         kind, lab = self.preset.itemData(i)
         bins = getattr(self.session.project, "roi_bins", None)
         if kind == "line":
-            self._line, self._custom = lab, False
+            # a line the stack was reduced with keeps its bins; another roi_bins line is read from the raw spectra
+            self._line, self._custom = lab, lab not in self._labels
             self._windows = xw.bins_windows(bins, lab)
         elif kind == "edge" and self._edge_line is not None:
             self._line, self._custom = self._edge_line.label, True

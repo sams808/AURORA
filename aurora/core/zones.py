@@ -155,23 +155,13 @@ def _points_of(value):
     return None
 
 
-def _lattice(poly, pitch) -> tuple[np.ndarray, np.ndarray]:
-    """Points of a lattice of the given pitch (anchored at multiples of the pitch) covering the polygon's box."""
-    p = np.asarray(poly, float)
-    px, py = float(pitch[0]), float(pitch[1])
-    xs = np.arange(np.floor(p[:, 0].min() / px), np.ceil(p[:, 0].max() / px) + 1) * px
-    ys = np.arange(np.floor(p[:, 1].min() / py), np.ceil(p[:, 1].max() / py) + 1) * py
-    gx, gy = np.meshgrid(xs, ys)
-    return gx.ravel(), gy.ravel()
-
-
 def export_ready(zone: Zone, pitches) -> dict:
     """The zone as the HTML zone tool reads it (zones_all.json). The tool knows rectangles and painted squares only:
     every polygon is rasterised into painted squares centred on the pixels inside it, at the pitch of every stack in
-    `pitches` (sid -> StackData, or (x, y, pitch), or a bare (pitch x, pitch y)), so the tool finds the same members.
-    'polys' itself is kept for AURORA. With stack coordinates the result is exact (checked per stack, erase squares
-    added where squares of another pitch would reach a pixel outside the polygon); a bare pitch rasterises on a lattice
-    anchored at multiples of the pitch, which is exact only when the stack grid lies on that lattice."""
+    `pitches` (sid -> StackData or (x, y, pitch): the loaded stacks), so the tool finds the same members; the result is
+    checked per stack, with erase squares added where a square of another pitch would reach a pixel outside the
+    polygon. 'polys' itself is kept for AURORA. A bare (pitch x, pitch y) carries no pixel positions, so no exact
+    square can be placed for it: it adds nothing (logged)."""
     out = copy.deepcopy(zone.to_json())
     if not zone.polys:
         return out
@@ -198,11 +188,7 @@ def export_ready(zone: Zone, pitches) -> dict:
                 if in_poly[i]:
                     add(paint, have, x[i], y[i], pitch[0], pitch[1])
         else:
-            pitch = tuple(v)
-            for poly in zone.polys:
-                gx, gy = _lattice(poly, pitch)
-                for cx, cy in zip(gx[polygon_inside(poly, gx, gy)], gy[polygon_inside(poly, gx, gy)]):
-                    add(paint, have, cx, cy, pitch[0], pitch[1])
+            log.info("zone %s: %s has a pitch but no pixel positions; its polygon is not rasterised for it", zone.id, sid)
     # verify per stack with coordinates: the tool's rule (no polygons) must give AURORA's members
     erased = {(round(s[0], 4), round(s[1], 4), round(s[2], 4), round(s[3], 4)) for s in erase}
     for _round in range(3):

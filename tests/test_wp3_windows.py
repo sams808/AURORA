@@ -296,6 +296,38 @@ def test_line_of_the_edge_offered_with_a_calibration(qapp, fake_project):
         close(win)
 
 
+def test_a_roi_bins_line_the_stack_lacks_is_read_from_the_raw_spectra(qapp, fake_project):
+    """Every line of roi_bins.json is a preset. A line the stack was reduced without (its cache predates the line)
+    becomes windows read from the raw spectra, so the trace still exists."""
+    from wp3_helpers import close, open_window, pump
+    proj = Project.discover(fake_project)
+    StackData.load(proj, proj.find(testdata.STACK))               # cached with 'total XRF' only
+    (fake_project / "config" / "roi_bins.json").write_text(json.dumps(
+        {"F Kα": {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]}}), encoding="utf-8")
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        sd = ses.stack_loaded(sid)
+        assert sd.labels == ["total XRF"]
+        items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
+        assert items == ["total XRF (fixed bins)", "F Kα (fixed bins)", "custom"]
+        rd.map.rect_drawn.emit(*sd.bbox)
+        pump(qapp)
+        wc.preset.setCurrentIndex(1)
+        pump(qapp)
+        st = ses.zone().settings[sid]
+        assert st.line == "F Kα" and st.roi == {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]}
+        assert wc.preset.currentText() == "F Kα (fixed bins)"
+        win.jobs.wait_idle(30000)
+        pump(qapp)
+        rd.update_preview()
+        t = rd.preview._traces[0][1]
+        assert t.sum is not None and "windows SDD1 60:74" in t.line
+    finally:
+        close(win)
+
+
 def test_real_windows_reproduce_the_sgm_report_bins(real_project):
     """Read-only, on the real beamtime: the roi_bins F Kα windows read from the raw spectra give exactly the F Kα line of
     sgm_report's reduced cache (an independent implementation) at every energy the cache kept. Memory only: no root,
