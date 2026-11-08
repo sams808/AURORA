@@ -122,6 +122,14 @@ def _destroy_leftover_windows(_isolated_settings):
         w.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     app.processEvents()
+    # What a destroyed window leaves on the Python side is cyclic garbage that still owns live widgets (pyqtgraph's
+    # parentless ViewBox menus). Collect it here, on the GUI thread: left to the automatic collector, a full
+    # collection can start on a job's worker thread in a later test and delete those widgets there (an access
+    # violation, or a deadlock between the GIL and Qt). Skipped while a job has paused the collector (jobs._hold_gc).
+    if doomed:
+        import gc
+        if gc.isenabled():
+            gc.collect()
 
 
 @pytest.fixture(autouse=True)
