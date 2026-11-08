@@ -134,7 +134,7 @@ class CheckPerspective(QWidget):
         split = QSplitter(Qt.Vertical)
         # ---------------------------------------------------------------- Easy: the queue and its preview
         top = QSplitter(Qt.Horizontal)
-        self.queue_card = qcard = Card("Spectra to check", help_anchor="5-check")
+        self.queue_card = qcard = Card("Spectra to check", help_anchor="51-spectra-to-check")
         self.queue = QTableWidget(0, len(QCOLS))
         self.queue.setHorizontalHeaderLabels(QCOLS)
         self.queue.setAccessibleName("spectra to check")
@@ -158,7 +158,7 @@ class CheckPerspective(QWidget):
         self.queue_note = QLabel(""); self.queue_note.setObjectName("muted"); self.queue_note.setWordWrap(True)
         qcard.body.addWidget(self.queue_note)
         top.addWidget(qcard)
-        self.preview_card = pcard = Card("Preview of the selected spectrum", help_anchor="5-check")
+        self.preview_card = pcard = Card("Preview of the selected spectrum", help_anchor="51-spectra-to-check")
         vrow = QHBoxLayout()
         self.view_combo = QComboBox()
         for key, text in VIEWS:
@@ -187,7 +187,7 @@ class CheckPerspective(QWidget):
         split.addWidget(top)
 
         # ---------------------------------------------------------------- Advanced: the holder checks (sgm_report)
-        self.table_card = tcard = Card("Scans of the holder", help_anchor="5-check")
+        self.table_card = tcard = Card("Scans of the holder", help_anchor="52-the-holder-checks-advanced")
         self.run_btn = QPushButton("Run the checks on this holder"); self.run_btn.setObjectName("primary")
         self.run_btn.clicked.connect(self.run_checks)
         self.every_btn = QPushButton("Run the checks on every holder")
@@ -206,7 +206,7 @@ class CheckPerspective(QWidget):
         split.addWidget(tcard)
 
         self.bottom = bottom = QSplitter(Qt.Horizontal)
-        i0c = Card("I0 of the holder's scans (per-pixel mean)", help_anchor="5-check")
+        i0c = Card("I0 of the holder's scans (per-pixel mean)", help_anchor="52-the-holder-checks-advanced")
         opts = QHBoxLayout()
         self.i0_norm = QCheckBox("normalise to the level"); self.i0_norm.setChecked(True); self.i0_norm.toggled.connect(self._draw_i0)
         self.auto_btn = QPushButton("Auto-select good I0"); self.auto_btn.clicked.connect(self._auto_select)
@@ -222,7 +222,7 @@ class CheckPerspective(QWidget):
         self.i0_plot.getViewBox().disableAutoRange()
         i0c.body.addWidget(self.i0_plot, 2)
         bottom.addWidget(i0c)
-        sddc = Card("The four detectors on the selected zone", help_anchor="5-check")
+        sddc = Card("The four detectors on the selected zone", help_anchor="52-the-holder-checks-advanced")
         self.sdd_note = QLabel("select a zone in Reduce and a scan above"); self.sdd_note.setObjectName("muted"); self.sdd_note.setWordWrap(True)
         sddc.body.addWidget(self.sdd_note)
         self.sdd_plot = make_plot(x="energy (eV)", y="normalised (own range)", legend="inside")
@@ -231,7 +231,8 @@ class CheckPerspective(QWidget):
         self.spike_note = QLabel(""); self.spike_note.setObjectName("muted"); self.spike_note.setWordWrap(True)
         sddc.body.addWidget(self.spike_note)
         bottom.addWidget(sddc)
-        i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)", help_anchor="5-check")
+        i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)",
+                   help_anchor="52-the-holder-checks-advanced")
         xrow = QHBoxLayout()
         self.x_scan = QComboBox()
         self.x_scan.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -239,7 +240,7 @@ class CheckPerspective(QWidget):
         xrow.addWidget(self.x_scan, 1)
         self.x_read_btn = xb = QPushButton("Read"); xb.clicked.connect(self.explore_i0); xrow.addWidget(xb)
         i0x.body.addLayout(xrow)
-        self.x_plot = make_plot(x="energy (eV)", y="normalised to the median", legend="inside")
+        self.x_plot = make_plot(x="energy (eV)", y="/ median", legend="inside")        # short: the card is low
         self.x_plot.getViewBox().disableAutoRange()
         i0x.body.addWidget(self.x_plot, 1)
         self.x_note = QLabel(""); self.x_note.setObjectName("muted"); self.x_note.setWordWrap(True); i0x.body.addWidget(self.x_note)

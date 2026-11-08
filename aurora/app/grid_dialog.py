@@ -238,4 +238,4 @@ class GridDialog(QDialog):
 
     def _help(self) -> None:
         from aurora.app.help import open_help
-        open_help(self, "MANUAL.md", "3-survey")
+        open_help(self, "MANUAL.md", "31-grid-of-zones-advanced")

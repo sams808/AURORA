@@ -33,7 +33,7 @@ class XrfWindowCard(Card):
     remember_requested = Signal(object)     # the same, for 'Remember these windows for <edge>'
 
     def __init__(self, session, taskbar=None, parent: QWidget | None = None):
-        super().__init__("XRF window", parent, help_anchor="4-reduce")
+        super().__init__("XRF window", parent, help_anchor="48-xrf-windows")
         self.session = session
         self.taskbar = taskbar
         self._sd = None

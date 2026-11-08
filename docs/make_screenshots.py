@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     s = settings()
     s.setValue("appearance", args.scheme)
     s.setValue("reference_dir", str(demo / "references"))
+    s.setValue("report_author", "A. Researcher")      # a placeholder: never the account of the machine that makes the shots
     s.sync()
     app = create_app(["AURORA"])
     apply_theme(app, appearance=args.scheme)
@@ -73,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     z2 = ses.new_zone("2 beta"); z2.group = "Simple Glass"; z2.rects.append([(x0 + x1) / 2, x1, y0, y1])
     ses.touch(); ses.select_zone(z1.id)
     win.reduce.scan_list.setCurrentRow(0)
+    from aurora.app.session import CheckItem
+    ses.queue_for_check([CheckItem(ses.current_holder, z.id, sid) for z in (z1, z2)])     # Reduce's Add to Check
     ck = win.check
     ck._rates = {sid: count_rate_probe(proj, scan)}
     ck.compute()
@@ -94,6 +97,10 @@ def main(argv: list[str] | None = None) -> int:
     mp.set_hypercube(Hypercube.load(proj, scan)); mp.line.setCurrentIndex(1); mp.roi_mode.setCurrentIndex(1)
     mp.draw_elements(); mp.n_k.setValue(2); mp.run_clusters()
     win.report.out_dir.setText(str(demo / "reports" / "aurora"))
+    win.jobs.wait_idle(120000)                        # fits, clusters, elemental maps and the Check rows
+    win.check.queue.selectRow(0)
+    win.report.build()                                # the Pages card shows the first page of a real build
+    win.jobs.wait_idle(180000)
 
     shots = [("home", lambda: win.show_perspective("home")), ("survey", lambda: win.show_perspective("survey")),
              ("reduce", lambda: win.show_perspective("reduce")), ("check", lambda: win.show_perspective("check")),

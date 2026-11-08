@@ -343,14 +343,14 @@ class MapsPerspective(QWidget):
     # ------------------------------------------------------------------ tabs
     def _explore_tab(self) -> QWidget:
         w = QSplitter(Qt.Horizontal)
-        left = Card("Map at the energy", help_anchor="8-maps")
+        left = Card("Map at the energy", help_anchor="81-explore")
         self.map = MapView(); self.map.set_tool("navigate")
         self.map.rect_drawn.connect(self._rect)
         left.body.addWidget(self.map, 1)
         self.map_hint = ElidedLabel("", Qt.ElideMiddle); self.map_hint.setObjectName("muted"); left.body.addWidget(self.map_hint)
         w.addWidget(left)
         right = QSplitter(Qt.Vertical)
-        sc = Card("Emission spectrum of the ROI (drag the band to set the window)", help_anchor="8-maps")
+        sc = Card("Emission spectrum of the ROI (drag the band to set the window)", help_anchor="81-explore")
         self.spec = make_plot(x="emission energy (eV)", y="counts")
         self.spec.getViewBox().disableAutoRange()
         self._spec_curves = [self.spec.plot([], [], pen=pg.mkPen(curve(k), width=1.2, style=dash(k))) for k in range(len(DETS))]
@@ -360,7 +360,7 @@ class MapsPerspective(QWidget):
         self.spec.addItem(self.band, ignoreBounds=True)
         sc.body.addWidget(self.spec, 1)
         right.addWidget(sc)
-        xc = Card("XANES of the ROI in the window", help_anchor="8-maps")
+        xc = Card("XANES of the ROI in the window", help_anchor="81-explore")
         self.xanes = make_plot(x="incident energy (eV)", y="window counts / I0", legend="inside")
         self.xanes.plotItem.legend.setColumnCount(2)      # five entries in three rows: the curves stay visible
         self.xanes.getViewBox().disableAutoRange()
@@ -405,7 +405,7 @@ class MapsPerspective(QWidget):
 
     def _cluster_tab(self) -> QWidget:
         w = QSplitter(Qt.Horizontal)
-        left = Card("PCA + k-means on the pixels (window XANES / I0)", help_anchor="8-maps")
+        left = Card("PCA + k-means on the pixels (window XANES / I0)", help_anchor="84-clusters")
         row_box = QWidget(); row = FlowLayout(row_box, spacing=6)
         self.n_pc = QSpinBox(); self.n_pc.setRange(1, 20); self.n_pc.setValue(5); self.n_pc.setSuffix(unit_suffix("components"))
         row.addWidget(pair(labelled("PCA", self.n_pc, "maps.n_pc"), self.n_pc))
@@ -423,7 +423,7 @@ class MapsPerspective(QWidget):
         left.body.addWidget(self.cluster_map, 1)
         self.cluster_info = QLabel(""); self.cluster_info.setObjectName("muted"); self.cluster_info.setWordWrap(True); left.body.addWidget(self.cluster_info)
         w.addWidget(left)
-        right = Card("Clusters: tick to merge", help_anchor="8-maps")
+        right = Card("Clusters: tick to merge", help_anchor="84-clusters")
         self.cluster_list = QListWidget()               # the legend of the map and the spectra: same swatches
         self.cluster_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.cluster_list.setFlow(QListView.LeftToRight)

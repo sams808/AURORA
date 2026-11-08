@@ -1,38 +1,85 @@
 # AURORA
 
-Soft X-ray XAS and XRF stack analysis for the SGM beamline (ambxas endstation) of the Canadian Light Source. Desktop application for Windows and macOS.
+Soft X-ray XAS and XRF stack analysis for the SGM beamline (ambxas endstation) of the Canadian Light Source. Desktop
+application for Windows and macOS.
 
-Status 0.3.0 (2026-11-06): every planned perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps,
-Report), with stitching, deconvolution, peak decomposition, a reference library, zone proposals and the I0 explorer.
-Windows and macOS builds in CI. See `CHANGELOG.md`.
+AURORA is version 2 of John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_Beamline_Analysis notebooks.
 
-Documentation (`aurora/resources/docs/`, also in the application's Help menu): [user guide](aurora/resources/docs/USER_GUIDE.md) (short),
-[manual](aurora/resources/docs/MANUAL.md) (every control), [tutorials](aurora/resources/docs/TUTORIALS.md) (on the demo
-beamtime: `aurora demo <folder>`), [installation](aurora/resources/docs/INSTALL.md),
+Status 0.4.0 (2026-11-08): every perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps, Report).
+AURORA starts in **Easy mode**, the basic path of John Bussey's GUI (open the beamtime, draw the samples, check the
+spectra, compare, fit with LCF, build the report); **Advanced mode** (View > Advanced mode, the button in the top bar,
+or Ctrl+Shift+A) shows every option, Maps included. Zones attach to every stack that covers them, every edit can be
+undone, the session is backed up, and the report says what it will contain before it is built. See `CHANGELOG.md`.
+
+## Downloads
+
+Each release on the [GitHub releases page](https://github.com/sams808/AURORA/releases) carries:
+
+| File | For |
+|---|---|
+| `AURORA-<version>-windows-x64-setup.exe` | Windows 10 (1809) or 11, 64-bit: per-user install, no administrator rights |
+| `AURORA-<version>-windows-x64.zip` | Windows, the same application without an installer |
+| `AURORA-<version>-macos-arm64.dmg` | macOS 15 Sequoia or later on Apple silicon |
+| `AURORA-<version>-macos-x86_64.dmg` | macOS 15 Sequoia or later on an Intel Mac |
+| `SHA256SUMS.txt` | the checksums of the four files above |
+
+The installers are not code-signed: Windows SmartScreen asks once (*More info* > *Run anyway*), and macOS asks once
+(*System Settings > Privacy & Security > Open Anyway*, or `xattr -dr com.apple.quarantine /Applications/AURORA.app`).
+The macOS builds are tested on GitHub's macOS runners, not on a physical Mac. The installation guide covers both
+systems, the command line (`aurora-cli.exe` on Windows) and where settings, logs and caches are stored.
+
+Measured on the last local Windows x64 build (2026-11-08, PyInstaller 6.22.3, PySide6 6.11.3): the setup is 104 MiB,
+the zip 143 MiB, and the installed application folder 307 MiB.
+
+## Documentation
+
+The manuals live in `aurora/resources/docs/` and open inside the application from the Help menu:
+[user guide](aurora/resources/docs/USER_GUIDE.md) (short), [manual](aurora/resources/docs/MANUAL.md) (every control),
+[tutorials](aurora/resources/docs/TUTORIALS.md) (nine tutorials, eight on the demo beamtime: `aurora demo <folder>` or
+Help > Open the demo beamtime), [installation](aurora/resources/docs/INSTALL.md). For developers:
 [developer manual](docs/DEVELOPER.md), [brainstorm](docs/BRAINSTORM.md) (feature universe, architecture, roadmap),
-[design](docs/DESIGN.md). Logo in `branding/`.
+[design](docs/DESIGN.md), and the [documentation index](docs/README.md). Logo in `branding/`.
 
 ## Quick start (developers)
 
 ```
 py -3.12 -m venv .venv && .venv\Scripts\activate   # own environment: PySide6 >= 6.10 is required (6.9 paints nothing)
-python -m pip install -e ".[dev,build]"
+python -m pip install -e ".[dev]"
 python -m pytest                       # synthetic data; the Nov 2026 beamtime tests run when AURORA_REAL_PROJECT exists
 aurora                                 # the application
+aurora <beamtime folder>               # the application on that beamtime
 aurora project <beamtime folder>       # headless listing of days, holders, scans, status and flags
 aurora scan <scan folder>              # one scan's metadata and first energy
 aurora report <beamtime folder>        # the group-organised report, headless, from the saved session or a zones file
 aurora demo <folder>                   # a synthetic beamtime for the tutorials
-aurora --distcheck                     # offscreen smoke test (used by CI on the frozen build)
-packaging\build_win.bat                # frozen build from a clean venv -> dist/AURORA (Windows)
-packaging/build_mac.sh                 # same on macOS -> dist/AURORA.app
+aurora --selftest                      # every core path and perspective; the exit code is the number of failures
+packaging\build_win.bat                # Windows: dist\AURORA, the per-user setup and the zip (Inno Setup 6)
+packaging/build_mac.sh                 # macOS: dist/AURORA.app and the disk image of this Mac's architecture
 ```
 
-Always build from a clean virtual environment (the scripts create `.venv-build`): PyInstaller follows every import it
-finds in site-packages, and a global Python with torch or scikit-learn installed turns a 100 MB bundle into 1 GB.
+The build scripts create a clean `.venv-build` (Python 3.12, the pins of `packaging/constraints.txt`): PyInstaller
+follows every import it finds in site-packages, and a global Python with torch or scikit-learn installed would turn a
+300 MB bundle into 1 GB.
 
-The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with `processed/`, `config/`, `reports/` beside it.
-`aurora.core` never imports Qt; `aurora.app` holds the PySide6 interface.
+The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with `processed/`, `config/`, `reports/` beside it;
+a loose folder of scan folders (John Bussey's `CLS GUI/`) opens too. `aurora.core` never imports Qt; `aurora.app` holds
+the PySide6 interface.
+
+## Continuous integration
+
+`.github/workflows/ci.yml`, on every push to `main`, every pull request and by hand:
+
+- **tests**: the suite and the self-test from source on windows-latest and macos-15 (Python 3.11, 3.12, 3.13) and on
+  macos-15-intel, macos-26 and ubuntu-24.04 (Python 3.12);
+- **build-windows** (windows-latest): the frozen app and `aurora-cli.exe`, their self-tests, a frozen report, the
+  per-user installer installed, upgraded and uninstalled, the portable zip;
+- **test-windows**: the installer on windows-2022 and windows-11-arm;
+- **build-macos**: the app and its disk image on macos-15 (arm64) and macos-15-intel (x86_64), with the measured
+  minimum macOS (`packaging/min_macos.txt`);
+- **test-macos**: each disk image on macos-15 and macos-26 (arm64) and macos-15-intel (x86_64).
+
+A `v*` tag runs `.github/workflows/release.yml`: it checks the tag against the version, runs the whole of ci.yml and
+opens a draft GitHub release with the four installers, `SHA256SUMS.txt` and the notes of the CHANGELOG section.
 
 ## Lineage and credits
 
@@ -43,22 +90,30 @@ AURORA is version 2 of John Bussey's SGM XAS GUI (Washington State University), 
 - **sgm_report**, the beamtime reporting pipeline by **Sami Soudani**, Washington State University: survey pad detection, plate layouts, fixed ROI bins, per-SDD checks, saturation detection and holder reports.
 
 Edge and emission-line energies come from xraydb. Data acquired at the SGM beamline of the Canadian Light Source.
-The full credits text is in `CREDITS.md`; the licence is in `LICENSE` (MIT).
+The full credits text is in `CREDITS.md`.
+
+Licence: MIT (`LICENSE`). The installers carry `THIRD_PARTY_LICENSES.txt` for the bundled packages; Qt for Python is
+used under the LGPL-3.0. Help > Licences shows all of them.
 
 ## Layout
 
 ```
-aurora/core/    readers (h5, raw bin/csv, sgm_report caches, config, zones), names, grid, project model, synthetic test data
-aurora/core/    + stack/survey/zones (the zone tool's maths), qc (count rate, saturation, I0, SDD agreement, mcc curves),
-                compare (readers, normalisations, peaks), fit (LCF, PCA, MCR-ALS, ITFA, peak decomposition),
-                report (group-organised PDF), hypercube (maps, clusters, PyMca), references, propose, deconv, stitch
-aurora/app/     PySide6 shell: theme, icons, rail; perspectives Home, Survey, Reduce, Check, Compare, Fit, Maps, Report
-aurora/cli.py   aurora / aurora project / aurora scan / aurora report / aurora demo / aurora --distcheck
-tests/          pytest (offscreen Qt); tests/test_real_data.py needs the beamtime folder
-packaging/      PyInstaller spec; .github/workflows/ci.yml builds on windows-latest and macos-14
-branding/       logo (SVG, PNG 16-1024, .ico), wordmark
-docs/           USER_GUIDE, MANUAL, TUTORIALS, INSTALL, DEVELOPER, BRAINSTORM, DESIGN; img/ screenshots (make_screenshots.py)
-legacy/         sgm_report v2.5 (the Nov 2026 beamtime scripts); the two parent code bases stay local, not committed
+aurora/core/        readers (h5, raw bin/csv, sgm_report caches, config, zones), names, grid, project model,
+                    stack / survey / zones (the zone tool's maths), XRF windows, rules, qc, spectra, compare, fit,
+                    report and provenance, hypercube (maps, clusters, PyMca), references, propose, deconv, stitch,
+                    synthetic test data
+aurora/app/         PySide6 shell: theme, icons, rail, session (undo, backups), jobs; perspectives Home, Survey, Reduce,
+                    Check, Compare, Fit, Maps, Report; help browser and diagnostics
+aurora/resources/   icons, licences, and docs/ (the four manuals and their img/ screenshots, made by
+                    docs/make_screenshots.py)
+aurora/cli.py       aurora, aurora <folder>, project, scan, report, demo, --selftest, --distcheck
+aurora/selftest.py  the deep self-test (also Help > Run self-test…)
+tests/              pytest (offscreen Qt); the real-data tests need the beamtime folder
+packaging/          PyInstaller spec, Inno Setup script, build scripts, disk image, constraints, licences
+.github/workflows/  ci.yml (tests, builds, installer and disk-image tests) and release.yml (draft releases)
+branding/           logo (SVG, PNG 16-1024, .ico, .icns), wordmark
+docs/               DEVELOPER, BRAINSTORM, DESIGN, make_screenshots.py
+legacy/             sgm_report v2.5 (the Nov 2026 beamtime scripts); the two parent code bases stay local, not committed
 ```
 
 Author: Sami Soudani.

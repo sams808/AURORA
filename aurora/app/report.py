@@ -65,7 +65,7 @@ class ReportPerspective(QWidget):
 
         split = QSplitter(Qt.Horizontal)
         self.left_split = QSplitter(Qt.Vertical)
-        left = Card("Options", help_anchor="9-report")
+        left = Card("Options", help_anchor="91-options")
         r1 = QHBoxLayout()
         self.title = QLineEdit(); self.title.setPlaceholderText("AURORA report · <project>")
         r1.addWidget(labelled("title", self.title, "report.title")); r1.addWidget(self.title, 1)
@@ -131,7 +131,7 @@ class ReportPerspective(QWidget):
         left.body.addStretch(0)                        # takes the room of the hidden options in Easy mode only
         self.left_split.addWidget(left)
 
-        check = Card("Check before building", help_anchor="9-report")
+        check = Card("Check before building", help_anchor="92-check-before-building")
         self.totals = QLabel("no project open"); self.totals.setWordWrap(True)
         check.body.addWidget(self.totals)
         self.check_tabs = QTabWidget()
@@ -171,7 +171,7 @@ class ReportPerspective(QWidget):
         self.left_split.setMinimumWidth(400)
         split.addWidget(self.left_split)
 
-        right = Card("Pages", help_anchor="9-report")
+        right = Card("Pages", help_anchor="93-what-a-build-writes")
         nav_row = QHBoxLayout()
         self.prev_btn = QPushButton("◀"); self.prev_btn.clicked.connect(lambda: self._show_page(self._page - 1))
         self.next_btn = QPushButton("▶"); self.next_btn.clicked.connect(lambda: self._show_page(self._page + 1))

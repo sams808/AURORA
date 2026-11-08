@@ -19,5 +19,6 @@ x86_64 disk image on an Intel Mac.
    disk image again and compare it with SHA256SUMS.txt of the release (shasum -a 256 <file>).
 
 Help > Manual inside AURORA explains everything else. Settings live in ~/Library/Preferences, the log file in
-~/Library/Logs/AURORA (Help > Open the log folder). AURORA never writes into the raw/ folder of a beamtime.
+~/Library/Logs/AURORA (Help > Report a problem… > Open the log folder). AURORA never writes into the raw/ folder
+of a beamtime.
 LICENSE, CREDITS.md and THIRD_PARTY_LICENSES.txt next to this note hold the licences.

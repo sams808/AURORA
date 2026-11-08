@@ -213,7 +213,7 @@ class HomePerspective(QWidget):
         split.addWidget(left)
         self.scans_card = left
 
-        self.details_card = right = Card("Project", help_anchor="2-home")
+        self.details_card = right = Card("Project", help_anchor="22-project-and-scan-summaries")
         self.details = QTextBrowser()
         self.details.setOpenExternalLinks(False)
         self.details.setAccessibleName("summary of the project or of the selected scan")

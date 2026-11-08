@@ -29,12 +29,12 @@ PERSPECTIVE_HELP: dict[str, str] = {
     "home": "2-home", "survey": "3-survey", "reduce": "4-reduce", "check": "5-check", "compare": "6-compare",
     "fit": "7-fit", "maps": "8-maps", "report": "9-report", "settings": "10-settings",
 }
-# (perspective, tab title) -> anchor. The Maps tabs point at the Maps section until it gains subsections.
+# (perspective, tab title) -> anchor: each Fit and Maps tab opens its own MANUAL subsection.
 TAB_HELP: dict[tuple[str, str], str] = {
     ("fit", "LCF"): "71-lcf-linear-combination-fit", ("fit", "PCA / MCR-ALS"): "72-pca--mcr-als",
     ("fit", "ITFA"): "73-itfa", ("fit", "Peaks"): "74-peaks",
-    ("maps", "Explore"): "8-maps", ("maps", "Elemental maps"): "8-maps", ("maps", "RGB"): "8-maps",
-    ("maps", "Clusters"): "8-maps",
+    ("maps", "Explore"): "81-explore", ("maps", "Elemental maps"): "82-elemental-maps", ("maps", "RGB"): "83-rgb",
+    ("maps", "Clusters"): "84-clusters",
 }
 HELP_ANCHOR_PROP = "aurora_help_anchor"
 

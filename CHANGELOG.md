@@ -187,6 +187,22 @@ installs on Windows and macOS.
 - Releases: a `v*` tag builds and tests everything and opens a draft GitHub release with versioned installers,
   `SHA256SUMS.txt` and notes from this changelog.
 
+### Manuals
+- The user guide, manual, tutorials and installation guide describe this version: Easy mode as the start mode and
+  what Advanced mode adds in each perspective, every menu entry and shortcut, the session's undo and backups, the new
+  subsections (opening a project, project and scan summaries, grid of zones, XRF windows, copying settings and rules,
+  spectra to check, the holder checks, John Bussey's file formats, the five Maps tabs, the report's options, check,
+  build folders and CSV provenance), every file read and written, and the troubleshooting cases.
+- F1, the **?** of every card and What's this? open these subsections, including each Maps tab.
+- The installation guide follows the real release files (per-user setup, portable zip, one disk image per Mac
+  architecture, `SHA256SUMS.txt`), the measured minimum macOS (15.0), SmartScreen and Gatekeeper, where settings, logs
+  and caches live on each system, and how to run the self-test and report a problem. The macOS builds are tested on
+  GitHub's runners, not on a physical Mac, and the guide says so.
+- The tutorials use the demo beamtime's own spectra and references, and every number they quote is measured on it.
+- Tests keep the manuals honest: every bold control name must exist in the window, every control of the window must be
+  named in the manual, every Settings row must be a setting the application reads, every link, image and quoted
+  command-line option must resolve, and the stated minimum macOS must equal the measured one.
+
 ## 0.3.0 (2026-11-06)
 Phase 5 and the documentation.
 - Check: I0 explorer, mesh (mcc1) vs photodiode (mcc2), their ratio and TEY for any stack including the photodiode tests.
