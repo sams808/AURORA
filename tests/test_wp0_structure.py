@@ -81,10 +81,10 @@ def test_spectra_split_reexports_and_same_numbers(fake_project):
     for f in ("sum", "sum_raw", "tey", "tey_raw", "i0", "i0_used", "i0_raw"):
         assert np.array_equal(getattr(a, f), getattr(b, f), equal_nan=True), f
     assert all(np.array_equal(x, y, equal_nan=True) for x, y in zip(a.det, b.det))
-    # the new fields: empty by default, never shared between results
-    assert a.err == {} and a.notes == [] and a.masked == {}
+    # the new fields: err and masked empty by default; notes say what was done (WP4: spike energies in eV); never shared
+    assert a.err == {} and a.masked == {} and a.notes == b.notes
     a.notes.append("x")
-    assert b.notes == []
+    assert "x" not in b.notes
     # a zone without pixels gives no traces, from both entry points
     assert zones.zone_traces(sd, [], st) is None
     assert spectra.build_traces(zones.zone_sums(sd, [], st), st) is None

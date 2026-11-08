@@ -4,16 +4,27 @@ source, normalisation, the per-detector traces on the sum's scale, TEY, and the 
 Ported function for function from the zone tool (`despike`, `normalise`, `zoneTraces`, `i0Score`, `goodI0Curve`;
 docs/HANDOFF.md sections 3.2 and 5). Membership and channel sums stay in aurora.core.zones, so the geometry and the
 trace maths live in different files.
+
+Beyond the zone tool (ScanSettings fields added by AURORA):
+- despike_mode 'classic' is the zone tool's rule, bit for bit; 'coherent' looks for spikes in each SDD against the
+  median of the other three (a white line is common to all four and leaves no residual) and keeps a sum or TEY outlier
+  that the SDDs show as well (despike_coherent, coherent_despike);
+- energies whose I0 is below I0_LOW_FRAC of its median are left out of every / I0 trace (docs/HANDOFF.md 5.2);
+- signal 'ipfy' divides I0 by the counts of the (non-resonant) line, aurora.core.yields.ipfy;
+- ZoneTraces.notes says what was done in words and in eV (spike energies, masked energies, the signal).
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from aurora.core.constants import DESPIKE_K, DETS
+from aurora.core.constants import COHERENT_MIN_SDDS, DESPIKE_K, DETS, EDGE_SPIKE_STEPS, I0_LOW_FRAC
 from aurora.core.io.config import ScanSettings
+from aurora.core.yields import describe as describe_ipfy
+from aurora.core.yields import ipfy
 
 if TYPE_CHECKING:                                   # zones imports this module; the annotation only needs the name
     from aurora.core.zones import ZoneSums
@@ -63,6 +74,162 @@ def despike(y: np.ndarray, k: float = DESPIKE_K) -> tuple[np.ndarray, list[int]]
     return out, spikes
 
 
+DESPIKE_MODES = ("classic", "coherent")
+
+
+def _detect(y: np.ndarray, k: float) -> list[int]:
+    """The classic detection alone: indices where |y - running median 5| > k * 1.4826 * MAD."""
+    y = np.asarray(y, float)
+    res = y - run_median(y, 5)
+    ar = np.abs(res[np.isfinite(res)])
+    mad = float(np.sort(ar)[ar.size // 2]) if ar.size else 0.0
+    thr = k * 1.4826 * mad
+    if not thr > 0:
+        return []
+    return [int(i) for i in np.where(np.isfinite(res) & (np.abs(res) > thr))[0]]
+
+
+def fill_spikes(y: np.ndarray, spikes) -> np.ndarray:
+    """A copy of y with the points `spikes` replaced by linear interpolation between the nearest non-spike finite
+    neighbours (the classic rule's interpolation)."""
+    y = np.asarray(y, float); n = len(y)
+    out = y.copy()
+    sp = set(int(i) for i in spikes)
+    for i in sorted(sp):
+        a, b = i - 1, i + 1
+        while a >= 0 and (a in sp or not np.isfinite(y[a])):
+            a -= 1
+        while b < n and (b in sp or not np.isfinite(y[b])):
+            b += 1
+        if a >= 0 and b < n:
+            out[i] = y[a] + (y[b] - y[a]) * (i - a) / (b - a)
+        elif a >= 0:
+            out[i] = y[a]
+        elif b < n:
+            out[i] = y[b]
+    return out
+
+
+def hampel(y: np.ndarray, k: float) -> list[int]:
+    """Indices where |y - running median 5| > k * 1.4826 * S, S being the median absolute deviation of the same
+    5-point window from its median (the Hampel identifier), never below the scan-wide MAD of the classic rule. The
+    window scale follows the noise where it changes along the scan (few counts below the edge, many above), where
+    one scan-wide MAD would call the noisier part spikes."""
+    y = np.asarray(y, float); n = len(y)
+    med = run_median(y, 5)
+    res = y - med
+    ar = np.abs(res[np.isfinite(res)])
+    g = float(np.sort(ar)[ar.size // 2]) if ar.size else 0.0
+    out = []
+    for i in range(n):
+        if not np.isfinite(res[i]):
+            continue
+        seg = y[max(0, i - 2): i + 3]
+        seg = seg[np.isfinite(seg)]
+        loc = float(np.sort(np.abs(seg - med[i]))[seg.size // 2]) if seg.size else 0.0
+        s = max(loc, g)
+        if s > 0 and abs(res[i]) > k * 1.4826 * s:
+            out.append(i)
+    return out
+
+
+def coherent_count(dets, i: int, sign: float) -> int:
+    """How many SDD traces show a local maximum (sign > 0) or minimum (sign < 0) at index i: strictly above (below)
+    every finite neighbour; the first and last energies have one neighbour."""
+    n_ok = 0
+    for d in dets:
+        if d is None:
+            continue
+        d = np.asarray(d, float)
+        if not 0 <= i < len(d) or not np.isfinite(d[i]):
+            continue
+        nbs = [j for j in (i - 1, i + 1) if 0 <= j < len(d) and np.isfinite(d[j])]
+        if nbs and all(sign * (d[i] - d[j]) > 0 for j in nbs):
+            n_ok += 1
+    return n_ok
+
+
+def despike_coherent(dets, k: float = DESPIKE_K) -> tuple[list, list[list[int]]]:
+    """De-spike the four SDD traces together. For SDD j the spikes are looked for on the ratio y_j / m_j, m_j being the
+    median of the other detectors, each scaled to SDD j's level (its median over the energies), against its running
+    median (hampel: the 5-point window's own MAD, never below the scan-wide one). A white line, common to all four
+    detectors, leaves the ratio flat; a loose-electron spike on one detector does not. A candidate that at least
+    COHERENT_MIN_SDDS detectors in all show as the same local maximum (or minimum), each other one with at least 1/k
+    of this detector's relative excess or as an outlier of its own, is a real feature whose height differs between
+    the detectors (geometry, self-absorption) and stays. Spikes are
+    interpolated as in the classic rule. A detector with
+    fewer than two usable references (dead or missing detectors) falls back to the classic rule.
+    Returns (cleaned traces, spike indices per detector); None entries stay None."""
+    arrs = [None if d is None else np.asarray(d, float) for d in dets]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        levels = [float(np.nanmedian(a)) if a is not None and np.isfinite(a).any() else float("nan") for a in arrs]
+    out: list = []
+    spikes: list[list[int]] = []
+    for j, a in enumerate(arrs):
+        if a is None:
+            out.append(None); spikes.append([])
+            continue
+        refs = [i for i, b in enumerate(arrs) if i != j and b is not None and levels[i] > 0]
+        if len(refs) < 2 or not levels[j] > 0:
+            y, sp = despike(a, k)
+            out.append(y); spikes.append(sp)
+            continue
+        scaled = np.column_stack([arrs[i] * (levels[j] / levels[i]) for i in refs])
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            warnings.simplefilter("ignore", RuntimeWarning)
+            ref = np.nanmedian(scaled, axis=1)
+            ratio = np.where(ref > 0, a / ref, np.nan)
+        med = run_median(a, 5)
+        res = a - med
+        others = [arrs[i] for i in refs]
+        omed = [run_median(b, 5) for b in others]
+        oout = [set(hampel(b, k)) for b in others]
+
+        def common(i: int) -> bool:
+            """At least COHERENT_MIN_SDDS detectors in all (this one and the others) show the same local extremum here,
+            each other one with either at least 1/k of this one's relative excess over the running median or an
+            outlier of its own trace: a real feature (of another height), not a noise coincidence next to a spike."""
+            if not (np.isfinite(res[i]) and med[i]):
+                return False
+            sign = 1.0 if res[i] > 0 else -1.0
+            rel = abs(res[i] / med[i])
+            n_ok = sum(1 for b, m, o in zip(others, omed, oout)
+                       if coherent_count([b], i, sign) == 1
+                       and (i in o or (m[i] and sign * (b[i] - m[i]) / abs(m[i]) >= rel / k)))
+            return n_ok >= min(COHERENT_MIN_SDDS - 1, len(others))
+
+        sp = [i for i in hampel(ratio, k) if not common(i)]
+        out.append(fill_spikes(a, sp) if sp else a.copy())
+        spikes.append(sp)
+    return out, spikes
+
+
+def coherent_despike(y: np.ndarray, k: float, dets) -> tuple[np.ndarray, list[int]]:
+    """The sum or TEY in the coherent mode: an outlier (hampel) counts as a spike only when it is not a local maximum
+    (a white line) or, for a dip, a local minimum, in at least COHERENT_MIN_SDDS of the SDD traces. Without enough
+    SDD traces it is the classic rule."""
+    if dets is None or sum(d is not None for d in dets) < COHERENT_MIN_SDDS:
+        return despike(y, k)
+    y = np.asarray(y, float)
+    res = y - run_median(y, 5)
+    keep = [i for i in hampel(y, k) if coherent_count(dets, i, 1.0 if res[i] > 0 else -1.0) < COHERENT_MIN_SDDS]
+    return (fill_spikes(y, keep) if keep else y.copy()), keep
+
+
+def i0_low_mask(i0, frac: float = I0_LOW_FRAC) -> np.ndarray:
+    """Energies whose I0 is below `frac` x its median (finite values only): beam loss, never divided by
+    (docs/HANDOFF.md 5.2, the sgm_report rule)."""
+    i0 = np.asarray(i0, float)
+    fin = np.isfinite(i0)
+    if not fin.any():
+        return np.zeros(i0.shape, bool)
+    med = float(np.median(i0[fin]))
+    if not med > 0:
+        return np.zeros(i0.shape, bool)
+    return fin & (i0 < frac * med)
+
+
 # ----------------------------------------------------------------------------- normalisation
 @dataclass
 class Normalised:
@@ -72,12 +239,14 @@ class Normalised:
     scale: float = 1.0
 
 
-def normalise(E: np.ndarray, y: np.ndarray, mode: str, i0: np.ndarray | None, pre=None, post=None) -> Normalised:
+def normalise(E: np.ndarray, y: np.ndarray, mode: str, i0: np.ndarray | None, pre=None, post=None,
+              pre_divided: bool = False) -> Normalised:
     """raw | i0 (y / I0) | i0pre (minus a line fitted on `pre`) | i0jump (i0pre / mean over `post`, edge jump = 1) |
-    area (y/I0 / integral) | max (y/I0 / maximum). Default pre = first 15 % of the range, post = last 20 %."""
+    area (y/I0 / integral) | max (y/I0 / maximum). Default pre = first 15 % of the range, post = last 20 %.
+    pre_divided=True: y is already a ratio to I0 (IPFY), so it is never divided again; the modes apply to y itself."""
     E = np.asarray(E, float); y = np.asarray(y, float); n = len(E)
     out = y.copy(); scale = 1.0
-    if mode != "raw":
+    if mode != "raw" and not pre_divided:
         if i0 is None:
             out[:] = np.nan
         else:
@@ -194,7 +363,7 @@ class ZoneTraces:
     i0: np.ndarray                          # zone I0 (de-spiked when asked)
     i0_used: np.ndarray                     # what the traces were divided by (own or good-I0 x n_pix)
     i0_raw: np.ndarray
-    spikes: dict = field(default_factory=dict)
+    spikes: dict = field(default_factory=dict)      # trace -> spike indices ('sdd1'..'sdd4', 'sum', 'tey', 'i0')
     pre: tuple[float, float] | None = None
     post: tuple[float, float] | None = None
     sum_scale: float = 1.0
@@ -202,52 +371,165 @@ class ZoneTraces:
     err: dict[str, np.ndarray] = field(default_factory=dict)       # trace name -> 1-sigma uncertainty, when computed
     notes: list[str] = field(default_factory=list)                 # what was done to the data, for Check and the report
     masked: dict[str, np.ndarray] = field(default_factory=dict)    # trace name -> bool mask of the energies left out
+    signal: str = "pfy"                                            # 'pfy' | 'ipfy': what sum and det hold
+    spikes_ev: dict[str, list[float]] = field(default_factory=dict)  # trace -> spike energies (eV)
+
+    def trace_names(self) -> dict[str, str]:
+        """Column names of the normalised traces: fluo_sum_norm / sdd1_norm for PFY, ipfy_sum_norm / ipfy_sdd1_norm
+        for IPFY; TEY_norm either way."""
+        pre = "ipfy_" if self.signal == "ipfy" else ""
+        out = {"sum": f"{pre or 'fluo_'}sum_norm", "tey": "TEY_norm"}
+        out.update({d: f"{pre}{d}_norm" for d in DETS})
+        return out
+
+    def bad_mask(self, include_i0: bool = True) -> np.ndarray:
+        """Energies flagged bad: spikes of the ticked SDDs, the sum, TEY (when used) and I0, plus masked energies."""
+        nE = len(self.E)
+        bad = np.zeros(nE, bool)
+        st = self.settings
+        keys = [d for k, d in enumerate(DETS) if st is None or st.sdd[k]] + ["sum"]
+        if st is None or st.tey:
+            keys.append("tey")
+        if include_i0:
+            keys.append("i0")
+        for key in keys:
+            for i in self.spikes.get(key) or []:
+                if isinstance(i, (int, np.integer)) and 0 <= int(i) < nE:
+                    bad[int(i)] = True
+        for m in self.masked.values():
+            m = np.asarray(m, bool)
+            if m.shape == bad.shape:
+                bad |= m
+        return bad
+
+
+def _plural(n: int, word: str, many: str | None = None) -> str:
+    return f"{n} {word if n == 1 else (many or word + 's')}"
+
+
+def _ev_list(E: np.ndarray, idx) -> str:
+    return ", ".join(f"{float(E[i]):.2f}" for i in idx)
+
+
+def _spike_notes(out: "ZoneTraces", settings: ScanSettings, mode: str, edge_ev: float | None) -> None:
+    """Spike energies in eV (ZoneTraces.spikes_ev and a sentence), and the calm note for spikes next to the edge."""
+    E = out.E
+    names = {**{d: d.upper() for d in DETS}, "sum": "sum", "tey": "TEY", "i0": "I0"}
+    found = []
+    for key in (*DETS, "sum", "tey", "i0"):
+        idx = out.spikes.get(key)
+        if isinstance(idx, list) and idx:
+            out.spikes_ev[key] = [float(E[i]) for i in idx]
+            found.append(f"{names[key]} at {_ev_list(E, idx)} eV")
+    if not settings.despike:
+        out.notes.append("de-spike off")
+        return
+    head = f"de-spike ({mode}, k = {settings.k:g})"
+    out.notes.append(f"{head}: " + ("; ".join(found) + " interpolated" if found else "no spikes found"))
+    if edge_ev is not None and len(E) > 1 and np.isfinite(edge_ev):
+        step = float(np.median(np.abs(np.diff(E)))) or 0.0
+        near = sorted({round(e, 6) for evs in out.spikes_ev.values() for e in evs
+                       if abs(e - edge_ev) <= EDGE_SPIKE_STEPS * step})
+        if near:
+            out.notes.append(f"{_plural(len(near), 'point')} near the edge {'was' if len(near) == 1 else 'were'} treated "
+                             f"as {'a spike' if len(near) == 1 else 'spikes'}, check the preview")
 
 
 def build_traces(sums: "ZoneSums", settings: ScanSettings, good_curve: np.ndarray | None = None) -> ZoneTraces | None:
     """The zone tool's `zoneTraces` on precomputed zone sums: de-spike, I0 source, normalisation of the sum of the
-    ticked SDDs, per-SDD traces on the sum's scale / number of ticked SDDs, TEY. None for a zone without pixels."""
+    ticked SDDs, per-SDD traces on the sum's scale / number of ticked SDDs, TEY. None for a zone without pixels.
+
+    despike_mode 'classic' (and every file without 'dsm') is the zone tool's rule, unchanged; 'coherent' uses
+    despike_coherent on the four SDDs and coherent_despike on the sum and TEY. Energies with I0 below I0_LOW_FRAC x its
+    median are NaN in every / I0 trace. signal 'ipfy': the sum and each SDD become I0 / counts (yields.ipfy), then
+    normalised without a second division by I0."""
     if sums.n_pix == 0:
         return None
     E = sums.E; nE = len(E)
     i0_raw, tey_raw = sums.i0, sums.tey
     line = settings.line or sums.main
+    mode = getattr(settings, "despike_mode", "classic") or "classic"
+    coherent = bool(settings.despike) and mode == "coherent"
+    signal = getattr(settings, "signal", "pfy") or "pfy"
+    is_ipfy = signal == "ipfy"
     sp: dict = {}
     i0 = i0_raw
     if settings.despike:
         i0, sp["i0"] = despike(i0_raw, settings.k)
     i0n = i0
-    if settings.i0_source == "good" and good_curve is not None:
+    use_good = settings.i0_source == "good" and good_curve is not None
+    if use_good:
         i0n = np.asarray(good_curve, float) * sums.n_pix
         sp["i0good"] = True
+    # I0 below I0_LOW_FRAC x its median (beam loss): left out of every / I0 trace. Judged on the measured I0 (before
+    # de-spiking, which would interpolate a dip away), or on the good-I0 curve when that is what the traces use.
+    low = i0_low_mask(i0n if use_good else i0_raw)
+    i0d = i0n
+    if low.any():
+        i0d = np.array(i0n, float, copy=True)
+        i0d[low] = np.nan
     det_arr = sums.det.get(line)                    # (nE, 4) or None
     det_raw: list = [None] * len(DETS)
     det_norm: list = [None] * len(DETS)
     sum_raw = np.zeros(nE); any_det = False; n_ticked = 0
     if det_arr is not None:
+        cleaned, cspikes = (despike_coherent([det_arr[:, i].astype(float) for i in range(len(DETS))], settings.k)
+                            if coherent else (None, None))
         for i in range(len(DETS)):
             y = det_arr[:, i].astype(float)
             if settings.despike:
-                y, sp[f"sdd{i + 1}"] = despike(y, settings.k)
+                if coherent:
+                    y, sp[f"sdd{i + 1}"] = cleaned[i], cspikes[i]
+                else:
+                    y, sp[f"sdd{i + 1}"] = despike(y, settings.k)
             else:
                 sp[f"sdd{i + 1}"] = []
             det_raw[i] = y
             if settings.sdd[i]:
                 sum_raw = sum_raw + y; any_det = True; n_ticked += 1
+        if coherent and any_det:
+            sum_raw, sp["sum"] = coherent_despike(sum_raw, settings.k, det_raw)
     out = ZoneTraces(E=E, n_pix=int(sums.n_pix), line=line, det=det_norm, det_raw=det_raw, sum=None, sum_raw=None,
-                     tey=np.full(nE, np.nan), tey_raw=tey_raw, i0=i0, i0_used=i0n, i0_raw=i0_raw, spikes=sp, settings=settings)
+                     tey=np.full(nE, np.nan), tey_raw=tey_raw, i0=i0, i0_used=i0n, i0_raw=i0_raw, spikes=sp, settings=settings,
+                     signal="ipfy" if is_ipfy else "pfy")
+    n_nonpos = 0
     if any_det:
-        nr = normalise(E, sum_raw, settings.fluo_norm, i0n, settings.pre, settings.post)
+        if is_ipfy:
+            r = ipfy(sum_raw, i0d, getattr(settings, "ipfy_mode", "ratio"))
+            n_nonpos = r.n_nonpos
+            nr = normalise(E, r.y, settings.fluo_norm, None, settings.pre, settings.post, pre_divided=True)
+        else:
+            nr = normalise(E, sum_raw, settings.fluo_norm, i0d, settings.pre, settings.post)
         out.sum, out.sum_raw, out.pre, out.post, out.sum_scale = nr.y, sum_raw, nr.pre, nr.post, nr.scale
     for i, y in enumerate(det_raw):
         if y is None:
             continue
-        mode = "raw" if settings.fluo_norm == "raw" else ("i0" if settings.fluo_norm == "i0" else "i0pre")
-        nr = normalise(E, y, mode, i0n, settings.pre, settings.post)
-        sc = (out.sum_scale / n_ticked) if (out.sum_scale and n_ticked) else 1.0
+        mode_i = "raw" if settings.fluo_norm == "raw" else ("i0" if settings.fluo_norm == "i0" else "i0pre")
+        if is_ipfy:
+            # I0 / (n_ticked x S_k): equal detectors give the sum's trace, on the sum's scale
+            r = ipfy(y * max(n_ticked, 1), i0d, getattr(settings, "ipfy_mode", "ratio"))
+            nr = normalise(E, r.y, mode_i, None, settings.pre, settings.post, pre_divided=True)
+            sc = out.sum_scale if out.sum_scale else 1.0
+        else:
+            nr = normalise(E, y, mode_i, i0d, settings.pre, settings.post)
+            sc = (out.sum_scale / n_ticked) if (out.sum_scale and n_ticked) else 1.0
         det_norm[i] = nr.y / sc
     ty = tey_raw
     if settings.despike:
-        ty, sp["tey"] = despike(tey_raw, settings.k)
-    out.tey = normalise(E, ty, settings.tey_norm, i0n, settings.pre, settings.post).y
+        if coherent:
+            ty, sp["tey"] = coherent_despike(tey_raw, settings.k, det_raw if det_arr is not None else None)
+        else:
+            ty, sp["tey"] = despike(tey_raw, settings.k)
+    out.tey = normalise(E, ty, settings.tey_norm, i0d, settings.pre, settings.post).y
+    # notes, in words and in eV
+    _spike_notes(out, settings, mode if settings.despike else "off", getattr(sums, "edge_ev", None))
+    if low.any():
+        out.masked["i0_low"] = low
+        idx = np.where(low)[0]
+        out.notes.append(f"I0 below {I0_LOW_FRAC:.0%} of its median at {_plural(len(idx), 'energy', 'energies')} "
+                         f"({_ev_list(E, idx)} eV): left out of the / I0 traces")
+    if is_ipfy:
+        out.notes.append(describe_ipfy(line, getattr(settings, "ipfy_mode", "ratio")))
+        if n_nonpos:
+            out.notes.append(f"IPFY: {_plural(n_nonpos, 'energy', 'energies')} without {line} counts left out")
     return out

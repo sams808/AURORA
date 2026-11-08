@@ -43,8 +43,19 @@ SAT_TOP_CV = 0.02                       # brightest-pixel total counts: spread o
 SAT_I0_VAR = 0.05                       # ... while I0 varied by more than this ...
 SAT_RATE_RATIO = 2.0                    # ... and the rate is at least this many times the day's median -> saturated
 I0_BAD_FRAC = 0.1                       # median I0 below this fraction of the day's other scans -> I0 invalid
+I0_REF_WINDOW_EV = 150.0                # ... the other scans being those whose energy range overlaps within +/- this
 I0_LOW_FRAC = 0.2                       # energies with I0 below this fraction of the scan median are NaN in /I0 traces
 DESPIKE_K = 6.0                         # |residual to the running median| > k * 1.4826 * MAD -> spike
+# coherent de-spike (aurora.core.spectra.despike_coherent): a sum or TEY outlier that is also a local maximum (a white
+# line) or, for a dip, a local minimum, in at least this many of the four SDDs is a real feature, never a spike
+COHERENT_MIN_SDDS = 3
+EDGE_SPIKE_STEPS = 3                    # spikes within this many energy steps of the edge get a 'check the preview' note
+
+# sanity checks of a zone x scan (aurora.core.qc.check_zone), John Bussey's `check_reduced`. The values are the ones
+# in his xas_core module (SGM_XAS_GUI): DEFAULT, confirm with John Bussey.
+FEW_POINTS = 3                          # a region with fewer measurement points than this: 'spectra will be noisy'
+I0_VARIES_FACTOR = 3.0                  # max(I0) / min(I0) over the scan above this: 'I0 varies by a factor X'
+BAD_POINT_FRACTION = 0.1                # more than this fraction of the energies flagged bad: warn
 N_SIGMA = 1.5                           # fixed ROI half-width in fitted peak sigmas
 COUNT_RATE_PROBE_N = 7                  # energies probed for the count-rate check
 
