@@ -137,6 +137,7 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     assert "left out: no included scan" in zones["3 gamma"].toolTip(0) and zones["1 alpha"].icon(0).isNull()
     # jump: the Show button of the ungrouped zone selects its holder and zone and shows Reduce
     item = next(lst.topLevelItem(i) for i in range(lst.topLevelItemCount()) if "has no group" in lst.topLevelItem(i).text(0))
+    fid = item.data(0, Qt.UserRole)          # read now: a check run on the way back rebuilds the list's items
     win.session.set_holder("N6")
     lst.itemWidget(item, 2).findChild(QToolButton).click()
     pump(qapp)
@@ -145,7 +146,6 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     win.show_perspective("report")
     pump(qapp)
     # ignore: ticked, remembered with the session, not counted
-    fid = item.data(0, Qt.UserRole)
     item = next(lst.topLevelItem(i) for i in range(lst.topLevelItemCount()) if lst.topLevelItem(i).data(0, Qt.UserRole) == fid)
     item.setCheckState(1, Qt.Checked)
     pump(qapp)

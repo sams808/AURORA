@@ -461,6 +461,7 @@ class ReportPerspective(QWidget):
         if not self.isVisible():
             self._plan_stale = True
             return
+        self._check_timer.stop()            # a pending debounced check is covered by this one (it would re-run hidden)
         job = jobs.of(self).job("preflight")
         if job is not None and job.is_running():
             self._plan_again = True
