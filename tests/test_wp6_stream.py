@@ -249,6 +249,17 @@ def test_a_0_3_cache_is_converted_without_the_raw_data(fake_project, tmp_path):
     for d in range(len(DETS)):
         assert np.array_equal(np.asarray(hc.cubes[d]), cubes[d])
     assert not (cdir / "cube_sdd1.npy").exists() and not (cdir / "cube_meta.json").exists()
+    # 0.3 files of an older key (the raw data changed since) are removed once the new cube exists
+    hc = None
+    import shutil
+    shutil.rmtree(cdir)
+    cdir.mkdir(parents=True)
+    for d, c in zip(DETS, cubes):
+        np.save(cdir / f"cube_{d}.npy", c)
+    np.savez(cdir / "cube_aux.npz", i0=i0, tey=tey, valid=valid)
+    (cdir / "cube_meta.json").write_text(json.dumps({"key": "cube|5|12|0", "skipped": []}), encoding="utf-8")
+    hc = Hypercube.load(proj, scan)
+    assert hc.cache_dir.parent == cdir and not (cdir / "cube_sdd1.npy").exists()
 
 
 def test_bin_sums_follow_the_roi_bins(fake_project):

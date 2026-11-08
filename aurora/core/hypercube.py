@@ -537,8 +537,9 @@ class Hypercube:
             hc = cls._build(dirs, key, source, scan, E, x, y, cal, spec, progress)
         finally:
             source.close()
-        if legacy is not None:
-            _remove_legacy(legacy)
+        for d in dirs:                               # 0.3 files: converted above, or stale (the raw data changed)
+            if (d / "cube_sdd1.npy").exists():
+                _remove_legacy(d)
         return hc
 
     @classmethod
@@ -751,6 +752,12 @@ class _LegacySource:
 
 
 def _remove_legacy(cdir: Path) -> None:
+    """Remove the AURORA 0.3 cube files of a scan folder (converted, or stale once a new cube exists)."""
+    from aurora.core.io.safety import assert_writable
+    try:
+        assert_writable(cdir)
+    except OSError:
+        return
     gc.collect()
     for f in LEGACY_FILES:
         try:
