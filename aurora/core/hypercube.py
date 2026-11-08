@@ -171,6 +171,8 @@ class Hypercube:
             i0[i] = pd.mcc[:npts, I0_COL]; tey[i] = pd.mcc[:npts, TEY_COL]
             valid[i] = True
         try:
+            from aurora.core.io.safety import assert_writable
+            assert_writable(cdir)
             cdir.mkdir(parents=True, exist_ok=True)
             for d, c in zip(DETS, cubes):
                 np.save(cdir / f"cube_{d}.npy", c)

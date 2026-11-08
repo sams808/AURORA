@@ -77,6 +77,8 @@ def count_rate_probe(project: Project, scan: ScanInfo, n_probe: int = COUNT_RATE
     cr = CountRate(scan=scan.name, key=key, time_per_map_s=tmap, rows=rows)
     cdir = project.root / ".aurora" / "cache" / scan.day / scan.name
     try:
+        from aurora.core.io.safety import assert_writable
+        assert_writable(cdir)
         cdir.mkdir(parents=True, exist_ok=True)
         (cdir / "_count_rate.json").write_text(json.dumps(cr.to_json()))
     except OSError as err:
@@ -315,6 +317,8 @@ def mcc_curves(project: Project, scan: ScanInfo) -> MccCurves:
     arr = np.array(cols) if cols else np.zeros((0, 4))
     cur = MccCurves(scan.name, np.array(E), arr[:, 0], arr[:, 1], arr[:, 2], arr[:, 3])
     try:
+        from aurora.core.io.safety import assert_writable
+        assert_writable(cdir)
         cdir.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"key": key, "E": cur.E.tolist(), "mesh": cur.mesh.tolist(), "diode": cur.diode.tolist(),
                                  "aux": cur.aux.tolist(), "tey": cur.tey.tolist()}))

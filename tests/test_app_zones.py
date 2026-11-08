@@ -119,7 +119,9 @@ def test_real_zones_in_the_app(qapp, real_project, monkeypatch):
     assert len(win.reduce._cards) == 1 and win.reduce._cards[0].sid == sid
     t = win.reduce.preview._traces[0][1]
     assert t.n_pix == len(fz.members[sid]) and t.line == "F Kα" and abs(float(t.sum[t.E >= t.post[0]].mean()) - 1.0) < 1e-6
-    win.close()
+    ses._save_timer.stop()
+    ses.project = None                    # a later close (session teardown) has nothing to save
+    win.close(); win.deleteLater(); qapp.processEvents()
 
 
 def test_load_all_scans(qapp, fake_project):

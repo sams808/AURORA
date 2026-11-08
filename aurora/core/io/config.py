@@ -65,6 +65,8 @@ class Calibration:
         md = {**self.data.get("_metadata", {}), **(meta or {}),
               "last_updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         self.data["_metadata"] = md
+        from aurora.core.io.safety import assert_writable
+        assert_writable(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.data, indent=4), encoding="utf-8")
 
@@ -281,4 +283,6 @@ class ZonesFile:
                                 "zones": [z.to_json() for z in h.zones]} for k, h in self.holders.items()}}
 
     def save(self, path: Path) -> None:
+        from aurora.core.io.safety import assert_writable
+        assert_writable(path)
         Path(path).write_text(json.dumps(self.to_json(), indent=1, ensure_ascii=False), encoding="utf-8")

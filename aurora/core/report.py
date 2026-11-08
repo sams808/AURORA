@@ -182,6 +182,8 @@ class ReportBuilder:
 
     # ------------------------------------------------------------------ build
     def build(self, progress=None) -> ReportResult:
+        from aurora.core.io.safety import assert_writable
+        assert_writable(self.out)
         self.out.mkdir(parents=True, exist_ok=True)
         (self.out / "figures").mkdir(exist_ok=True)
         (self.out / "csv").mkdir(exist_ok=True)

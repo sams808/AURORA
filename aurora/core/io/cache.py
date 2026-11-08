@@ -29,6 +29,8 @@ def load_npz(path: Path | None):
 def save_npz(path: Path, **arrays) -> None:
     """Atomic write: a run killed mid-way never leaves a half-written cache behind."""
     path = Path(path)
+    from aurora.core.io.safety import assert_writable
+    assert_writable(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp.npz")
     with open(tmp, "wb") as f:                  # explicit handle: closed before the rename (Windows refuses otherwise)

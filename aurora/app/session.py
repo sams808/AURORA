@@ -250,6 +250,8 @@ class Session(QObject):
             return
         self.zones.exported = dt.datetime.now().isoformat(timespec="seconds")
         try:
+            from aurora.core.io.safety import assert_writable
+            assert_writable(self.session_file)
             self.session_file.parent.mkdir(parents=True, exist_ok=True)
             self.zones.save(self.session_file)
             self.status.emit(f"zones saved to {self.session_file}")

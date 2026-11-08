@@ -6,6 +6,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 REAL_PROJECT = Path(os.environ.get("AURORA_REAL_PROJECT", r"<beamtime folder>"))
+# the real beamtime is read-only for the whole test session: every AURORA write path refuses it (aurora.core.io.safety)
+os.environ["AURORA_PROTECT_DIRS"] = os.pathsep.join(filter(None, [os.environ.get("AURORA_PROTECT_DIRS", ""), str(REAL_PROJECT)]))
 
 
 @pytest.fixture(scope="session", autouse=True)
