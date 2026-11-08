@@ -848,7 +848,7 @@ class FitPerspective(QWidget):
         self.peak_result = r; self._pk_name = name
         self._fill_pk_table()
         self.pk_info.setText(f"{'converged' if r.converged else 'not converged: ' + r.message} · RMSE {r.rmse:.4g} · {len(r.E)} points"
-                             + ("" if r.converged else " · the fit is not drawn; the dotted lines are the initial centres"))
+                             + ("" if r.converged else " · the fit is not drawn; the dashed lines mark the initial centres"))
         self._draw_peaks()
         self.update_actions()
 
@@ -876,6 +876,7 @@ class FitPerspective(QWidget):
             self.pk_table.setRowCount(0)
             set_chip(self.pk_chip, "", "muted")
             self.pk_areas.setText("")
+            self.pk_areas.hide()
             return
         rows = self._pk_rows(r, areas=False)
         self.pk_table.setRowCount(len(rows))
@@ -893,6 +894,7 @@ class FitPerspective(QWidget):
         self.pk_areas.setText(("peak areas (a.u.·eV, ± from the covariance): " + " · ".join(
             f"{k.split('_')[0]} {v:.4g} ± {e:.2g}" if np.isfinite(e) else f"{k.split('_')[0]} {v:.4g} ± –"
             for k, (v, e) in areas.items())) if areas and r.converged else "")
+        self.pk_areas.setVisible(bool(self.pk_areas.text()))
 
     def _draw_peaks(self) -> None:
         self.pk_plot.clear(); self.pk_plot.plotItem.legend.clear()
@@ -908,9 +910,9 @@ class FitPerspective(QWidget):
             for c in init:
                 self.pk_plot.addItem(pg.InfiniteLine(c, angle=90, pen=role_pen("edge", 1.0)), ignoreBounds=True)
             from aurora.app.theme import TOKENS
-            note = pg.TextItem("fit not shown: not converged", color=TOKENS["bad_fg"], anchor=(0.5, 0))
+            note = pg.TextItem("fit not shown: not converged", color=TOKENS["bad_fg"], anchor=(1, 0))
             ymax = float(np.nanmax(r.y)) if np.isfinite(r.y).any() else 1.0
-            note.setPos(float(np.mean([r.E[0], r.E[-1]])), ymax)
+            note.setPos(float(r.E[-1]), ymax)                # top right, clear of the data
             self.pk_plot.addItem(note, ignoreBounds=True)
             _set_range(self.pk_plot, [float(r.E[0]), float(r.E[-1])], [r.y])
             return
