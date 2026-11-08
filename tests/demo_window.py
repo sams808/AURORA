@@ -106,5 +106,6 @@ def build_demo_window(qapp, root: Path, size=(1500, 940)):
     mp.draw_rgb()
     mp.n_k.setValue(2)
     mp.run_clusters()
+    win.jobs.wait_idle(30000)                     # elemental maps and clusters are background jobs
     pump(qapp, 10)
     return win

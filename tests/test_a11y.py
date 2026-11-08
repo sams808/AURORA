@@ -97,7 +97,7 @@ def test_perspectives_on_the_demo(qapp, tmp_path):
     # one vocabulary
     from aurora.app.vocab import DET_LABELS, NORM_LABELS
     assert [win.survey.sdd.itemText(i) for i in range(win.survey.sdd.count())] == ["sum", *DET_LABELS]
-    assert [win.maps.det.itemText(i) for i in range(win.maps.det.count())] == ["sum", *DET_LABELS]
+    assert [b.text() for b in win.maps.sdd_boxes] == list(DET_LABELS)          # Maps: one tick per SDD in the sum
     card = win.reduce._cards[0]
     assert [card.fn.itemText(i) for i in range(card.fn.count())] == list(NORM_LABELS.values())
     assert win.reduce.map_energy.text().endswith(" eV") and "E#" not in win.reduce.map_energy.text()
