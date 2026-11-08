@@ -292,12 +292,14 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
 
     def open_demo():
         win.home.open_project(ctx["proj"].root)
-        for _ in range(200):
+        # discovery runs in a worker: wait on the clock, not on a number of event-loop turns (200 turns took 0.04 s
+        # on macOS 26 started through `open`, before the worker had finished)
+        t0 = time.monotonic()
+        while win.session.project is None and time.monotonic() - t0 < 60.0:
             pump(2)
-            if win.session.project is not None:
-                break
-        assert win.session.project is not None
-        return win.crumb.text()
+            time.sleep(0.01)
+        assert win.session.project is not None, f"the demo did not open within {time.monotonic() - t0:.0f} s"
+        return f"{win.crumb.text()} ({time.monotonic() - t0:.2f} s)"
     r.check("open the demo in the window", open_demo)
 
     def perspectives():

@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("pyqtgraph")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtGui import QAction  # noqa: E402
+from PySide6.QtGui import QAction, QKeySequence  # noqa: E402
 
 from aurora.app import mode  # noqa: E402
 from aurora.core import testdata  # noqa: E402
@@ -147,7 +147,8 @@ def test_the_shortcuts_dialog_lists_every_shortcut(qapp, two_holders):
     assert not missing, missing
     text = d.text()
     for needle in ("Ctrl+3", "Ctrl+Shift+A", "Ctrl+PgDown", "Ctrl+Return", "Ctrl+/", "Shift+F1", "Esc"):
-        assert needle in text, needle
+        native = QKeySequence(needle).toString(QKeySequence.NativeText)     # macOS lists ⌘3, ⌘⇧A, …
+        assert native in text, (needle, native)
     sections = {s for s, _t, _k, _a in d.rows}
     assert {"File", "View", "Go to", "Help", "General"} <= sections
     d.deleteLater()

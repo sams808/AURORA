@@ -77,7 +77,10 @@ def test_dialogs_start_in_the_project_or_the_home_folder(qapp, tmp_path, monkeyp
     for fn in (win.compare._add_folder, win.compare._add_csv, win.compare._save_config, win.compare._load_config,
                win.survey._import, win.home.choose_project):
         fn()
-    assert captured and all(_under(d, Path.home()) and not _under(d, install) for _k, d in captured), captured
+    # Open… starts next to the most recent project (the demo opened above, under tmp_path: outside the home folder on
+    # macOS and Linux, where the temporary folder is /tmp or /var/folders)
+    assert captured and all((_under(d, Path.home()) or _under(d, tmp_path)) and not _under(d, install)
+                            for _k, d in captured), captured
     mode.set_advanced(False)
     win.close()
 
