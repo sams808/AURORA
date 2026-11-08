@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app.help_text import HELP, explain, explain_buttons
+from aurora.app.shortcuts import native_text
 
 POLICY_LABELS = (("merge", "Merge"), ("replace", "Replace"), ("skip", "Skip"))
 
@@ -75,9 +76,10 @@ class ImportDialog(QDialog):
         hh.setSectionResizeMode(QHeaderView.ResizeToContents)
         hh.setStretchLastSection(True)
         lay.addWidget(self.table, 1)
-        note = QLabel("Merge adds the file's zones with new numbers and skips the ones with the same area. Replace "
-                      "puts the file's zones in place of this holder's. Skip leaves the holder as it is. A backup of "
-                      "the session is saved first, and Ctrl+Z undoes the whole import.")
+        note = QLabel(native_text("Merge adds the file's zones with new numbers and skips the ones with the same "
+                                  "area. Replace puts the file's zones in place of this holder's. Skip leaves the "
+                                  "holder as it is. A backup of the session is saved first, and Ctrl+Z undoes the "
+                                  "whole import."))
         note.setWordWrap(True)
         note.setObjectName("muted")
         lay.addWidget(note)
@@ -116,9 +118,10 @@ class RestoreDialog(QDialog):
         self.setWindowTitle("Restore zones from a backup")
         self.backups = session.backups()
         lay = QVBoxLayout(self)
-        intro = QLabel("AURORA keeps a backup every 10 minutes while you edit, one before every import, proposal, "
-                       "rule and restore (the last 30), and the previous save. Restoring replaces the zones of every "
-                       "holder; the current zones are backed up first and Ctrl+Z undoes the restore.")
+        intro = QLabel(native_text("AURORA keeps a backup every 10 minutes while you edit, one before every import, "
+                                   "proposal, rule and restore (the last 30), and the previous save. Restoring "
+                                   "replaces the zones of every holder; the current zones are backed up first and "
+                                   "Ctrl+Z undoes the restore."))
         intro.setWordWrap(True)
         lay.addWidget(intro)
         self.table = QTableWidget(len(self.backups), 5)

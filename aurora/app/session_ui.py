@@ -46,8 +46,9 @@ class HistoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Edit history")
         lay = QVBoxLayout(self)
-        intro = QLabel("Every zone, settings and good-I0 edit since the project was opened, oldest first (the last "
-                       "100). Click a line to go back to that point; Ctrl+Z and Ctrl+Y step one edit.")
+        intro = QLabel(shortcuts.native_text("Every zone, settings and good-I0 edit since the project was opened, "
+                                             "oldest first (the last 100). Click a line to go back to that point; "
+                                             "Ctrl+Z and Ctrl+Y step one edit."))
         intro.setWordWrap(True)
         intro.setObjectName("muted")
         lay.addWidget(intro)

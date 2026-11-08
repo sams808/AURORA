@@ -140,9 +140,20 @@ class Worker(QThread):
     def is_cancelled(self) -> bool:
         return self.token.cancelled
 
+    PROGRESS_EVERY_S = 0.05
+
     def run(self) -> None:
         self.state = "running"
-        cb = cancellable(lambda i, n, msg="": self.progress.emit(int(i), int(n), str(msg)), self.token)
+        last = [-1.0]
+
+        def emit(i, n, msg="") -> None:
+            # at most 20 a second, plus the first and the last: every signal costs the GUI thread a queued event, and
+            # a job that reports each of thousands of steps (MCR-ALS) would starve the event loop behind them
+            now = time.monotonic()
+            if now - last[0] >= self.PROGRESS_EVERY_S or int(i) >= int(n) - 1:
+                last[0] = now
+                self.progress.emit(int(i), int(n), str(msg))
+        cb = cancellable(emit, self.token)              # the cancel check still runs at every step
         try:
             result = self._fn(cb)
         except Cancelled:

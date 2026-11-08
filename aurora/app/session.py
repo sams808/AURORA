@@ -44,6 +44,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QMainWindow
 
 from aurora import __version__
+from aurora.app.shortcuts import native_text
 from aurora.app.undo import Snapshot, SnapshotCommand, dumps, make_stack
 from aurora.core.io.config import (SESSION_SCHEMA, HolderZones, ScanSettings, Zone, ZonesFile, file_schema,
                                    json_default, read_sample_sheet)
@@ -902,7 +903,7 @@ class Session(QObject):
             if self.current_zone == zid:
                 self.current_zone = None
                 self.zone_selected.emit(None)
-        self.status.emit(f"zone {zid} deleted · Ctrl+Z to undo")
+        self.status.emit(native_text(f"zone {zid} deleted · Ctrl+Z to undo"))
 
     def select_zone(self, zid: int | None) -> None:
         if zid is not None and self._no_holder():
@@ -1243,7 +1244,7 @@ class Session(QObject):
             self.current_zone = None
         n = sum(len(h.zones) for h in zf.holders.values())
         from aurora.app.vocab import plural
-        self.status.emit(f"restored {plural(n, 'zone')} from the backup of {when:%Y-%m-%d %H:%M} · Ctrl+Z to undo")
+        self.status.emit(native_text(f"restored {plural(n, 'zone')} from the backup of {when:%Y-%m-%d %H:%M} · Ctrl+Z to undo"))
         self.zone_selected.emit(None)
         return n
 

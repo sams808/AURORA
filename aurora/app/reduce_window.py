@@ -24,7 +24,7 @@ from aurora.app.widgets import Card, FlowLayout, pair, set_plot_hint
 from aurora.core import xrf_windows as xw
 from aurora.core.constants import DETS, N_CH
 
-SOURCES = (("stack", "stack, all energies"), ("survey", "survey"), ("region", "inside the region"))
+SOURCES = (("stack", "the whole stack"), ("survey", "survey"), ("region", "inside the region"))   # short: Linux fonts
 CUSTOM = "custom"
 
 

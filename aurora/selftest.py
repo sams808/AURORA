@@ -115,7 +115,9 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
     from aurora import __version__
     from aurora.credits import CREDITS
     cwd = os.getcwd()                                   # '/' when macOS LaunchServices (Finder, `open`) started us
-    base = Path(tempfile.mkdtemp(prefix="aurora selftest é "))
+    # resolved: the temporary folder can be an alias of itself (C:\Users\RUNNER~1 on Windows, /var -> /private/var on
+    # macOS), and the checks compare paths with the project's resolved root
+    base = Path(tempfile.mkdtemp(prefix="aurora selftest é ")).resolve()
     os.environ["AURORA_SETTINGS_DIR"] = str(base / "settings")
     os.environ["AURORA_LOG_DIR"] = str(base / "logs")
     if qpa:
@@ -486,7 +488,9 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         assert len(res) == sum(len(v) for v in holders.values()), (len(res), holders)
         p = q.save_qc(proj, res)
         back = q.load_qc(proj)
-        assert p == root / ".aurora" / "qc.json" and set(back) == set(res) and all(back[k] == res[k] for k in res)
+        assert p == proj.root / ".aurora" / "qc.json", (p, proj.root)
+        assert set(back) == set(res), (sorted(back), sorted(res))
+        assert all(back[k] == res[k] for k in res), [k for k in res if back[k] != res[k]]
         first = next(iter(back))
         back[first].saturated = ["sdd2"]
         q.save_qc(proj, {first: back[first]})

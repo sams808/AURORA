@@ -108,8 +108,9 @@ def diagnostics_text(window=None) -> str:
     if proj is not None:
         lines.append(f"project {proj.root}")
         zones = getattr(ses, "zones", None)
-        extra = getattr(zones, "extra", {}) or {}
-        lines.append(f"session schema {extra.get('schema') or extra.get('format') or 'zones_all.json layout (no schema key)'}")
+        lines.append(f"session schema {getattr(zones, 'schema', None) or 1} "
+                     f"({getattr(zones, 'app', None) or 'no header: AURORA 0.3 or the zone tool'})"
+                     + (" · read-only" if getattr(ses, "read_only", False) else ""))
         cache = Path(proj.root) / ".aurora" / "cache"
         lines.append(f"cache {cache}: {_dir_size(cache) / 1e6:.1f} MB" if cache.is_dir() else f"cache {cache}: none")
     else:

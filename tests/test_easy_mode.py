@@ -211,7 +211,8 @@ def test_maps_is_advanced_only(qapp):
     assert "maps" in mode.advanced_perspectives() and mode.perspective_hidden("maps")
     assert not win.rail_buttons["maps"].isVisible()
     assert win.go_to("maps") is False and win.stack.currentWidget() is win.home
-    assert win.statusBar().currentMessage() == "Maps is part of Advanced mode (Ctrl+Shift+A)"
+    from aurora.app.shortcuts import native_text
+    assert win.statusBar().currentMessage() == native_text("Maps is part of Advanced mode (Ctrl+Shift+A)")
     mode.set_advanced(True)
     qapp.processEvents()
     assert win.rail_buttons["maps"].isVisible() and win.go_to("maps") and win.stack.currentWidget() is win.maps

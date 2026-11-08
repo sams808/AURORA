@@ -122,7 +122,9 @@ program, no permission) gives one calm dialog that names it.
   address); **Check for updates…** (asks GitHub whether a newer AURORA exists; nothing is downloaded or installed);
   **Licences…** (AURORA's MIT licence, the credits, the third-party licences); **About AURORA**.
 
-Keyboard shortcuts (**Help > Keyboard shortcuts** lists the same table, generated from the window):
+Keyboard shortcuts (**Help > Keyboard shortcuts** lists the same table, generated from the window). The keys are
+written with their Windows and Linux names. On macOS, Ctrl is ⌘ (Command) and Alt is ⌥ (Option), the Mac delete
+key also deletes a sample, and the Help window, tooltips and messages show the Mac keys:
 
 | Section | Keys |
 |---|---|
@@ -456,8 +458,8 @@ In the coherent de-spike mode the sum may carry spike markers of its own.
 ### 4.8 XRF windows
 
 Step 2 of John Bussey's GUI. The **XRF window** card shows the emission spectrum (log scale) of the stack summed over
-its energies; in Advanced, **spectrum of** also offers the *survey* and the pixels *inside the region*. The first
-time, the raw spectra are read in the background (**Cancel** in the progress strip) and cached under
+its energies (*the whole stack*); in Advanced, **spectrum of** also offers the *survey* and the pixels *inside the
+region*. The first time, the raw spectra are read in the background (**Cancel** in the progress strip) and cached under
 `.aurora/cache/<day>/<scan>/_emission_cache.npz`.
 
 - **preset**: every fixed line of `config/roi_bins.json` (*F Kα (fixed bins)*; a line the stack was reduced without

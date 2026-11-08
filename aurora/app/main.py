@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
             b = QToolButton()
             b.setObjectName("railbtn")
             b.setText(title)
-            b.setToolTip(f"{title} (Ctrl+{i + 1})")
+            b.setToolTip(shortcuts.native_text(f"{title} (Ctrl+{i + 1})"))
             b.setAccessibleName(title)
             b.setProperty("aurora_icon", key)
             b.setIcon(two_state_icon(key, TOKENS["rail_text"], TOKENS["on_accent"]))
@@ -401,7 +401,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def perspective_hint(key: str) -> str:
         title = dict(PERSPECTIVES).get(key, key)
-        return f"{title} is part of Advanced mode (Ctrl+Shift+A)"
+        return shortcuts.native_text(f"{title} is part of Advanced mode (Ctrl+Shift+A)")
 
     def step_holder(self, step: int) -> None:
         """Previous / next holder of the project, wrapping around."""
@@ -637,6 +637,9 @@ def fix_working_dir() -> Path | None:
 
 
 def create_app(argv: list[str] | None = None) -> QApplication:
+    # the GUI thread gets the GIL back within 1 ms (not 5) while a job computes in pure Python: every Qt call it makes
+    # releases the GIL, and waiting 5 ms each time froze the window for most of a second on slower machines (MCR-ALS)
+    sys.setswitchinterval(min(sys.getswitchinterval(), 0.001))
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG_NAME)

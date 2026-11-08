@@ -51,6 +51,24 @@ def test_session_json_has_the_header(qapp, fake_project):
     assert list(d)[:3] == ["format", "schema", "app"]
 
 
+def test_copy_diagnostics_names_the_session_schema(qapp, fake_project):
+    """Help > Report a problem > Copy diagnostics: the schema and writer of session.json (the header fields)."""
+    from types import SimpleNamespace
+    from aurora.app.diagnostics import diagnostics_text
+    from aurora.app.session import Session
+    ses = session(fake_project)
+    draw_zone(ses)
+    ses.flush()
+    s2 = Session()
+    s2.set_project(Project.discover(fake_project))
+    text = diagnostics_text(SimpleNamespace(session=s2))
+    assert f"session schema {SESSION_SCHEMA} (AURORA {__version__})" in text, text
+    s2.read_only = True
+    assert f"session schema {SESSION_SCHEMA} (AURORA {__version__}) · read-only" in diagnostics_text(SimpleNamespace(session=s2))
+    s2._save_timer.stop()
+    ses._save_timer.stop()
+
+
 def test_unknown_keys_at_every_level_survive_load_and_save(qapp, fake_project, tmp_path):
     from aurora.app.session import Session
     ses = session(fake_project)

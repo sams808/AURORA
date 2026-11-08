@@ -208,7 +208,8 @@ def test_delete_needs_no_confirmation_and_undoes(qapp, fake_project, monkeypatch
     ses.select_zone(3); pump(qapp)
     win.reduce.del_zone_btn.click(); pump(qapp)
     assert [z.id for z in ses.holder_zones().zones] == [1, 2]
-    assert win.statusBar().currentMessage() == "zone 3 deleted · Ctrl+Z to undo"
+    from aurora.app.shortcuts import native_text
+    assert win.statusBar().currentMessage() == native_text("zone 3 deleted · Ctrl+Z to undo")
     ses.undo()
     assert [z.id for z in ses.holder_zones().zones] == [1, 2, 3] and ses.current_zone == 3
     ses._save_timer.stop()

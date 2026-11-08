@@ -133,6 +133,27 @@ def _destroy_leftover_windows(_isolated_settings):
 
 
 @pytest.fixture(autouse=True)
+def _release_modifiers():
+    """QTest.keyClick(w, key, Ctrl | Shift) leaves QApplication.keyboardModifiers() at Shift (its synthetic release
+    still carries the modifier), and a later test's selectRow() then extends the selection instead of setting it.
+    Release every modifier after each test, as a real keyboard would."""
+    yield
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication, QWidget
+    except ImportError:
+        return
+    app = QApplication.instance()
+    if app is None or app.keyboardModifiers() == Qt.NoModifier:
+        return
+    w = QWidget()
+    for k in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta):
+        QTest.keyRelease(w, k, Qt.NoModifier)
+    w.deleteLater()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_settings(tmp_path, monkeypatch):
     """Never touch the user's real QSettings (registry / plist) from a test."""
     monkeypatch.setenv("AURORA_SETTINGS_DIR", str(tmp_path / "settings"))

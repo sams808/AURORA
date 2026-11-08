@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QAction, QKeySequence  # noqa: E402
 
 from aurora.app import mode  # noqa: E402
+from aurora.app.shortcuts import native_text  # noqa: E402
 from aurora.core import testdata  # noqa: E402
 from aurora.core.model import Project  # noqa: E402
 
@@ -83,12 +84,12 @@ def test_ctrl_number_opens_a_perspective(qapp, two_holders):
     pump(qapp)
     assert win.stack.currentWidget() is win.reduce
     for i, (key, title) in enumerate(PERSPECTIVES):
-        assert win.rail_buttons[key].toolTip() == f"{title} (Ctrl+{i + 1})"
+        assert win.rail_buttons[key].toolTip() == native_text(f"{title} (Ctrl+{i + 1})")      # ⌘1 on macOS
         assert win.goto_actions[key].shortcut().toString() == f"Ctrl+{i + 1}"
     QTest.keyClick(win, Qt.Key_7, Qt.ControlModifier)             # Maps in Easy mode: a status hint, Reduce stays
     pump(qapp)
     assert win.stack.currentWidget() is win.reduce
-    assert win.statusBar().currentMessage() == "Maps is part of Advanced mode (Ctrl+Shift+A)"
+    assert win.statusBar().currentMessage() == native_text("Maps is part of Advanced mode (Ctrl+Shift+A)")
     assert not win.goto_actions["maps"].isVisible()
     mode.set_advanced(True)
     pump(qapp)

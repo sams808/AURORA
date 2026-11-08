@@ -12,6 +12,8 @@ action added here is listed by registered(window), which the Keyboard shortcuts 
 """
 from __future__ import annotations
 
+import re
+import sys
 from typing import Callable
 
 from PySide6.QtCore import QObject, Qt
@@ -23,6 +25,31 @@ PROP_REGISTERED = "aurora_shortcut"         # set on every QAction made by add()
 PROP_SECTION = "aurora_section"             # its group in the shortcuts list
 PROP_MENU = "aurora_menu"                   # the main-window menu it belongs in ('' = none)
 PROP_PLACED = "aurora_placed"               # already inserted into that menu
+
+# a modifier chord written in a text: 'Ctrl+Shift+A', 'Ctrl+PgUp', 'Alt+Up', 'Ctrl+/', 'Shift+Enter' (not 'Shift+click')
+_CHORD = re.compile(r"\b((?:(?:Ctrl|Shift|Alt|Meta)\+)+(?:F\d{1,2}\b|PgUp\b|PgDown\b|Return\b|Enter\b|Up\b|Down\b|Left\b|"
+                    r"Right\b|Del\b|Delete\b|Esc\b|Tab\b|Space\b|[A-Z0-9](?![A-Za-z])|[/\[\]+\-](?!\w)))")
+
+
+def native_text(text: str) -> str:
+    """The shortcuts named in a user-visible text, written the way this platform writes them. Unchanged on Windows and
+    Linux; on macOS, where Qt maps Ctrl to Command, 'Ctrl+Shift+A' reads '⇧⌘A' and 'Alt+Up' reads '⌥↑', as in the
+    menus. Texts and manuals are written with the Windows names; every place that shows one passes it through here."""
+    if sys.platform != "darwin" or not text or "+" not in text:
+        return text
+    return _CHORD.sub(lambda m: _native_chord(m.group(1)) or m.group(1), text)
+
+
+def _native_chord(chord: str) -> str:
+    return QKeySequence(chord).toString(QKeySequence.NativeText)
+
+
+def delete_keys() -> list[QKeySequence]:
+    """Delete, plus Backspace on macOS, whose 'delete' key is Backspace (Fn+delete is the forward Delete)."""
+    keys = [QKeySequence("Delete")]
+    if sys.platform == "darwin":
+        keys.append(QKeySequence("Backspace"))
+    return keys
 
 
 def _main_window(owner: QObject) -> QWidget | None:

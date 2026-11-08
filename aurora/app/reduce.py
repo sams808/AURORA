@@ -255,8 +255,8 @@ class ScanSettingsCard(Card):
             a.triggered.connect(lambda _c=False, t=target: self.copy_requested.emit(self, t))
         m.addSeparator()
         if self.owner is not None:
-            m.addAction("Copy these settings (Ctrl+Shift+C)", lambda: self.owner.copy_card(self))
-            pa = m.addAction("Paste settings here (Ctrl+Shift+V)", lambda: self.owner.paste_card(self))
+            m.addAction(shortcuts.native_text("Copy these settings (Ctrl+Shift+C)"), lambda: self.owner.copy_card(self))
+            pa = m.addAction(shortcuts.native_text("Paste settings here (Ctrl+Shift+V)"), lambda: self.owner.paste_card(self))
             pa.setEnabled(self.owner.copied is not None)
             sub = m.addMenu("Fields that travel")
             on = set(self.owner.copy_fields())
@@ -543,7 +543,10 @@ class ReducePerspective(QWidget):
     def fit_cards(self) -> None:
         """The splitters ignore wrapped rows: give the zone card and the XRF window card the height their rows need at
         their width, so no control is cut at the smallest window."""
+        import shiboken6
         for card in (self.zone_card, self.window_card):
+            if not shiboken6.isValid(self) or not shiboken6.isValid(card):    # a deferred call after the window died
+                return
             if card.width() > 0:
                 need = self._min_height(card)
                 if need > 0 and need != card.minimumHeight():
@@ -593,6 +596,7 @@ class ReducePerspective(QWidget):
             "copy": add("Copy the scan settings", "Ctrl+Shift+C", lambda: self.copy_card(self.current_card())),
             "paste": add("Paste the scan settings", "Ctrl+Shift+V", lambda: self.paste_card(self.current_card())),
         }
+        a["delete"].setShortcuts(shortcuts.delete_keys())          # Backspace too on macOS
         mark_advanced_action(self, a["rect-"], a["brush+"], a["brush-"], a["polygon+"], a["bigger"], a["smaller"],
                              a["copy"], a["paste"])
 
@@ -1584,7 +1588,7 @@ class ReducePerspective(QWidget):
             return
         import copy as _copy
         self.copied = (_copy.deepcopy(card.s), self.copy_keys(), short_time(card.sid) or card.scan.name)
-        self.status_label.setText(f"settings of {self.copied[2]} copied (Ctrl+Shift+V pastes them into a card)")
+        self.status_label.setText(shortcuts.native_text(f"settings of {self.copied[2]} copied (Ctrl+Shift+V pastes them into a card)"))
 
     def paste_card(self, card: ScanSettingsCard | None) -> list:
         """Ctrl+Shift+V: the copied fields into this card, in one edit."""

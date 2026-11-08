@@ -4,6 +4,7 @@ with a document list, search, back / forward, heading anchors and cross-document
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, QUrl, Qt
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QListWidget, QLis
                                QSplitter, QTextBrowser, QVBoxLayout, QWidget)
 
 from aurora import APP_NAME, resources_dir
+from aurora.app.shortcuts import native_text
 from aurora.app.theme import TOKENS, on_theme_changed
 
 DOCS = [
@@ -128,6 +130,14 @@ class DocBrowser(QTextBrowser):
         self._fit.setSingleShot(True)
         self._fit.setInterval(120)
         self._fit.timeout.connect(self._fit_images)
+
+    def loadResource(self, type_: int, name: QUrl):
+        data = super().loadResource(type_, name)
+        if sys.platform == "darwin" and type_ == QTextDocument.MarkdownResource and data is not None:
+            raw = data.data() if hasattr(data, "data") else data
+            text = bytes(raw).decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray, memoryview)) else str(raw)
+            return native_text(text)
+        return data
 
     def doSetSource(self, name: QUrl, type_=QTextDocument.UnknownResource) -> None:
         if name.scheme() in ("http", "https", "mailto"):
@@ -255,7 +265,7 @@ class HelpWindow(QMainWindow):
         self.back_btn = QPushButton("◀  Back")
         self.fwd_btn = QPushButton("Forward  ▶")
         self.find_edit = QLineEdit()
-        self.find_edit.setPlaceholderText("search in this document (Enter: next, Shift+Enter: previous)")
+        self.find_edit.setPlaceholderText(native_text("search in this document (Enter: next, Shift+Enter: previous)"))
         self.find_edit.setClearButtonEnabled(True)
         self.find_info = QLabel("")
         self.find_info.setObjectName("muted")

@@ -169,6 +169,12 @@ def test_mcr_keeps_the_event_loop_responsive(qapp):
     fit.n_comp.setValue(3)
     fit.max_iter.setValue(400)
     fit.tol.setValue(0.0)                                          # run every iteration: a long job
+    # the new perspective's first layout (pyqtgraph axes and labels, ~0.4 s on CI) runs at the first event-loop pass:
+    # let it finish, so the gaps measure the job and not the widget's construction
+    settle = time.monotonic()
+    while time.monotonic() - settle < 0.5:
+        qapp.processEvents()
+        time.sleep(0.01)
     gaps, clock = [], QElapsedTimer()
     clock.start()
     last = [clock.elapsed()]
@@ -184,6 +190,7 @@ def test_mcr_keeps_the_event_loop_responsive(qapp):
     t0 = time.monotonic()
     job = fit.run_mcr()
     assert job is not None
+    job.ended.connect(lambda _state: timer.stop())                 # the gaps while it runs, not the drawing after
     assert of(fit).wait_idle(120000)
     timer.stop()
     took = time.monotonic() - t0

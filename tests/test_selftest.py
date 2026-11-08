@@ -117,3 +117,47 @@ def test_the_exit_code_counts_the_failed_checks(tmp_path, monkeypatch):
     from aurora.cli import main
     monkeypatch.setattr(selftest, "run", lambda **kw: 3)
     assert main(["--selftest", "--no-gui"]) == 3
+
+
+def _alias(real, link):
+    """`link` names the folder `real` another way: a junction on Windows, a symbolic link elsewhere."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(real), str(link))
+    else:
+        os.symlink(real, link)
+
+
+def test_a_temporary_folder_reached_through_an_alias_passes(tmp_path, monkeypatch):
+    """CI's temporary folder is an alias of itself (the 8.3 name RUNNER~1, /var -> /private/var): the checks that compare
+    a path with the project's resolved root must still pass (they failed on every frozen CI build of 0.4.0)."""
+    import tempfile
+    from aurora import selftest
+    from aurora.core import xrf_windows
+    for var in ("AURORA_SETTINGS_DIR", "AURORA_LOG_DIR", "QT_QPA_PLATFORM", "QT_QPA_FONTDIR"):
+        if var in os.environ:
+            monkeypatch.setenv(var, os.environ[var])
+        else:
+            monkeypatch.delenv(var, raising=False)
+    real = tmp_path / "real temp"
+    real.mkdir()
+    _alias(real, tmp_path / "alias")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "alias"))
+    keep = {"AURORA's checks persisted, flags and the energy-local I0 pool"}
+    real_core = selftest._core_checks
+
+    def only(r, ctx, base):
+        assert str(base).startswith(str(real.resolve()))            # the self-test works in the resolved folder
+        check = r.check
+        r.check = lambda name, fn: check(name, fn) if name in keep else None
+        real_core(r, ctx, base)
+    monkeypatch.setattr(selftest, "_core_checks", only)
+    out = tmp_path / "s.json"
+    try:
+        rc = selftest.run(out=out, gui=False)
+    finally:
+        xrf_windows.clear_memory()
+        xrf_windows.forget_projects()
+    d = json.loads(out.read_text(encoding="utf-8"))
+    ran = {c["name"]: c for c in d["checks"]}
+    assert keep <= set(ran) and rc == 0, [(c["name"], c["detail"]) for c in d["checks"] if not c["ok"]]

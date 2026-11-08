@@ -592,7 +592,9 @@ def manual_ref(anchor: str) -> str:
 
 def explain(widget: QWidget, key: str) -> QWidget:
     """Set the tooltip, accessible name, status tip and What's This text of a widget from HELP[key]."""
+    from aurora.app.shortcuts import native_text
     tip, name, anchor = HELP[key]
+    tip = native_text(tip)
     widget.setToolTip(tip)
     widget.setProperty("aurora_tip", tip)          # widgets.set_enabled keeps it while the widget is disabled
     widget.setAccessibleName(name)
@@ -624,7 +626,8 @@ def header_tips(view, tips: dict[int, str]) -> None:
     """Tooltips on the header items of a QTableWidget (horizontal) or a QTreeWidget, from HELP keys."""
     from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QTreeWidget
     for col, key in tips.items():
-        tip = HELP[key][0] if key in HELP else key
+        from aurora.app.shortcuts import native_text
+        tip = native_text(HELP[key][0]) if key in HELP else key
         if isinstance(view, QTableWidget):
             it = view.horizontalHeaderItem(col)
             if it is None:
