@@ -6,7 +6,6 @@ import traceback
 from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from aurora.app.theme import chip_style
 
 
 class Card(QFrame):
@@ -29,7 +28,7 @@ class Card(QFrame):
 class Chip(QLabel):
     def __init__(self, text: str, kind: str = "other", parent: QWidget | None = None):
         super().__init__(text, parent)
-        self.setStyleSheet(chip_style(kind))
+        self.setProperty("chip", kind if kind else "other")   # coloured by the app style sheet: follows the theme
         self.setAlignment(Qt.AlignCenter)
 
 

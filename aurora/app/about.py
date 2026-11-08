@@ -9,13 +9,9 @@ from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QV
 
 from aurora import APP_NAME, __version__
 from aurora.app.icons import mark_pixmap
+from aurora.app.theme import TOKENS
 
-CREDITS = (
-    "AURORA builds on the SGM XAS GUI by John Bussey (Washington State University), on the SGM_Beamline_Analysis "
-    "toolkit by James J. Dynes and the SGM beamline staff (Canadian Light Source), and on the beamtime reporting "
-    "pipeline by Sami Soudani (Washington State University). Edge and emission-line energies from xraydb. "
-    "Data from the SGM beamline, Canadian Light Source."
-)
+from aurora.credits import CREDITS  # noqa: E402  (one source for About, README, report, CLI)
 
 
 def versions_text() -> str:
@@ -39,12 +35,13 @@ class AboutDialog(QDialog):
         top.addWidget(mark)
         title = QLabel(f"<b style='font-size:22px;letter-spacing:3px'>{APP_NAME}</b><br>"
                        "Soft X-ray XAS and XRF stacks from the SGM beamline, Canadian Light Source<br>"
-                       f"<span style='color:#5B6B8C'>version {__version__} · Sami Soudani · MIT licence</span>")
+                       f"<span style='color:{TOKENS['muted']}'>version {__version__} · Sami Soudani · MIT licence</span>")
         title.setTextFormat(Qt.RichText)
         top.addWidget(title, 1)
         lay.addLayout(top)
         credits = QLabel(CREDITS)
         credits.setWordWrap(True)
+        credits.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(credits)
         ver = QLabel(versions_text())
         ver.setObjectName("muted")

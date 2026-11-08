@@ -32,7 +32,7 @@ aurora = "aurora.cli:main"
 include = ["aurora*"]
 
 [tool.setuptools.package-data]
-aurora = ["resources/*.png", "resources/*.ico"]
+aurora = ["resources/*.png", "resources/*.ico", "resources/ui/*.svg", "resources/docs/*.md", "resources/docs/img/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

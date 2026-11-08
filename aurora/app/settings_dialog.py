@@ -14,6 +14,9 @@ DEFAULTS = {
     "report_author": "Sami Soudani",
     "map_colormap": "viridis",
     "reference_dir": "",
+    "appearance": "system",          # system / light / dark
+    "text_size": "normal",           # normal / large / larger
+    "advanced_mode": False,          # Easy mode on first start
 }
 
 
@@ -49,6 +52,19 @@ class SettingsDialog(QDialog):
         self.ref_dir = QLineEdit(get("reference_dir")); form.addRow("reference spectra folder", self.ref_dir)
         self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
         form.addRow("", self.open_last)
+        self.appearance = QComboBox()
+        for key, label in (("system", "follow the system"), ("light", "light"), ("dark", "dark")):
+            self.appearance.addItem(label, key)
+        self.appearance.setCurrentIndex(max(0, self.appearance.findData(get("appearance"))))
+        form.addRow("appearance", self.appearance)
+        self.text_size = QComboBox()
+        for key, label in (("normal", "normal"), ("large", "large"), ("larger", "larger")):
+            self.text_size.addItem(label, key)
+        self.text_size.setCurrentIndex(max(0, self.text_size.findData(get("text_size"))))
+        form.addRow("text size", self.text_size)
+        self.advanced = QCheckBox("advanced mode (every option; Easy mode shows the basic workflow)")
+        self.advanced.setChecked(get("advanced_mode"))
+        form.addRow("", self.advanced)
         lay.addLayout(form)
         note = QLabel("Per-scan choices (detectors, lines, normalisation, I0 source) live with each zone in the session file, "
                       "not here.")
@@ -67,5 +83,12 @@ class SettingsDialog(QDialog):
         s.setValue("report_author", self.author.text().strip() or DEFAULTS["report_author"])
         s.setValue("open_last_project", self.open_last.isChecked())
         s.setValue("reference_dir", self.ref_dir.text().strip())
+        s.setValue("appearance", self.appearance.currentData())
+        s.setValue("text_size", self.text_size.currentData())
         s.sync()
+        from aurora.app.mode import is_advanced, set_advanced
+        from aurora.app.theme import apply_theme
+        apply_theme()
+        if self.advanced.isChecked() != is_advanced():
+            set_advanced(self.advanced.isChecked())
         super().accept()

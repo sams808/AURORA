@@ -7,11 +7,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsRectItem
 
-from aurora.app.theme import TOKENS
+from aurora.app.theme import TOKENS, style_plot
 from aurora.core.grid import Grid
 from aurora.core.io.config import Zone
 
-pg.setConfigOptions(imageAxisOrder="row-major", background="#0B1630", foreground="#C9D6F0", antialias=False)
+pg.setConfigOptions(imageAxisOrder="row-major")
 
 TOOLS = ("navigate", "rect+", "rect-", "brush+", "brush-")
 
@@ -76,6 +76,7 @@ class MapView(pg.GraphicsLayoutWidget):
         self.plot.setAspectLocked(True)
         self.plot.setLabel("bottom", "x (mm)")
         self.plot.setLabel("left", "y (mm)")
+        style_plot(self, "map")                                  # navy in both schemes, light axes
         for ax in ("bottom", "left"):
             self.plot.getAxis(ax).enableAutoSIPrefix(False)      # never "x (mm) (x0.001)"
         self.plot.showGrid(False, False)

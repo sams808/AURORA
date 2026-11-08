@@ -41,7 +41,7 @@ class ScanSettingsCard(Card):
         if scan.summary.get("i0_bad"):
             flags.append("I0 invalid")
         fl = QLabel(" · ".join(flags) if flags else f"{settings.n} px")
-        fl.setStyleSheet(f"color:{TOKENS['warn_fg']}" if flags else f"color:{TOKENS['muted']}")
+        fl.setProperty("tone", "warn" if flags else "muted")
         self.header.addWidget(fl)
         row1 = QHBoxLayout()
         self.inc = QCheckBox("include"); self.inc.setChecked(settings.include); row1.addWidget(self.inc)

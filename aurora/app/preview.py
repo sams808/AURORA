@@ -6,10 +6,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from aurora.app.theme import DASH, PAL, on_theme_changed, pc, style_plot   # PAL / DASH re-exported (live lists)
 from aurora.core.zones import ZoneTraces
-
-PAL = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#D55E00", "#F0E442"]
-DASH = [Qt.SolidLine, Qt.DashLine, Qt.DotLine, Qt.DashDotLine]
 
 
 class PreviewPlot(QWidget):
@@ -33,7 +31,6 @@ class PreviewPlot(QWidget):
         opts.addWidget(self.readout)
         lay.addLayout(opts)
         self.gl = pg.GraphicsLayoutWidget()
-        self.gl.setBackground("w")
         self.top = self.gl.addPlot(row=0, col=0)
         self.mid = self.gl.addPlot(row=1, col=0)
         self.low = self.gl.addPlot(row=2, col=0)
@@ -51,6 +48,8 @@ class PreviewPlot(QWidget):
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
+        style_plot(self.gl)
+        on_theme_changed(self, lambda _s: self.redraw())
         self._traces: list[tuple[str, ZoneTraces, dict]] = []
         for c in (self.show_sdd, self.show_sum, self.show_tey, self.show_i0, self.show_spikes):
             c.toggled.connect(self.redraw)
@@ -74,14 +73,14 @@ class PreviewPlot(QWidget):
         self.top.setTitle("fluorescence" + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))
         if t0.pre:
             for rng in (t0.pre, t0.post):
-                reg = pg.LinearRegionItem(values=list(rng), movable=False, brush=pg.mkBrush(31, 95, 191, 18), pen=pg.mkPen(None))
+                reg = pg.LinearRegionItem(values=list(rng), movable=False, brush=pg.mkBrush(pc("band") + "22"), pen=pg.mkPen(None))
                 reg.setZValue(-20)
                 self.top.addItem(reg, ignoreBounds=True)
         for ti, (name, t, meta) in enumerate(self._traces):
             col = PAL[ti % len(PAL)] if multi else None
             if meta.get("edge_ev") and t.E[0] <= meta["edge_ev"] <= t.E[-1]:
-                self.top.addItem(pg.InfiniteLine(meta["edge_ev"], angle=90, pen=pg.mkPen("#999999", style=Qt.DashLine),
-                                                 label=meta.get("edge", ""), labelOpts={"position": 0.9, "color": "#777777"}),
+                self.top.addItem(pg.InfiniteLine(meta["edge_ev"], angle=90, pen=pg.mkPen(pc("edge"), style=Qt.DashLine),
+                                                 label=meta.get("edge", ""), labelOpts={"position": 0.9, "color": pc("edge")}),
                                  ignoreBounds=True)
             if self.show_sdd.isChecked():
                 for i, y in enumerate(t.det):
@@ -93,19 +92,19 @@ class PreviewPlot(QWidget):
                     item.setOpacity(1.0 if on else 0.35)
                     self._spikes(self.top, t.E, y, t.spikes.get(f"sdd{i + 1}"))
             if self.show_sum.isChecked() and t.sum is not None:
-                self.top.plot(t.E, t.sum, pen=pg.mkPen(col or "#111111", width=2.2), connect="finite",
+                self.top.plot(t.E, t.sum, pen=pg.mkPen(col or pc("ink"), width=2.2), connect="finite",
                               name=(name + " " if multi else "") + "sum of ticked SDDs")
                 self._spikes(self.top, t.E, t.sum, t.spikes.get("sum"))
             if self.show_tey.isChecked():
-                self.mid.plot(t.E, t.tey, pen=pg.mkPen(col or "#444444", width=1.6), connect="finite")
+                self.mid.plot(t.E, t.tey, pen=pg.mkPen(col or pc("tey"), width=1.6), connect="finite")
                 self._spikes(self.mid, t.E, t.tey, t.spikes.get("tey"))
             if self.show_i0.isChecked():
-                self.low.plot(t.E, t.i0, pen=pg.mkPen(col or "#C8501E", width=1.2), connect="finite")
+                self.low.plot(t.E, t.i0, pen=pg.mkPen(col or pc("i0"), width=1.2), connect="finite")
                 if t.settings and t.settings.i0_source == "good":
-                    self.low.plot(t.E, t.i0_used, pen=pg.mkPen("#2a8a4a", width=1.4, style=Qt.DashLine), connect="finite")
+                    self.low.plot(t.E, t.i0_used, pen=pg.mkPen(pc("good"), width=1.4, style=Qt.DashLine), connect="finite")
                 sp = t.spikes.get("i0")
                 if sp and self.show_spikes.isChecked():
-                    self.low.addItem(pg.ScatterPlotItem(t.E[sp], t.i0_raw[sp], size=6, brush=pg.mkBrush("#e02020"), pen=None), ignoreBounds=True)
+                    self.low.addItem(pg.ScatterPlotItem(t.E[sp], t.i0_raw[sp], size=6, brush=pg.mkBrush(pc("spike")), pen=None), ignoreBounds=True)
         self._set_ranges()
 
     def _set_ranges(self) -> None:
@@ -141,7 +140,7 @@ class PreviewPlot(QWidget):
         if idx and self.show_spikes.isChecked():
             idx = [i for i in idx if np.isfinite(y[i])]
             if idx:
-                plot.addItem(pg.ScatterPlotItem(E[idx], y[idx], size=6, brush=pg.mkBrush("#e02020"), pen=None), ignoreBounds=True)
+                plot.addItem(pg.ScatterPlotItem(E[idx], y[idx], size=6, brush=pg.mkBrush(pc("spike")), pen=None), ignoreBounds=True)
 
     def _moved(self, pos) -> None:
         if not self._traces or not self.top.sceneBoundingRect().contains(pos):

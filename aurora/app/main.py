@@ -1,11 +1,11 @@
-"""Main window: top bar, perspectives rail, stacked perspectives. Only Home is built in Phase 0."""
+"""Main window: top bar (Easy / Advanced switch), perspectives rail, stacked perspectives, menus (manuals in Help)."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QFont, QKeySequence
+from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QKeySequence
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -24,12 +24,15 @@ from aurora.app.settings import recent_projects
 from aurora.app.settings_dialog import SettingsDialog, get as setting
 from aurora.app.survey import SurveyPerspective
 from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
-from aurora.app.theme import TOKENS, qss
+from aurora.app.theme import TOKENS, apply_theme, follow_system
+from aurora.app import mode as ui_mode
 
 PERSPECTIVES = [
     ("home", "Home"), ("survey", "Survey"), ("reduce", "Reduce"), ("check", "Check"), ("compare", "Compare"),
     ("fit", "Fit"), ("maps", "Maps"), ("report", "Report"),
 ]
+# perspectives shown only in Advanced mode (Easy mode = John Bussey's basic path: reduce, check, compare, fit, report)
+ADVANCED_PERSPECTIVES = {"maps"}
 
 
 class Placeholder(QWidget):
@@ -108,6 +111,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{APP_NAME} {__version__}")
 
         self._menus()
+        self._help = None
+        ui_mode.on_mode_changed(self, self._mode_changed)
         self.show_perspective("home")
 
     # ------------------------------------------------------------------ chrome
@@ -128,6 +133,13 @@ class MainWindow(QMainWindow):
         self.crumb.setObjectName("crumb")
         lay.addWidget(self.crumb)
         lay.addStretch(1)
+        self.mode_btn = QToolButton()
+        self.mode_btn.setObjectName("modebtn")
+        self.mode_btn.setCheckable(True)
+        self.mode_btn.setToolTip("Easy mode: the basic processing path of John Bussey's GUI (reduce, check, compare, "
+                                 "fit, report).\nAdvanced mode: every option. Ctrl+Shift+A")
+        self.mode_btn.clicked.connect(lambda on: ui_mode.set_advanced(on))
+        lay.addWidget(self.mode_btn)
         return bar
 
     def _rail(self) -> QWidget:
@@ -163,7 +175,9 @@ class MainWindow(QMainWindow):
 
     def _menus(self) -> None:
         m = self.menuBar()
+        self.menus: dict[str, object] = {}
         file = m.addMenu("&File")
+        self.menus["file"] = file
         a = QAction("&Open project…", self)
         a.setShortcut(QKeySequence.Open)
         a.triggered.connect(self.home.choose_project)
@@ -173,21 +187,80 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self.home.reload_btn.click)
         file.addAction(a)
         file.addSeparator()
-        a = QAction("&Quit", self)
-        a.setShortcut(QKeySequence.Quit)
-        a.triggered.connect(self.close)
-        file.addAction(a)
         a = QAction("&Settings…", self)
         a.setShortcut(QKeySequence.Preferences)
+        a.setMenuRole(QAction.PreferencesRole)          # macOS: the application menu's Settings entry
         a.triggered.connect(self.show_settings)
         file.addAction(a)
+        file.addSeparator()
+        a = QAction("&Quit", self)
+        a.setShortcut(QKeySequence.Quit)
+        a.setMenuRole(QAction.QuitRole)
+        a.triggered.connect(self.close)
+        file.addAction(a)
+
         view = m.addMenu("&View")
+        self.menus["view"] = view
+        self.mode_action = QAction("&Advanced mode", self)
+        self.mode_action.setCheckable(True)
+        self.mode_action.setShortcut("Ctrl+Shift+A")
+        self.mode_action.setMenuRole(QAction.NoRole)
+        self.mode_action.toggled.connect(lambda on: on != ui_mode.is_advanced() and ui_mode.set_advanced(on))
+        view.addAction(self.mode_action)
+        view.addSeparator()
+        appearance = view.addMenu("Appearance")
+        group = QActionGroup(self)
+        self.appearance_actions = {}
+        for key, label in (("system", "Follow the system"), ("light", "Light"), ("dark", "Dark")):
+            a = QAction(label, self, checkable=True)
+            a.setActionGroup(group)
+            a.triggered.connect(lambda _=False, k=key: self.set_appearance(k))
+            appearance.addAction(a)
+            self.appearance_actions[key] = a
+        size = view.addMenu("Text size")
+        group = QActionGroup(self)
+        self.size_actions = {}
+        for key, label in (("normal", "Normal"), ("large", "Large"), ("larger", "Larger")):
+            a = QAction(label, self, checkable=True)
+            a.setActionGroup(group)
+            a.triggered.connect(lambda _=False, k=key: self.set_text_size(k))
+            size.addAction(a)
+            self.size_actions[key] = a
+        self._sync_view_actions()
+        view.addSeparator()
         a = QAction("&Full screen", self)
         a.setShortcut("F11")
         a.triggered.connect(self.toggle_fullscreen)
         view.addAction(a)
+
         help_ = m.addMenu("&Help")
+        self.menus["help"] = help_
+        from aurora.app.help import DOCS
+        self.help_actions = {}
+        for i, (name, title, tip) in enumerate(DOCS):
+            a = QAction(title, self)
+            a.setStatusTip(tip)
+            a.setMenuRole(QAction.NoRole)
+            if i == 0:
+                a.setShortcut(QKeySequence.HelpContents)
+            a.triggered.connect(lambda _=False, n=name: self.show_help(n))
+            help_.addAction(a)
+            self.help_actions[name] = a
+        help_.addSeparator()
+        a = QAction("Open the &demo beamtime", self)
+        a.setStatusTip("a small synthetic beamtime to try every perspective (the tutorials use it)")
+        a.setMenuRole(QAction.NoRole)
+        a.triggered.connect(self.open_demo)
+        help_.addAction(a)
+        self.demo_action = a
+        a = QAction("Open the &log folder", self)
+        a.setStatusTip("the log file to attach to a bug report")
+        a.setMenuRole(QAction.NoRole)
+        a.triggered.connect(self.open_log_folder)
+        help_.addAction(a)
+        help_.addSeparator()
         a = QAction(f"&About {APP_NAME}", self)
+        a.setMenuRole(QAction.AboutRole)
         a.triggered.connect(self.show_about)
         help_.addAction(a)
 
@@ -204,6 +277,64 @@ class MainWindow(QMainWindow):
 
     def show_settings(self) -> None:
         SettingsDialog(self).exec()
+        self._sync_view_actions()
+
+    # ------------------------------------------------------------------ mode, theme, help
+    def _mode_changed(self, advanced: bool) -> None:
+        self.mode_btn.blockSignals(True)
+        self.mode_btn.setChecked(advanced)
+        self.mode_btn.setText("Advanced mode" if advanced else "Easy mode")
+        self.mode_btn.blockSignals(False)
+        self.mode_action.blockSignals(True)
+        self.mode_action.setChecked(advanced)
+        self.mode_action.blockSignals(False)
+        for key in ADVANCED_PERSPECTIVES:
+            if key in self.rail_buttons:
+                self.rail_buttons[key].setVisible(advanced)
+        current = next((k for k, w in self.pages.items() if w is self.stack.currentWidget()), "home")
+        if not advanced and current in ADVANCED_PERSPECTIVES:
+            self.show_perspective("home")
+        self.statusBar().showMessage("Advanced mode: every option" if advanced else
+                                     "Easy mode: the basic path (Advanced mode in the top bar shows every option)", 5000)
+
+    def _sync_view_actions(self) -> None:
+        from aurora.app.settings_dialog import get
+        for key, a in self.appearance_actions.items():
+            a.setChecked(key == get("appearance"))
+        for key, a in self.size_actions.items():
+            a.setChecked(key == get("text_size"))
+
+    def set_appearance(self, key: str) -> None:
+        from aurora.app.settings import settings
+        s = settings(); s.setValue("appearance", key); s.sync()
+        apply_theme()
+        self._sync_view_actions()
+
+    def set_text_size(self, key: str) -> None:
+        from aurora.app.settings import settings
+        s = settings(); s.setValue("text_size", key); s.sync()
+        apply_theme()
+        self._sync_view_actions()
+
+    def show_help(self, doc: str = "USER_GUIDE.md", anchor: str | None = None) -> None:
+        from aurora.app.help import HelpWindow
+        if self._help is None:
+            self._help = HelpWindow(self)
+        self._help.show_doc(doc, anchor)
+
+    def open_demo(self) -> None:
+        """Create (once) and open the synthetic demo beamtime in the user's data folder."""
+        from platformdirs import user_data_dir
+        from aurora.cli import cmd_demo
+        root = Path(user_data_dir(APP_NAME, appauthor=False)) / "demo_beamtime"
+        if not (root / "raw").is_dir():
+            cmd_demo(root)
+        self.home.open_project(root)
+        self.show_perspective("home")
+
+    def open_log_folder(self) -> None:
+        from aurora.logsetup import log_dir
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir())))
 
     def open_scan_in_reduce(self, scan) -> None:
         """Home double-click / Survey footprint click: select the scan's holder and stack, show Reduce."""
@@ -243,7 +374,8 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     f.setFamilies(["Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", "Arial"])
     f.setPointSize(10)
     app.setFont(f)
-    app.setStyleSheet(qss())
+    apply_theme(app)                 # Fusion + palette + style sheet of the light or dark scheme (Settings > appearance)
+    follow_system(app)
     return app
 
 
@@ -266,7 +398,11 @@ def shutdown_app(app: QApplication, *windows: QWidget) -> None:
 
 
 def run(project: Path | None = None) -> int:
+    from aurora.logsetup import setup_logging
+    from aurora.app import crash
+    setup_logging()
     app = create_app()
+    crash.install()
     win = MainWindow()
     win.show()
     if project is None and setting("open_last_project") and recent_projects() and Path(recent_projects()[0]).is_dir():
