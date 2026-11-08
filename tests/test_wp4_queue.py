@@ -246,6 +246,7 @@ def test_a_stack_that_cannot_be_read_gives_an_error_row(qapp, fake_project, erro
     win = MainWindow()
     win.home.set_project(Project.discover(fake_project))
     qapp.processEvents()
+    assert win.jobs.wait_idle(30000)                      # Reduce's own read of the first stack must not land after the pop
     ses = win.session
     sid = ses.stack_id(ses.project.find(testdata.STACK))
     sd = ses.stack(sid)

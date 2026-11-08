@@ -39,6 +39,8 @@ EASY_DEFAULTS: dict[str, dict] = {
         "sdd": [True, True, True, True],        # minus the SDDs flagged saturated (flags.merged_flags)
         "despike": True,
         "k": "setting:despike_k",               # Settings despike_k (constants.DESPIKE_K)
+        "despike_mode": "coherent",             # across the four SDDs (spectra.despike_coherent); files without
+                                                # 'dsm' stay classic
         "i0_source": "own",                     # the good-I0 mean when the scan's I0 is flagged invalid
         "pre": None,                            # automatic
         "post": None,                           # automatic
@@ -283,9 +285,10 @@ def easy_line(scan, labels: list[str] | None = None) -> str:
 
 
 def easy_scan_settings(scan, flags=(), labels: list[str] | None = None):
-    """A ScanSettings built from EASY_DEFAULTS for one zone x scan: Settings normalisations and k, TEY and de-spike on,
-    SDD1-4 on except the ones flagged saturated, I0 'own' (the good-I0 mean when I0 is flagged invalid), pre / post
-    automatic, the holder's main line, and the default signal when the settings carry one."""
+    """A ScanSettings built from EASY_DEFAULTS for one zone x scan: Settings normalisations and k, TEY and the
+    coherent de-spike on, SDD1-4 on except the ones flagged saturated, I0 'own' (the good-I0 mean when I0 is flagged
+    invalid), pre / post automatic, the holder's main line, and the default signal of that line
+    (lines.default_signal, the same rule as check.science_defaults)."""
     from aurora.core import flags as fl
     from aurora.core.constants import DETS
     from aurora.core.io.config import ScanSettings
@@ -301,10 +304,12 @@ def easy_scan_settings(scan, flags=(), labels: list[str] | None = None):
                       tey_norm=str(easy_value("zone_scan", "tey_norm")), despike=bool(d["despike"]), k=k,
                       i0_source="good" if fl.i0_invalid(flags) else str(d["i0_source"]), pre=d["pre"], post=d["post"])
     st.sdd = [bool(on) and det not in sat for det, on in zip(DETS, d["sdd"])]
+    if hasattr(st, "despike_mode"):
+        st.despike_mode = str(d["despike_mode"])
     if hasattr(st, "signal"):
         try:
             from aurora.core.lines import default_signal
-            st.signal = default_signal(scan, getattr(scan, "summary", None) or {})
+            st.signal = default_signal(scan, getattr(scan, "summary", None) or {}, line=st.line or None)
         except ImportError:                     # lines.default_signal arrives with the science package
             pass
     return st

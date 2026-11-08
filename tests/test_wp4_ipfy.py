@@ -131,3 +131,28 @@ def test_default_signal():
     assert default_signal(_Scan(("F", "K")), {}, line="total XRF") == "pfy"
     assert default_signal(None, {}) == "pfy" and default_signal(object(), {"mode": "PFY F Kα"}) == "pfy"
     assert line_element("Fe Lα") == "Fe" and line_element("total XRF") is None and line_element("") is None
+
+
+def test_easy_defaults_agree_with_the_check_defaults():
+    """Reduce's 'advanced settings in use' chip compares a zone's settings with mode.easy_scan_settings; new settings
+    also pass through check.science_defaults. Both must give the coherent de-spike and the same signal, or every new
+    zone would show the chip in Easy."""
+    import copy
+
+    pytest.importorskip("pyqtgraph")
+    from aurora.app import mode
+    from aurora.app.check import science_defaults
+    from aurora.app.main import create_app
+    from aurora.app.reduce import easy_differences
+    create_app(["aurora-tests"])
+    cases = ((("F", "K"), "PFY F Kα", None), (("U", "N45"), "IPFY O Kα", None), (("F", "K"), None, ["O Kα", "total XRF"]),
+             (("F", "K"), None, ["F Kα", "O Kα", "total XRF"]))
+    for edge, mode_name, labels in cases:
+        scan = _Scan(edge, mode_name)
+        scan.name = "s"
+        easy = mode.easy_scan_settings(scan, [], labels=labels)
+        new = copy.deepcopy(easy)
+        science_defaults(scan, new)
+        assert easy.despike_mode == "coherent", (edge, mode_name, labels)
+        assert easy_differences(new, easy) == [], (edge, mode_name, labels, easy_differences(new, easy))
+    assert mode.EASY_DEFAULTS["zone_scan"]["despike_mode"] == "coherent"

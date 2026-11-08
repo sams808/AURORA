@@ -121,6 +121,14 @@ def test_fixed_bins_sum_mode_and_other_zones(fake, tmp_path):
     # a polygon zone: its vertices are his polygon, strict membership
     z3 = Zone(id=3, label="tri", polys=[[[-0.6, 4.9], [0.1, 4.9], [-0.6, 5.6]]])
     assert roi_polygon(z3) == [[-0.6, 4.9], [0.1, 4.9], [-0.6, 5.6]] and len(zone_pixels(z3, sd)) > 0
+    # the pixels saved are the zone's members (Reduce's own rule): an erase rectangle inside a polygon stays erased
+    from aurora.core.zones import members
+    z4 = Zone(id=4, label="erased", polys=[[[-0.7, 4.8], [0.3, 4.8], [0.3, 5.7], [-0.7, 5.7]]],
+              erects=[[-0.5, -0.5, 5.0, 5.0]])
+    pix4 = zone_pixels(z4, sd)
+    assert np.array_equal(pix4, members(z4, sd.x, sd.y, sd.pitch))
+    whole = zone_pixels(Zone(id=5, label="whole", polys=z4.polys), sd)
+    assert len(pix4) == len(whole) - 1
 
 
 def test_masked_and_incomplete_energies_are_flagged(fake, tmp_path):

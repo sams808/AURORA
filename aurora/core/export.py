@@ -65,15 +65,9 @@ def polygon_mask(poly, x, y) -> np.ndarray:
 
 
 def zone_pixels(zone: Zone, stack) -> np.ndarray:
-    """Pixel indices of the zone on a stack: the zone tool's members (rectangles, painted squares, erasures) plus the
-    pixels inside its polygons."""
-    pix = members(zone, stack.x, stack.y, stack.pitch)
-    if zone.polys:
-        m = np.zeros(len(stack.x), bool)
-        for poly in zone.polys:
-            m |= polygon_mask(poly, stack.x, stack.y)
-        pix = np.union1d(pix, np.where(m)[0]).astype(int)
-    return np.asarray(pix, int)
+    """Pixel indices of the zone on a stack: zones.members, which holds the rectangles, painted squares and the
+    pixels strictly inside the polygons (John Bussey's rule), minus the erasures."""
+    return np.asarray(members(zone, stack.x, stack.y, stack.pitch), int)
 
 
 def roi_polygon(zone: Zone, pitch: tuple[float, float] | None = None) -> list[list[float]] | None:
