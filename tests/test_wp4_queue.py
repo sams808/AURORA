@@ -235,3 +235,36 @@ def test_a_bad_row_starts_unticked_and_is_not_saved(qapp, demo, monkeypatch):
     win.session.delete_zone(z.id)
     pump(qapp)
     assert ck.queue_rows() == [] and win.session.check_queue == []
+
+
+def test_a_stack_that_cannot_be_read_gives_an_error_row(qapp, fake_project, error_dialogs):
+    from aurora.app.main import MainWindow
+    from aurora.app.session import CheckItem
+    from aurora.app.widgets import Chip
+    from aurora.core import testdata
+    from aurora.core.model import Project
+    win = MainWindow()
+    win.home.set_project(Project.discover(fake_project))
+    qapp.processEvents()
+    ses = win.session
+    sid = ses.stack_id(ses.project.find(testdata.STACK))
+    sd = ses.stack(sid)
+    z = ses.new_zone("z")
+    with ses.edit("draw"):
+        z.rects.append(list(sd.bbox))
+    assert sid in z.settings
+    ses._stacks.pop(sid)                                  # forgotten, and now unreadable
+
+    def broken(s, progress=None):
+        raise OSError("the share is gone")
+    ses.stack = broken
+    ses.queue_for_check([CheckItem(ses.current_holder, z.id, sid)])
+    assert win.jobs.wait_idle(30000)
+    qapp.processEvents()
+    rows = win.check.queue_rows()
+    assert rows[0]["state"] == "error" and not win.check.save_btn.isEnabled()
+    chips = win.check.queue.cellWidget(0, 4).findChildren(Chip)
+    assert [c.property("chip") for c in chips] == ["bad"] and "the share is gone" in chips[0].toolTip()
+    assert error_dialogs                                   # the failed read was reported once, calmly
+    win.session._save_timer.stop()
+    win.close()

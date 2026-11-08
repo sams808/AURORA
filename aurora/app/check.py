@@ -118,6 +118,7 @@ class CheckPerspective(QWidget):
         self._defer = False
         self._queue_dirty = False
         self._probed_holders: set = set()     # holders probed automatically for the queue (once each)
+        self._load_errors: dict[str, str] = {}  # sid -> why its stack could not be read (queue rows say so)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -371,6 +372,7 @@ class CheckPerspective(QWidget):
         whose files changed since."""
         self._rates.clear()
         self._rows, self._row_cache, self._seen, self._probed_holders = [], {}, set(), set()
+        self._load_errors = {}
         try:
             self._results = qc.load_qc(project) if project is not None else {}
         except (OSError, ValueError) as err:
@@ -728,9 +730,13 @@ class CheckPerspective(QWidget):
             if ses.scan_of(it.sid) is None:
                 row.state, row.error = "error", "the scan of this row is not in the project"
                 return row
+            if it.sid in self._load_errors:
+                row.state, row.error = "error", f"the stack could not be read: {self._load_errors[it.sid]}"
+                return row
             row.state = "loading"
             jobs.of(self).submit(f"stack:{it.sid}", lambda cb, s=it.sid: ses.stack(s, progress=cb),
-                                 on_done=lambda _sd: self._refresh_queue(), label="reading the stack",
+                                 on_done=lambda _sd: self._refresh_queue(),
+                                 on_failed=lambda t, s=it.sid: self._stack_failed(s, t), label="reading the stack",
                                  taskbar=self.taskbar)
             return row
         row.n_total = sd.n_pix
@@ -759,6 +765,11 @@ class CheckPerspective(QWidget):
         row.frame, row.messages = fr, qc.check_zone(fr.traces, sd, flags)
         self._row_cache[key] = (row.frame, row.messages)
         return row
+
+    def _stack_failed(self, sid: str, details: str) -> None:
+        lines = [ln for ln in (details or "").strip().splitlines() if ln.strip()]
+        self._load_errors[sid] = lines[-1] if lines else "unknown error"
+        self._refresh_queue()
 
     def _frame_done(self, key, fr, sd, flags) -> None:
         self._row_cache[key] = (fr, qc.check_zone(fr.traces, sd, flags))
