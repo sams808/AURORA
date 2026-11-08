@@ -229,9 +229,10 @@ def attach(stack, scan, root=None, cache_dir: Path | None = None) -> RawSource:
 
 
 def _cache_root(stack) -> Path | None:
-    """The project root a StackData was read under, from its cache path ('sgm_report cache <root>/processed/...' or
-    'aurora cache <root>/.aurora/cache/...'); None for a stack reduced from raw just now."""
-    m = re.search(r"cache (.+_reduced_cache\.npz)\s*$", str(getattr(stack, "source", "")))
+    """The project root a StackData was read under, from its cache path ('sgm_report cache <root>/processed/...',
+    'sgm_report cache with other windows <root>/processed/...' or 'aurora cache <root>/.aurora/cache/...'); None for a
+    stack reduced from raw just now."""
+    m = re.search(r"cache (?:with other windows )?(.+_reduced_cache\.npz)\s*$", str(getattr(stack, "source", "")))
     if not m:
         return None
     parts = Path(m.group(1)).parts

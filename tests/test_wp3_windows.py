@@ -126,6 +126,18 @@ def test_unknown_raw_folders_fall_back_with_a_note(tmp_path):
     assert "aurora cache" in sd2.source and xw.source_of(sd2) is not None
 
 
+def test_the_cache_root_of_every_stack_source():
+    """Every source text StackData.load writes names the project root the same way, including the sgm_report cache
+    whose windows differ from config/roi_bins.json (I49)."""
+    from types import SimpleNamespace
+    root = Path("C:/beam time") if os.name == "nt" else Path("/beam time")
+    rep = root / "processed" / "2026-11-05" / testdata.STACK / "_reduced_cache.npz"
+    own = root / ".aurora" / "cache" / "2026-11-05" / testdata.STACK / "_reduced_cache.npz"
+    for text in (f"sgm_report cache {rep}", f"sgm_report cache with other windows {rep}", f"aurora cache {own}"):
+        assert xw._cache_root(SimpleNamespace(source=text)) == root, text
+    assert xw._cache_root(SimpleNamespace(source="reduced from raw")) is None
+
+
 def test_roi_round_trips_through_the_session_file(tmp_path):
     from aurora.core.io.config import HolderZones, ZonesFile
     zf = ZonesFile(project="T")
@@ -297,11 +309,23 @@ def test_line_of_the_edge_offered_with_a_calibration(qapp, fake_project):
 
 
 def test_a_roi_bins_line_the_stack_lacks_is_read_from_the_raw_spectra(qapp, fake_project):
-    """Every line of roi_bins.json is a preset. A line the stack was reduced without (its cache predates the line)
-    becomes windows read from the raw spectra, so the trace still exists."""
+    """Every line of roi_bins.json is a preset. A line the stack was reduced without becomes windows read from the raw
+    spectra, so the trace still exists. The stack here is sgm_report's cache holding only some of the project's lines
+    (sgm_report picks the lines per sample); AURORA's own cache is re-reduced when roi_bins.json gains a line (I49)."""
+    from aurora.core.io.raw import stack_last_mtime
     from wp3_helpers import close, open_window, pump
     proj = Project.discover(fake_project)
-    StackData.load(proj, proj.find(testdata.STACK))               # cached with 'total XRF' only
+    scan = proj.find(testdata.STACK)
+    first = StackData.load(proj, scan)                            # reduced with 'total XRF' only
+    assert first.labels == ["total XRF"]
+    rep = proj.processed / scan.day / scan.name                   # ... and kept as sgm_report v2.5 would write it
+    rep.mkdir(parents=True, exist_ok=True)
+    windows = {"total XRF": {d: [5, 200] for d in DETS}}
+    np.savez(rep / "_reduced_cache.npz", i0=first.i0, tey=first.tey, roi_pix_det=first.roi_pix_det, valid=first.valid,
+             roi_labels=np.array(first.labels, dtype=object),
+             signature=f"v2.5|{len(scan.energy_dirs)}|{stack_last_mtime(scan.energy_dirs):.0f}|"
+                       f"{json.dumps(windows, sort_keys=True)}")
+    (proj.root / ".aurora" / "cache" / scan.day / scan.name / "_reduced_cache.npz").unlink()
     (fake_project / "config" / "roi_bins.json").write_text(json.dumps(
         {"F Kα": {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]}}), encoding="utf-8")
     win, sid = open_window(qapp, Project.discover(fake_project))
@@ -309,7 +333,7 @@ def test_a_roi_bins_line_the_stack_lacks_is_read_from_the_raw_spectra(qapp, fake
         ses, rd = win.session, win.reduce
         wc = rd.window_card
         sd = ses.stack_loaded(sid)
-        assert sd.labels == ["total XRF"]
+        assert sd.labels == ["total XRF"] and sd.source.startswith("sgm_report cache ") and not sd.window_note
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
         assert items == ["total XRF (fixed bins)", "F Kα (fixed bins)", "custom"]
         rd.map.rect_drawn.emit(*sd.bbox)

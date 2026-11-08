@@ -12,6 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "packaging" / "aurora.spec"
 PYZ_TOC = ROOT / "build" / "aurora" / "PYZ-00.toc"         # packaging\build_win.bat: --workpath build
 DIST = ROOT / "dist" / "AURORA"
+# This spec writes _build.json into every bundle; a build/ or dist/ left by an older spec (a checkout built before
+# WP8a) says nothing about the current spec, so the checks on the built files wait for the next build. CI asserts
+# _build.json in the bundle and test_spec_entry_script_and_bundled_extras that the spec writes it.
+BUILD_JSON = DIST / "_internal" / "aurora" / "_build.json"
+OLD_BUILD = not BUILD_JSON.is_file()
+OLD_REASON = "no local build of this spec (dist/AURORA/_internal/aurora/_build.json absent): run packaging\\build_win.bat"
 
 
 def _spec_tree() -> ast.Module:
@@ -45,6 +51,7 @@ def test_spec_entry_script_and_bundled_extras():
 
 
 @pytest.mark.skipif(not PYZ_TOC.exists(), reason="no local PyInstaller build (build/aurora/PYZ-00.toc)")
+@pytest.mark.skipif(OLD_BUILD, reason=OLD_REASON)
 def test_the_built_archive_holds_the_backends():
     toc = PYZ_TOC.read_text(encoding="utf-8", errors="replace")
     for mod in ("matplotlib.backends.backend_svg", "matplotlib.backends.backend_pdf", "aurora.core.reportcheck"):
@@ -63,6 +70,7 @@ def test_spec_keeps_build_tools_out_of_the_bundle():
 
 
 @pytest.mark.skipif(not PYZ_TOC.exists(), reason="no local PyInstaller build (build/aurora/PYZ-00.toc)")
+@pytest.mark.skipif(OLD_BUILD, reason=OLD_REASON)
 def test_the_built_archive_has_no_build_tools():
     toc = PYZ_TOC.read_text(encoding="utf-8", errors="replace")
     for top in ("PyInstaller", "setuptools", "pkg_resources", "altgraph", "pefile", "numpy._pyinstaller"):
@@ -71,6 +79,7 @@ def test_the_built_archive_has_no_build_tools():
 
 
 @pytest.mark.skipif(not (DIST / "AURORA.exe").exists(), reason="no local frozen Windows build (dist/AURORA)")
+@pytest.mark.skipif(OLD_BUILD, reason=OLD_REASON)
 def test_the_frozen_folder_carries_licences_provenance_and_tls():
     for rel in ("AURORA.exe", "aurora-cli.exe", "LICENSE", "CREDITS.md", "THIRD_PARTY_LICENSES.txt", "LICENSES/LGPL-3.0.txt",
                 "_internal/aurora/_build.json", "_internal/aurora/resources/licenses/THIRD_PARTY_LICENSES.txt",

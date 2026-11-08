@@ -33,6 +33,7 @@ from aurora.app.theme import TOKENS, apply_theme, follow_system, on_theme_change
 from aurora.app.vocab import plural
 from aurora.app import mode as ui_mode
 from aurora.app import shortcuts
+from aurora.app import stack_cache
 
 PERSPECTIVES = [
     ("home", "Home"), ("survey", "Survey"), ("reduce", "Reduce"), ("check", "Check"), ("compare", "Compare"),
@@ -173,6 +174,7 @@ class MainWindow(QMainWindow):
 
         self._menus()
         shortcuts.adopt(self)                  # menu entries the perspectives added before they were inside the window
+        stack_cache.install(self)              # File > Re-reduce the stack with the project ROI bins (Advanced, I49)
         self._help = None
         self.setAcceptDrops(True)              # a folder or an .h5 dropped on the window opens it (home.open_path)
         for key in sorted(ADVANCED_PERSPECTIVES):
