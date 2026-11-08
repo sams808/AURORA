@@ -97,6 +97,7 @@ def build_demo_window(qapp, root: Path, size=(1500, 940)):
     fit.pk_n.setValue(1)
     fit.pk_centres.setText("692")
     fit.run_peaks()
+    win.jobs.wait_idle(60000)              # LCF and MCR-ALS run through window.jobs (WP5 I33)
     fit.bootstrap.setValue(200)
     # Maps
     mp = win.maps

@@ -42,10 +42,10 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     # table edits propagate: hide the TEY rows, tick Fit on the sdd rows, shift one
     for i, r in enumerate(lib.requests):
         if r.signal == "TEY":
-            cmp_.table.item(i, 0).setCheckState(Qt.Unchecked)
+            cmp_.table.item(i, cmp_.col("Show")).setCheckState(Qt.Unchecked)
         else:
-            cmp_.table.item(i, 12).setCheckState(Qt.Checked)
-    cmp_.table.item(0, 3).setText("0.5")
+            cmp_.table.item(i, cmp_.col("Fit")).setCheckState(Qt.Checked)
+    cmp_.table.item(0, cmp_.col("Shift eV")).setText("0.5")
     qapp.processEvents()
     assert lib.requests[0].shift == 0.5 and sum(r.show for r in lib.requests) == 3 and sum(r.fit for r in lib.requests) == 3
     assert "3 traces plotted" in cmp_.status.text()
@@ -60,6 +60,7 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
         it = fit.components.item(i); it.setCheckState(Qt.Checked if it.text() != "M [sdd-scaled]" else Qt.Unchecked)
     fit.bootstrap.setValue(20)
     fit.run_lcf()
+    assert win.jobs.wait_idle(30000)
     r = fit.lcf_result
     assert r is not None and abs(r.total - 1) < 1e-6 and r.rmse < 0.05
     coef = {fit.lcf_table.item(i, 0).text(): float(fit.lcf_table.item(i, 1).text()) for i in range(fit.lcf_table.rowCount())}
@@ -70,6 +71,7 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     fit.run_pca()
     assert fit.pca_result is not None and fit.pca_result.explained[0] > 0.5
     fit.n_comp.setValue(2); fit.run_mcr()
+    assert win.jobs.wait_idle(30000)
     m = fit.mcr_result
     assert m is not None and m.C.shape == (3, 2) and fit.prop_table.rowCount() == 3
     files = fit.export_mcr(tmp_path / "mcr", m, "MCR")
@@ -77,6 +79,7 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     fit.itfa_sample.setCurrentText("A [sdd-scaled]"); fit.itfa_pct.setText("100, 0"); fit._add_target()
     assert fit.targets.count() == 1
     fit.run_itfa()
+    assert win.jobs.wait_idle(30000)
     assert fit.itfa_result is not None and fit.itfa_table.rowCount() == 3
     # config round trip
     lib.save(tmp_path / "cfg.json", {"spacing": 0.4})

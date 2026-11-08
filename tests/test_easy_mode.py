@@ -107,10 +107,10 @@ def test_easy_limits_on_the_demo(qapp, demo):
     win.show_perspective("report")
     pump(qapp)
     assert win.report.scope_line.isVisible() and "all groups" in win.report.scope_line.text()
-    # hidden columns: Compare shows Show, Label, Signal, Shift eV, Fit; Home hides Kind
+    # hidden columns: Compare shows Show, Fit, Label, Signal, Shift eV, Colour (WP5 I28); Home hides Kind
     t = win.compare.table
     shown = [t.horizontalHeaderItem(c).text() for c in range(t.columnCount()) if not t.isColumnHidden(c)]
-    assert shown == ["Show", "Label", "Signal", "Shift eV", "Fit"]
+    assert shown == ["Show", "Fit", "Label", "Signal", "Shift eV", "Colour"]
     assert win.home.tree.isColumnHidden(2)
 
 

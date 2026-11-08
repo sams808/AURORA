@@ -102,12 +102,13 @@ def test_lcf_export_writes_csv_svg_png_and_says_so(qapp, tmp_path):
     fit = win.fit
     assert fit.lcf_result is not None and fit.lcf_export_btn.isEnabled()
     out = fit.export_lcf(tmp_path / "x.csv")
-    assert [p.name for p in out] == ["x.csv", "x.svg", "x.png"]
-    assert all((tmp_path / n).is_file() and (tmp_path / n).stat().st_size > 100 for n in ("x.csv", "x.svg", "x.png"))
+    # WP5 I32: the figure is drawn again with matplotlib at the Figure size (PNG, SVG, PDF), not grabbed from the screen
+    assert [p.name for p in out] == ["x.csv", "x.png", "x.svg", "x.pdf"]
+    assert all((tmp_path / n).is_file() and (tmp_path / n).stat().st_size > 100 for n in ("x.csv", "x.svg", "x.png", "x.pdf"))
     svg = (tmp_path / "x.svg").read_text(encoding="utf-8")
-    assert " Z" in svg and not re.search(r"[Zz]-?\d", svg)        # closed paths survive the Qt 6.12 SVG fix (pgcompat)
+    assert "<svg" in svg and "linear combination" in svg                 # text stays text (svg.fonttype none)
     assert "x.csv" in fit.lcf_info.text() and "x.png" in fit.lcf_info.text() and "Open folder" in fit.lcf_info.text()
-    assert "wrote x.csv, x.svg, x.png" in win.statusBar().currentMessage()
+    assert "wrote x.csv, x.png, x.svg, x.pdf" in win.statusBar().currentMessage()
     win.session._save_timer.stop()
     win.close()
 

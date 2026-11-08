@@ -285,11 +285,13 @@ HELP: dict[str, tuple[str, str, str]] = {
                         "Add CSV", "61-loading"),
     "compare.references": ("Pick spectra from the reference folder (Settings), filtered by element.", "References",
                            "65-reference-spectra"),
-    "compare.save_config": ("Save the whole library (files, shifts, normalisation, ticks) as a JSON file.",
-                            "Save config", "61-loading"),
-    "compare.load_config": ("Load a library saved with Save config….", "Load config", "61-loading"),
-    "compare.export": ("Write a wide CSV of the shown traces as processed, a PNG, an SVG and the config JSON.",
-                       "Export", "64-diagnostics-and-export"),
+    "compare.save_config": ("Save the whole library (files, shifts, normalisation, E0, colours, ticks) as a JSON file, "
+                            "with the paths absolute and relative to it; traces without a file go to <name>_spectra.npz "
+                            "next to it.", "Save config", "61-loading"),
+    "compare.load_config": ("Load a library saved with Save config… (or John Bussey's compare_config.json); it "
+                            "replaces the rows.", "Load config", "61-loading"),
+    "compare.export": ("Write a wide CSV of the shown traces as processed, the figure drawn again at the Figure size "
+                       "(PNG, SVG, PDF) and the config JSON.", "Export", "64-diagnostics-and-export"),
     "compare.remove": ("Remove the selected rows.", "Remove", "62-the-table"),
     "compare.remove_sample": ("Remove every row of the selected rows' samples.", "Remove sample", "62-the-table"),
     "compare.rename": ("Rename the selected sample.", "Rename", "62-the-table"),
@@ -325,12 +327,16 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.col.label": ("Editable; Rename and Duplicate act on the selected rows.", "Label", "62-the-table"),
     "compare.col.signal": ("sdd-scaled, TEY, sdd1…, as read from the file.", "Signal", "62-the-table"),
     "compare.col.shift": ("Added to the energy axis (calibration offsets), eV.", "Shift eV", "62-the-table"),
-    "compare.col.norm": ("larch (two lines, E0 at the maximum of the derivative), legacy (constant pre / post), tey "
-                         "(pre-edge line only), none.", "Norm", "62-the-table"),
-    "compare.col.pre_lo": ("Start of the pre-edge window, eV from E0.", "Pre lo", "62-the-table"),
-    "compare.col.pre_hi": ("End of the pre-edge window, eV from E0.", "Pre hi", "62-the-table"),
-    "compare.col.post_lo": ("Start of the post-edge window, eV from E0.", "Post lo", "62-the-table"),
-    "compare.col.post_hi": ("End of the post-edge window, eV from E0.", "Post hi", "62-the-table"),
+    "compare.col.norm": ("larch (two lines around E0), legacy (constant pre / post means over absolute windows), "
+                         "tey_line (pre-edge line only), none.", "Norm", "62-the-table"),
+    "compare.col.pre_lo": ("Start of the pre-edge window: eV from E0 (larch, tey_line); absolute eV for legacy "
+                           "(blank = auto, the first 15 % of the scan).", "Pre lo", "62-the-table"),
+    "compare.col.pre_hi": ("End of the pre-edge window: eV from E0 (larch, tey_line); absolute eV for legacy "
+                           "(blank = auto, the first 15 % of the scan).", "Pre hi", "62-the-table"),
+    "compare.col.post_lo": ("Start of the post-edge window: eV from E0 (larch, tey_line); absolute eV for legacy "
+                            "(blank = auto, the last 20 % of the scan).", "Post lo", "62-the-table"),
+    "compare.col.post_hi": ("End of the post-edge window: eV from E0 (larch, tey_line); absolute eV for legacy "
+                            "(blank = auto, the last 20 % of the scan).", "Post hi", "62-the-table"),
     "compare.col.flatten": ("Post-edge line flattened to 1.", "Flatten", "62-the-table"),
     "compare.col.spacing": ("Offset after this row in the stacked plot (blank = the common spacing).", "Spacing",
                             "62-the-table"),
@@ -338,6 +344,38 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.col.fit": ("The row is available in Fit.", "Fit", "62-the-table"),
     "compare.col.diag": ("The row's raw signal and fitted lines are shown in the diagnostics panel.", "Diag",
                          "62-the-table"),
+    "compare.col.e0_mode": ("How E0 is found: deriv (maximum of the smoothed derivative, near the tabulated edge), half "
+                            "(half of the edge step), table (the tabulated edge), fixed (the E0 eV value), row:<row> "
+                            "(the E0 of another row, so the edge shifts become the measured quantity).", "E0",
+                            "62-the-table"),
+    "compare.col.e0": ("The E0 in force, eV. Type a value to fix it; empty the cell for the derivative again.", "E0 eV",
+                       "62-the-table"),
+    "compare.col.colour": ("The colour of the trace; click to choose another. Saved with the config.", "Colour",
+                           "62-the-table"),
+    "compare.colour": ("The colour of this trace in the plot and the exported figure: click to choose another.",
+                       "trace colour", "62-the-table"),
+    "compare.default_shift": ("Energy shift given to every row added from now on (John Bussey's default shift).",
+                              "default shift for new rows", "62-the-table"),
+    "compare.e0_smooth": ("Width of the Savitzky-Golay smoothing of the derivative that finds E0, eV.",
+                          "E0 derivative smoothing", "62-the-table"),
+    "compare.locate": ("Choose the folder the missing files moved to: they are found by name and every row gets its "
+                       "spectrum back.", "Locate the missing files", "61-loading"),
+    "compare.dismiss": ("Hide this message.", "Dismiss the message", "62-the-table"),
+    "compare.label_inset": ("Labels sit this many eV in from the right edge of the plot (John Bussey's label "
+                            "position); 0 = at the right edge.", "labels in from the right edge", "63-stacked-plot"),
+    "compare.figure_size": ("Size, font, PNG resolution and formats of every exported Compare and Fit figure "
+                            "(John Bussey's Plot size).", "Figure size", "64-diagnostics-and-export"),
+    "compare.fig_width": ("Figure width in inches: 3.5 for one column, 7.0 for two.", "figure width",
+                          "64-diagnostics-and-export"),
+    "compare.fig_height": ("Figure height in inches.", "figure height", "64-diagnostics-and-export"),
+    "compare.fig_font": ("Size of every text of the figure, in points.", "font size", "64-diagnostics-and-export"),
+    "compare.fig_dpi": ("Resolution of the PNG; 600 dpi gives 2100 x 2700 px at 3.5 x 4.5 in.", "PNG resolution",
+                        "64-diagnostics-and-export"),
+    "compare.fig_preset": ("Set a journal column width.", "width preset", "64-diagnostics-and-export"),
+    "compare.fig_png": ("Write a PNG at the chosen resolution.", "PNG", "64-diagnostics-and-export"),
+    "compare.fig_svg": ("Write an SVG with editable text.", "SVG", "64-diagnostics-and-export"),
+    "compare.fig_pdf": ("Write a one-page PDF of the figure size with embedded TrueType text.", "PDF",
+                        "64-diagnostics-and-export"),
     # ------------------------------------------------------------------ fit
     "fit.target": ("The spectrum to fit (a row ticked Fit in Compare).", "target", "71-lcf-linear-combination-fit"),
     "fit.components": ("The candidate components: tick the ones to combine.", "components",
@@ -348,15 +386,16 @@ HELP: dict[str, tuple[str, str, str]] = {
                    "fit range to", "71-lcf-linear-combination-fit"),
     "fit.sum_one": ("Force the coefficients to sum to 1.", "force sum to 1", "71-lcf-linear-combination-fit"),
     "fit.allow_neg": ("Allow negative coefficients.", "allow negative coefficients", "71-lcf-linear-combination-fit"),
-    "fit.bootstrap": ("Residual resampling for the uncertainties; 0 disables it.", "bootstrap draws",
-                      "71-lcf-linear-combination-fit"),
+    "fit.bootstrap": ("Refits on resampled residuals for the uncertainties; 0 = the covariance scaled by "
+                      "√(reduced χ²), the Larch / Athena convention.", "bootstrap draws", "71-lcf-linear-combination-fit"),
     "fit.run_lcf": ("Fit the target with the ticked components.", "Run LCF", "71-lcf-linear-combination-fit"),
-    "fit.export_lcf": ("Write the coefficients and the curves as CSV, and the figure as PNG and SVG.",
+    "fit.export_lcf": ("Write the coefficients (with χ², reduced χ², N, p, R-factor, the uncertainty method, the "
+                       "flags and the F-tests in the header) and the curves as CSV, and the figure at the Figure size.",
                        "Export figure and coefficients", "71-lcf-linear-combination-fit"),
     "fit.col.component": ("The component spectrum.", "component", "71-lcf-linear-combination-fit"),
     "fit.col.coefficient": ("Its weight in the linear combination.", "coefficient", "71-lcf-linear-combination-fit"),
-    "fit.col.uncertainty": ("Standard deviation over the bootstrap draws.", "uncertainty",
-                            "71-lcf-linear-combination-fit"),
+    "fit.col.uncertainty": ("Standard deviation over the bootstrap draws, or the covariance error scaled by "
+                            "√(reduced χ²) without a bootstrap.", "uncertainty", "71-lcf-linear-combination-fit"),
     "fit.mcr_lo": ("Lower end of the energy range (eV); blank = the whole common range.", "range from",
                    "72-pca--mcr-als"),
     "fit.mcr_hi": ("Upper end of the energy range (eV); blank = the whole common range.", "range to",
@@ -370,8 +409,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "fit.pca": ("Explained variance of the ticked rows over the range.", "Update PCA scree", "72-pca--mcr-als"),
     "fit.run_mcr": ("Alternating least squares with non-negative spectra and concentrations.", "Run MCR-ALS",
                     "72-pca--mcr-als"),
-    "fit.export_mcr": ("Write MCR_component_spectra.csv and MCR_component_makeup.csv to a folder.", "Export MCR-ALS",
-                       "72-pca--mcr-als"),
+    "fit.export_mcr": ("Write MCR_component_spectra.csv, MCR_component_makeup.csv and the component figure to a "
+                       "folder.", "Export MCR-ALS", "72-pca--mcr-als"),
     "fit.col.percent": ("Share of this component in the sample (%).", "component percent", "72-pca--mcr-als"),
     "fit.itfa_sample": ("The sample whose component percentages are held fixed.", "anchored sample", "73-itfa"),
     "fit.itfa_pct": ("The percentages, comma separated, one per component.", "percentages", "73-itfa"),
@@ -379,11 +418,12 @@ HELP: dict[str, tuple[str, str, str]] = {
     "fit.remove_target": ("Remove the selected anchored targets.", "Remove target", "73-itfa"),
     "fit.run_itfa": ("Refine the MCR-ALS concentration profiles with the anchored targets held fixed.", "Run ITFA",
                      "73-itfa"),
-    "fit.export_itfa": ("Write ITFA_component_spectra.csv and ITFA_component_makeup.csv to a folder.", "Export ITFA",
-                        "73-itfa"),
+    "fit.export_itfa": ("Write ITFA_component_spectra.csv, ITFA_component_makeup.csv and the component figure to a "
+                        "folder.", "Export ITFA", "73-itfa"),
     "fit.pk_trace": ("The trace to decompose (a row ticked Fit in Compare).", "trace", "74-peaks"),
     "fit.pk_n": ("Number of peaks (1 to 8).", "peaks", "74-peaks"),
-    "fit.pk_shape": ("Peak shape: gaussian, lorentzian or pseudo-voigt.", "shape", "74-peaks"),
+    "fit.pk_shape": ("Peak shape: gaussian, lorentzian or pseudo-voigt, each by height, centre and FWHM (eV); the "
+                     "pseudo-voigt also fits its Lorentzian fraction eta (0 to 1).", "shape", "74-peaks"),
     "fit.pk_step": ("Add an arctan edge step under the peaks.", "edge step", "74-peaks"),
     "fit.pk_bg": ("Background: linear or constant.", "background", "74-peaks"),
     "fit.pk_lo": ("Lower end of the range (eV); blank = the whole trace.", "range from", "74-peaks"),
@@ -391,12 +431,21 @@ HELP: dict[str, tuple[str, str, str]] = {
     "fit.pk_centres": ("Initial peak centres in eV, comma separated; blank = guesses from the local maxima.",
                        "initial centres", "74-peaks"),
     "fit.run_peaks": ("Fit peaks + arctan step + background with least squares.", "Run the decomposition", "74-peaks"),
-    "fit.export_peaks": ("Write every parameter and the curves as CSV with a provenance header.",
-                         "Export the decomposition", "74-peaks"),
-    "fit.col.parameter": ("p1_amp, p1_centre, p1_width, …, step_height, step_centre, step_width, the background.",
-                          "parameter", "74-peaks"),
+    "fit.export_peaks": ("Write every parameter with its unit, the peak areas and the curves as CSV with a provenance "
+                         "header, and the figure at the Figure size.", "Export the decomposition", "74-peaks"),
+    "fit.col.parameter": ("p1_amp, p1_centre, p1_fwhm (p1_eta), …, step_height, step_centre, step_width, the "
+                          "background, then the peak areas p1_area, …", "parameter", "74-peaks"),
     "fit.col.value": ("The fitted value.", "value", "74-peaks"),
-    "fit.col.error": ("Standard error from the covariance of the fit.", "uncertainty", "74-peaks"),
+    "fit.col.error": ("Standard error from the covariance of the fit (areas: propagated from it).", "uncertainty",
+                      "74-peaks"),
+    "fit.col.unit": ("eV for centres, FWHM, the step centre and the step width; a.u. for amplitudes.", "unit",
+                     "74-peaks"),
+    "fit.col.note": ("'at the 0 bound' or 'undetermined' (σ > |value|); the tooltip says why.", "note",
+                     "71-lcf-linear-combination-fit"),
+    "fit.resample": ("How the bootstrap resamples the residual: moving blocks as long as its autocorrelation (correlated "
+                     "residuals) or single points (iid).", "resampling", "71-lcf-linear-combination-fit"),
+    "fit.figure_size": ("Size, font, PNG resolution and formats of the exported Fit figures (shared with Compare).",
+                        "Figure size", "71-lcf-linear-combination-fit"),
     # ------------------------------------------------------------------ maps
     "maps.stack": ("The stack whose hypercube is loaded.", "stack", "8-maps"),
     "maps.load": ("Read the raw .bin files of the stack once and cache them (a few hundred MB per stack).",
