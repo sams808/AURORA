@@ -435,12 +435,14 @@ class RulesDialog(QDialog):
         return len(rows)
 
     def apply_now(self) -> list:
-        """Apply the enabled rules to the existing settings, in one edit."""
+        """Apply the enabled rules to the existing settings, in one edit. A rule may reach several holders, so the edit
+        covers them all (one undo step restores every holder it changed)."""
+        from aurora.app.session import ALL_HOLDERS
         self._store()
         rules = self.enabled_rules()
         if not rules:
             return []
-        with self.session.edit(f"apply {plural(len(rules), 'settings rule')}"):
+        with self.session.edit(f"apply {plural(len(rules), 'settings rule')}", holder=ALL_HOLDERS):
             changes = rl.apply(rules, self.session.zones, self.scans(), self.override.isChecked(),
                                flags_of=self.session.flags_of)
         self.refresh()

@@ -247,3 +247,53 @@ def test_saved_rules_reach_a_stack_attached_later_and_the_dialog(qapp, two_by_tw
     finally:
         mode.set_advanced(False)
         close(win)
+
+
+def test_apply_now_over_two_holders_is_one_undo_step(qapp, two_by_two, monkeypatch):
+    """A project-wide rule changes cards of both holders; one Undo (WP2) restores both."""
+    from PySide6.QtWidgets import QDialog
+    from aurora.app import mode
+    from wp3_helpers import close, open_window, pump
+    proj = two_by_two
+    win, s1 = open_window(qapp, proj)
+    try:
+        ses, rd = win.session, win.reduce
+        t1, s2, t2 = _sid(proj, TEY1), _sid(proj, testdata.STACK2), _sid(proj, TEY2)
+        for sid in (t1, s2, t2):
+            ses.stack(sid)
+        with ses.edit("a zone on N5"):
+            za = ses.new_zone("a")
+            za.rects.append(list(ses.stack_loaded(s1).bbox))
+        ses.set_holder("N6")
+        pump(qapp)
+        with ses.edit("a zone on N6"):
+            zc = ses.new_zone("c")
+            zc.rects.append(list(ses.stack_loaded(s2).bbox))
+        ses.set_holder("N5")
+        pump(qapp)
+
+        def tey(holder, sid):
+            return ses.zones.holders[holder].zones[0].settings[sid].tey_norm
+
+        assert tey("N5", t1) == "i0jump" and tey("N6", t2) == "i0jump"
+        monkeypatch.setattr(QDialog, "exec", lambda self: 0)
+        mode.set_advanced(True)
+        d = rd.open_rules()
+        d.add_rule()
+        d.edge.setText("F K")
+        d.plan.setText("_TEY")
+        d.use["tn"].setChecked(True)
+        d.tn.setCurrentIndex(d.tn.findData("i0pre"))
+        changes = d.apply_now()
+        assert {(c.holder, c.sid) for c in changes} == {("N5", t1), ("N6", t2)}
+        assert tey("N5", t1) == "i0pre" and tey("N6", t2) == "i0pre"
+        d.deleteLater()
+        assert ses.undo()
+        pump(qapp)
+        assert tey("N5", t1) == "i0jump" and tey("N6", t2) == "i0jump"
+        assert ses.redo()
+        pump(qapp)
+        assert tey("N5", t1) == "i0pre" and tey("N6", t2) == "i0pre"
+    finally:
+        mode.set_advanced(False)
+        close(win)

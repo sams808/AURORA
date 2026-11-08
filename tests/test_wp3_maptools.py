@@ -328,3 +328,23 @@ def test_reduce_shortcuts(qapp, win):
     pump(qapp)
     assert win.session.zone() is not None
     mode.set_advanced(False)
+
+
+def test_survey_export_rasterises_polygon_zones(qapp, win, tmp_path):
+    """Session.export_zones (Survey > Export zones...) writes polygon zones as painted squares, so the HTML zone tool,
+    which knows rectangles and painted squares only, finds AURORA's members; 'polys' is kept."""
+    ses = win.session
+    with ses.edit("a polygon zone"):
+        z = ses.new_zone("tri")
+        z.polys.append([list(p) for p in TRIANGLE])
+    pump(qapp)
+    assert z.members[win.sid] == TRIANGLE_MEMBERS
+    out = tmp_path / "zones_all.json"
+    ses.export_zones(out)
+    d = json.loads(out.read_text(encoding="utf-8"))
+    assert d["version"] == 1 and "rules" not in d and "ui" not in d
+    back = ZonesFile.load(out).holders["N5"].zones[-1]
+    assert back.polys == [TRIANGLE] and len(back.paint) == len(TRIANGLE_MEMBERS)
+    sd = ses.stack_loaded(win.sid)
+    tool = Zone(id=1, label="t", rects=back.rects, erects=back.erects, paint=back.paint, erase=back.erase)
+    assert members(tool, sd.x, sd.y, sd.pitch).tolist() == TRIANGLE_MEMBERS

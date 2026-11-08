@@ -52,7 +52,7 @@ from aurora.core.names import split_stack_id
 from aurora.core.stack import TOTAL_LABEL, StackData
 from aurora.core.survey import SurveyData
 from aurora.core.spectra import good_i0_curve
-from aurora.core.zones import grid_pitch, members
+from aurora.core.zones import export_json, grid_pitch, members
 
 log = logging.getLogger("aurora.session")
 
@@ -1351,7 +1351,14 @@ class Session(QObject):
         return {k: answer.get(k, "merge") for k in zf.holders}
 
     def export_zones(self, path: Path) -> None:
-        """The zone tool's zones_all.json: version 1, the session without its header, 'ui' and 'rules' blocks."""
+        """The zone tool's zones_all.json: version 1, the session without its header, 'ui' and 'rules' blocks. Polygon
+        zones are written as painted squares on the pixels inside them (aurora.core.zones.export_json), at the pitch
+        of every stack known by its coordinates, loaded or not, so the tool finds the same members; 'polys' is kept.
+        Atomic write, as ZonesFile.save."""
+        from aurora.core.io.textio import write_text_atomic
         self.zones.exported = self.clock().isoformat(timespec="seconds")
-        self.zones.save(path, export=True)
+        stacks: dict = {sid: (c[0], c[1], c[2]) for sid, c in self._coords.items()}
+        stacks.update(self._stacks)
+        write_text_atomic(path, json.dumps(export_json(self.zones, stacks), indent=1, ensure_ascii=False,
+                                           default=json_default))
         self.status.emit(f"exported zones to {path}")
