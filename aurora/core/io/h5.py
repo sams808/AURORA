@@ -60,6 +60,24 @@ def all_attrs(path: Path) -> dict[str, dict[str, str]]:
     return out
 
 
+def root_attrs(path: Path) -> dict[str, str]:
+    """Attributes of the file's root group as strings (file_creation_timestamp_iso, ring_current, ...)."""
+    with open_h5(path) as h:
+        return {k: _as_str(v) for k, v in h.attrs.items()}
+
+
+def file_day(path: Path | str) -> str:
+    """'YYYY-MM-DD' the scan file was written: the date of its `file_creation_timestamp_iso` root attribute (ISO or
+    ctime form, 'Thu Nov  5 09:27:59 2026'), else the date in the file name ('2026-11-05_092759_stack_data.h5',
+    'holderA_survey_2026-11-05_010013_695.00eV.h5'), else ''. A file that cannot be opened falls back to its name."""
+    from aurora.core.names import date_in_text, parse_timestamp
+    try:
+        ts = parse_timestamp(root_attrs(Path(path)).get("file_creation_timestamp_iso", ""))
+    except (OSError, KeyError, ValueError):
+        ts = None
+    return ts.date().isoformat() if ts is not None else date_in_text(Path(path).name)
+
+
 def xy(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Stage coordinates (mm) in acquisition order, one set shared by every energy of a stack."""
     with open_h5(path) as h:
