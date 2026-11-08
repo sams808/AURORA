@@ -193,6 +193,14 @@ def _unknown(d: dict, keys) -> dict:
     return {k: v for k, v in d.items() if k not in keys}
 
 
+def json_default(o):
+    """json.dumps default: numpy scalars (an np.int64 pixel index, an np.float32 coordinate) as Python values."""
+    item = getattr(o, "item", None)
+    if callable(item):
+        return item()
+    raise TypeError(f"{type(o).__name__} is not JSON serialisable")
+
+
 def _floats(v) -> list[float]:
     return [float(a) for a in v]
 
@@ -336,12 +344,31 @@ class HolderZones:
         return out
 
 
+# The session file's header (AURORA's session.json only; the zone tool's zones_all.json never carries it).
+SESSION_FORMAT = "aurora-session"
+SESSION_SCHEMA = 2          # 1 = no header (AURORA <= 0.3 and the zone tool's files); 2 = header, kept unknown keys
+TOOL_VERSION = 1            # 'version' of the zone tool's zones_all.json, written by every export
+
+
+def file_schema(d: dict) -> int:
+    """The session schema a parsed file declares: its 'schema' when it is an integer, else 1 (a file without header,
+    as the zone tool and AURORA <= 0.3 wrote it). A 'schema' that is not an integer counts as newer than this
+    version (read-only), never as older."""
+    if "schema" not in d:
+        return 1
+    try:
+        return int(d["schema"])
+    except (TypeError, ValueError):
+        return 10 ** 6
+
+
 @dataclass
 class ZonesFile:
     """`zones_all.json` exported by the zone tool; AURORA reads it, edits it and can export it again unchanged.
 
-    AURORA's session.json is the same format plus two blocks the tool ignores: 'ui' (view memory, Session.ui_value)
-    and 'rules' (batch-settings rules). Both are left out of an export (to_json(export=True))."""
+    AURORA's session.json is the same format plus a header ('format', 'schema', 'app', written when set, see
+    SESSION_SCHEMA) and two blocks the tool ignores: 'ui' (view memory, Session.ui_value) and 'rules' (batch-settings
+    rules). The header and both blocks are left out of an export (to_json(export=True)), which is always version 1."""
     version: int = 1
     exported: str = ""
     project: str = ""
@@ -351,22 +378,39 @@ class ZonesFile:
     holders: dict[str, HolderZones] = field(default_factory=dict)
     ui: dict = field(default_factory=dict)                      # session view memory (AURORA)
     rules: list = field(default_factory=list)                   # batch-settings rules, as JSON (AURORA)
+    format: str = ""                                            # header: 'aurora-session' (session.json only)
+    schema: int | None = None                                   # header: SESSION_SCHEMA of the writer
+    app: str = ""                                               # header: 'AURORA <version>' of the writer
     extra: dict = field(default_factory=dict)                   # keys this version does not know
     _seen: frozenset = field(default=frozenset(), compare=False, repr=False)
 
     BASE_KEYS = ("version", "exported", "project", "built", "notes", "goodI0", "holders")
     ADDED_KEYS = ("ui", "rules")
+    HEADER_KEYS = ("format", "schema", "app")
 
     @classmethod
     def from_json(cls, d: dict) -> "ZonesFile":
         ui = d.get("ui")
         rules = d.get("rules")
-        return cls(version=int(d.get("version", 1)), exported=str(d.get("exported", "")), project=str(d.get("project", "")),
+        known = cls.BASE_KEYS + cls.ADDED_KEYS + cls.HEADER_KEYS
+        schema = d.get("schema")
+        if schema is not None:
+            try:
+                schema = int(schema)
+            except (TypeError, ValueError):     # kept as it was written (in extra), never guessed
+                known = tuple(k for k in known if k != "schema")
+                schema = None
+        try:
+            version = int(d.get("version", 1))
+        except (TypeError, ValueError):
+            raise ValueError(f"'version' must be an integer, not {d.get('version')!r}") from None
+        return cls(version=version, exported=str(d.get("exported", "")), project=str(d.get("project", "")),
                    built=str(d.get("built", "")), notes=str(d.get("notes", "")),
                    good_i0={k: bool(v) for k, v in d.get("goodI0", {}).items()},
                    holders={name: HolderZones.from_json(h, name) for name, h in d.get("holders", {}).items()},
                    ui=dict(ui) if isinstance(ui, dict) else {}, rules=list(rules) if isinstance(rules, list) else [],
-                   extra=_unknown(d, cls.BASE_KEYS + cls.ADDED_KEYS),
+                   format=str(d.get("format", "")), schema=schema, app=str(d.get("app", "")),
+                   extra=_unknown(d, known),
                    _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
     @classmethod
@@ -380,20 +424,37 @@ class ZonesFile:
         return zf
 
     def to_json(self, export: bool = False) -> dict:
-        """The file content. export=True gives the zone tool's zones_all.json: no 'ui' and no 'rules' block."""
-        out = {"version": self.version, "exported": self.exported, "project": self.project, "built": self.built,
-               "notes": self.notes, "goodI0": self.good_i0,
-               "holders": {k: h.to_json() for k, h in self.holders.items()}}
+        """The file content. export=True gives the zone tool's zones_all.json: version 1, no header ('format',
+        'schema', 'app'), no 'ui' and no 'rules' block."""
+        out: dict = {}
+        if not export:
+            if self.format:
+                out["format"] = self.format
+            if self.schema is not None:
+                out["schema"] = self.schema
+            if self.app:
+                out["app"] = self.app
+        out.update({"version": TOOL_VERSION if export else self.version, "exported": self.exported,
+                    "project": self.project, "built": self.built, "notes": self.notes, "goodI0": self.good_i0,
+                    "holders": {k: h.to_json() for k, h in self.holders.items()}})
         if not export:
             if self.ui or "ui" in self._seen:
                 out["ui"] = self.ui
             if self.rules or "rules" in self._seen:
                 out["rules"] = self.rules
         for key, value in self.extra.items():
+            if export and key in self.HEADER_KEYS:
+                continue
             out.setdefault(key, value)
         return out
+
+    def stamp(self, app: str) -> None:
+        """Mark this file as a current AURORA session (the header written by Session.save)."""
+        self.format, self.schema, self.app = SESSION_FORMAT, SESSION_SCHEMA, app
+        self.extra.pop("schema", None)          # a non-integer 'schema' read from an older writer is replaced
 
     def save(self, path: Path, export: bool = False) -> None:
         """Atomic write (aurora.core.io.textio): a crash mid-way never leaves a half-written file."""
         from aurora.core.io.textio import write_text_atomic
-        write_text_atomic(path, json.dumps(self.to_json(export=export), indent=1, ensure_ascii=False))
+        write_text_atomic(path, json.dumps(self.to_json(export=export), indent=1, ensure_ascii=False,
+                                           default=json_default))
