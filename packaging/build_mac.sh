@@ -10,7 +10,7 @@ PY="${PYTHON:-python3}"
 VENV="$ROOT/.venv-build"
 [ -x "$VENV/bin/python" ] || "$PY" -m venv "$VENV"
 "$VENV/bin/python" -m pip install --quiet --upgrade pip
-"$VENV/bin/python" -m pip install --quiet "$ROOT[build]"
+"$VENV/bin/python" -m pip install --quiet "$ROOT[build]" -c "$ROOT/packaging/constraints.txt"
 VERSION="$("$VENV/bin/python" -c 'import aurora; print(aurora.__version__)')"
 ARCH="$(uname -m)"
 "$VENV/bin/python" -m PyInstaller --noconfirm --clean --log-level WARN packaging/aurora.spec --distpath "$ROOT/dist" --workpath "$ROOT/build"

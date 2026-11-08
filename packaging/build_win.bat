@@ -11,7 +11,7 @@ if not exist "%VENV%\Scripts\python.exe" (
     py -3.12 -m venv "%VENV%" || py -3.11 -m venv "%VENV%" || goto :fail
 )
 "%VENV%\Scripts\python.exe" -m pip install --quiet --upgrade pip || goto :fail
-"%VENV%\Scripts\python.exe" -m pip install --quiet "%ROOT%[build]" || goto :fail
+"%VENV%\Scripts\python.exe" -m pip install --quiet "%ROOT%[build]" -c "%ROOT%\packaging\constraints.txt" || goto :fail
 for /f "delims=" %%v in ('"%VENV%\Scripts\python.exe" -c "import aurora; print(aurora.__version__)"') do set VERSION=%%v
 "%VENV%\Scripts\python.exe" -m PyInstaller --noconfirm --clean --log-level WARN "%ROOT%\packaging\aurora.spec" --distpath "%ROOT%\dist" --workpath "%ROOT%\build" || goto :fail
 "%VENV%\Scripts\python.exe" "%ROOT%\packaging\third_party_licenses.py" "%ROOT%\dist\AURORA\THIRD_PARTY_LICENSES.txt" || goto :fail
