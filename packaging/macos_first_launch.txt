@@ -1,0 +1,27 @@
+AURORA on macOS: the first launch
+==================================
+
+1. Drag AURORA into the Applications folder (the shortcut next to it in this window).
+
+2. Open AURORA from Applications. AURORA is free software that is not notarised by Apple, so the first time
+   macOS stops it with a message such as "Apple could not verify AURORA is free of malware". Click Done
+   (not Move to Trash). Then:
+
+   macOS 15 Sequoia and macOS 26 Tahoe
+     Open System Settings > Privacy & Security, scroll down to the Security section, click "Open Anyway"
+     next to the message about AURORA, then confirm with your password or Touch ID.
+
+   macOS 14 Sonoma and earlier
+     In Applications, right-click (or Control-click) AURORA and choose Open, then click Open.
+
+   This is needed once; afterwards AURORA opens normally.
+
+   Alternative for any version (Terminal):
+     xattr -dr com.apple.quarantine /Applications/AURORA.app
+
+3. If macOS says AURORA "is damaged and can't be opened", the download was altered on the way; download the
+   disk image again. On a Mac with Apple silicon (M1 and later) use the arm64 disk image; on an Intel Mac use
+   the x86_64 disk image.
+
+Help > Manual inside AURORA explains everything else. Settings live in ~/Library/Preferences, the log file in
+~/Library/Logs/AURORA (Help > Open the log folder). AURORA never writes into the raw/ folder of a beamtime.
