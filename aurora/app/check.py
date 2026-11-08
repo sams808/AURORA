@@ -14,6 +14,7 @@ from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refi
                               status_text)
 from aurora.app.widgets import Card, Worker
 from aurora.core.constants import DETS
+from aurora.core.names import split_stack_id
 from aurora.core.qc import (CountRate, count_rate_probe, day_reference, i0_candidates, i0_check, saturation_check,
                             sdd_consistency, spike_summary)
 from aurora.core.zones import members, zone_traces
@@ -26,6 +27,7 @@ class CheckPerspective(QWidget):
         super().__init__(parent)
         self.session = session
         self._worker: Worker | None = None
+        self.library = None                   # the Compare library (MainWindow sets it)
         self._rates: dict[str, CountRate] = {}
         self._results: dict[str, dict] = {}
         self._x_curves = None                 # last I0-explorer read (scan name, curves), redrawn on a theme change
@@ -279,14 +281,19 @@ class CheckPerspective(QWidget):
         self._draw_i0()
 
     def _good_toggled(self, item: QListWidgetItem) -> None:
-        self.session.zones.good_i0[item.data(Qt.UserRole)] = item.checkState() == Qt.Checked
-        self.session.touch()
+        sid, good = item.data(Qt.UserRole), item.checkState() == Qt.Checked
+        if bool(self.session.zones.good_i0.get(sid)) != good:      # a re-coloured row (theme change) is no edit
+            with self.session.edit(f"{'mark' if good else 'unmark'} {split_stack_id(sid)[1]} as good I0"):
+                self.session.zones.good_i0[sid] = good
         self._draw_i0()
 
     def _auto_select(self) -> None:
-        for c in getattr(self, "_cands", []):
-            self.session.zones.good_i0[c.sid] = c.looks_good
-        self.session.touch()
+        cands = getattr(self, "_cands", [])
+        good_i0 = self.session.zones.good_i0
+        if any(c.sid not in good_i0 or bool(good_i0[c.sid]) != bool(c.looks_good) for c in cands):
+            with self.session.edit("auto-select good I0"):
+                for c in cands:
+                    good_i0[c.sid] = c.looks_good
         self._fill_i0()
 
     def _draw_i0(self) -> None:
@@ -306,7 +313,7 @@ class CheckPerspective(QWidget):
                 curves.append((c.E, y))
         if curves:
             E = curves[0][0]
-            from aurora.core.zones import good_i0_curve
+            from aurora.core.spectra import good_i0_curve
             m = good_i0_curve(E, curves)
             if m is not None:
                 self.i0_plot.plot(E, m, pen=role_pen("ink", 2.5), connect="finite")
@@ -341,7 +348,7 @@ class CheckPerspective(QWidget):
         scan = self.session.scan_of(sid)                  # None for a stitched stack
         sat = res["sat"].saturated if res else (((scan.summary or {}) if scan is not None else {}).get("sdd_saturated") or [])
         c = sdd_consistency(t, sat)
-        self.sdd_note.setText(f"{z.label} · {sid[11:]} · {t.n_pix} px, line {t.line}: {c.note}")
+        self.sdd_note.setText(f"{z.label} · {split_stack_id(sid)[1]} · {t.n_pix} px, line {t.line}: {c.note}")
         if c.normalised is not None:
             xs = (float(c.energies[0]), float(c.energies[-1]))
             for k in range(4):

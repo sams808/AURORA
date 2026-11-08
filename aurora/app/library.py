@@ -20,6 +20,12 @@ class Library(QObject):
         self.requests: list[TraceRequest] = []
         self.sources: dict[str, str] = {}               # label -> file (for save/load config)
         self.default_shift = 0.0
+        self.project = None                             # the open Project (set_project), None before one is open
+
+    def set_project(self, project) -> None:
+        """A project was opened. Foundation stub: remembers it. The Compare package restores and autosaves the library
+        of the project here (<project>/.aurora/library.json)."""
+        self.project = project
 
     # ------------------------------------------------------------------ adding
     def add_spectra(self, specs: list[Spectrum], show_signals: tuple[str, ...] = ("fluo_sum_norm", "sdd-scaled", "TEY_norm", "TEY"),

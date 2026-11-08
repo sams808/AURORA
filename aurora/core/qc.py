@@ -16,7 +16,7 @@ from scipy import ndimage
 from aurora.core.constants import (COUNT_RATE_PROBE_N, DETS, I0_BAD_FRAC, I0_COL, SAT_I0_VAR, SAT_RATE_RATIO, SAT_TOP_CV)
 from aurora.core.io.raw import read_point_dir, stack_energy_dirs, stack_last_mtime
 from aurora.core.model import Project, ScanInfo
-from aurora.core.zones import ZoneTraces, i0_score
+from aurora.core.spectra import ZoneTraces, i0_score
 
 log = logging.getLogger("aurora.qc")
 
@@ -55,7 +55,7 @@ def count_rate_probe(project: Project, scan: ScanInfo, n_probe: int = COUNT_RATE
     for cdir in (project.processed / scan.day / scan.name, project.root / ".aurora" / "cache" / scan.day / scan.name):
         p = cdir / "_count_rate.json"
         try:
-            d = json.loads(p.read_text())
+            d = json.loads(p.read_text(encoding="utf-8"))
             if d.get("key") == key and d.get("rows"):
                 return CountRate(scan=scan.name, key=key, time_per_map_s=float(d.get("time_per_map_s", 0) or 0), rows=d["rows"])
         except (OSError, ValueError):
@@ -80,7 +80,7 @@ def count_rate_probe(project: Project, scan: ScanInfo, n_probe: int = COUNT_RATE
         from aurora.core.io.safety import assert_writable
         assert_writable(cdir)
         cdir.mkdir(parents=True, exist_ok=True)
-        (cdir / "_count_rate.json").write_text(json.dumps(cr.to_json()))
+        (cdir / "_count_rate.json").write_text(json.dumps(cr.to_json()), encoding="utf-8")
     except OSError as err:
         log.warning("%s: count-rate cache not written (%s)", cdir, err)
     log.info("%s: count-rate probe at %d energies, top %s kcps", scan.name, len(rows), np.round(cr.top_kcps, 1).tolist())
@@ -300,7 +300,7 @@ def mcc_curves(project: Project, scan: ScanInfo) -> MccCurves:
     cdir = project.root / ".aurora" / "cache" / scan.day / scan.name
     p = cdir / "_mcc_curves.json"
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         if d.get("key") == key:
             return MccCurves(scan.name, *(np.array(d[k], float) for k in ("E", "mesh", "diode", "aux", "tey")))
     except (OSError, ValueError):
@@ -321,7 +321,7 @@ def mcc_curves(project: Project, scan: ScanInfo) -> MccCurves:
         assert_writable(cdir)
         cdir.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"key": key, "E": cur.E.tolist(), "mesh": cur.mesh.tolist(), "diode": cur.diode.tolist(),
-                                 "aux": cur.aux.tolist(), "tey": cur.tey.tolist()}))
+                                 "aux": cur.aux.tolist(), "tey": cur.tey.tolist()}), encoding="utf-8")
     except OSError:
         pass
     return cur

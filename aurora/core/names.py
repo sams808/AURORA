@@ -35,6 +35,34 @@ def time_label(scan_dir_name: str) -> str:
     return f"{scan_dir_name[0:2]}:{scan_dir_name[2:4]}" if re.match(r"\d{6}_", scan_dir_name) else ""
 
 
+_SCAN_START = re.compile(r"_(?=\d{6}_)")
+_ISO_DAY_ID = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.+)$")
+
+
+def split_stack_id(sid: str) -> tuple[str, str]:
+    """'<day>_<scan folder>' -> (day, scan folder), for day keys of any length: '2026-11-05_092758_alpha_beta_..._stack' ->
+    ('2026-11-05', '092758_alpha_beta_..._stack'); '_092758_x_stack' (a loose folder without a day) -> ('', '092758_x_stack');
+    'CLS GUI_092758_x_stack' -> ('CLS GUI', '092758_x_stack'). Ids that are not '<day>_<scan>' (stitched stacks,
+    'stitched_<id>') come back as ('', sid), so a project lookup of the scan part finds nothing."""
+    sid = str(sid)
+    if sid.startswith("stitched_"):
+        return "", sid
+    m = _ISO_DAY_ID.match(sid)
+    if m:
+        return m.group(1), m.group(2)
+    if sid.startswith("_"):
+        return "", sid[1:]
+    m = _SCAN_START.search(sid)
+    if m:
+        return sid[:m.start()], sid[m.end():]
+    return "", sid
+
+
+def short_time(sid: str) -> str:
+    """'HH:MM' of a stack id or scan folder name ('2026-11-05_092758_alpha_beta_...' -> '09:27'); '' when it has none."""
+    return time_label(split_stack_id(sid)[1])
+
+
 def strip_scan_suffix(name: str) -> str:
     """'095242_sampleA_f_k_u_n45_stack' -> 'sampleA'; '150255_UF4_u_n45coarse_1_stack' -> 'UF4'."""
     s = re.sub(r"^\d{6}_", "", name)

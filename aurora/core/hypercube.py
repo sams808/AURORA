@@ -143,7 +143,7 @@ class Hypercube:
         key = f"cube|{nE}|{npts}|{stack_last_mtime(edirs):.0f}"
         meta_p = cdir / "cube_meta.json"
         try:
-            meta = json.loads(meta_p.read_text())
+            meta = json.loads(meta_p.read_text(encoding="utf-8"))
             if meta.get("key") == key and all((cdir / f"cube_{d}.npy").exists() for d in DETS):
                 cubes = [np.load(cdir / f"cube_{d}.npy", mmap_mode="r") for d in DETS]
                 aux = np.load(cdir / "cube_aux.npz")
@@ -177,7 +177,7 @@ class Hypercube:
             for d, c in zip(DETS, cubes):
                 np.save(cdir / f"cube_{d}.npy", c)
             np.savez(cdir / "cube_aux.npz", i0=i0, tey=tey, valid=valid)
-            meta_p.write_text(json.dumps({"key": key, "skipped": skipped}))
+            meta_p.write_text(json.dumps({"key": key, "skipped": skipped}), encoding="utf-8")
             cubes = [np.load(cdir / f"cube_{d}.npy", mmap_mode="r") for d in DETS]
         except OSError as err:
             log.warning("%s: hypercube cache not written (%s)", cdir, err)

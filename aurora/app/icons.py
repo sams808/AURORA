@@ -1,13 +1,11 @@
 """Rail and action icons: inline stroke SVG rendered to QIcon in the colour asked for (no icon files to ship)."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import QByteArray, QSize, Qt
 from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
-RESOURCES = Path(__file__).resolve().parent.parent / "resources"
+from aurora import resources_dir
 
 _PATHS = {
     "home": '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -68,13 +66,13 @@ def two_state_icon(name: str, normal: str, checked: str, size: int = 22) -> QIco
 def app_icon() -> QIcon:
     ic = QIcon()
     for s in (16, 32, 64, 128, 256, 512):
-        p = RESOURCES / f"aurora_mark_{s}.png"
+        p = resources_dir() / f"aurora_mark_{s}.png"
         if p.exists():
             ic.addFile(str(p), QSize(s, s))
     return ic
 
 
 def mark_pixmap(size: int) -> QPixmap:
-    p = RESOURCES / f"aurora_mark_{512 if size > 256 else 256 if size > 128 else 128 if size > 64 else 64}.png"
+    p = resources_dir() / f"aurora_mark_{512 if size > 256 else 256 if size > 128 else 128 if size > 64 else 64}.png"
     pm = QPixmap(str(p)) if p.exists() else QPixmap()
     return pm.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation) if not pm.isNull() else pm

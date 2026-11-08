@@ -131,6 +131,6 @@ def load_count_rate(scan_proc_dir: Path) -> dict | None:
     """`_count_rate.json`: total counts of the brightest pixels at the probed energies (dict with 'rows')."""
     p = Path(scan_proc_dir) / "_count_rate.json"
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None

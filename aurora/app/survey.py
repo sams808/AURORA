@@ -301,7 +301,8 @@ class SurveyPerspective(QWidget):
         start = str(self.session.project.root / "zones_html") if self.session.project else ""
         p, _ = QFileDialog.getOpenFileName(self, "Import zones (zones_all.json)", start, "JSON (*.json)")
         if p:
-            self.session.import_zones(Path(p))
+            with self.session.edit(f"import zones from {Path(p).name}"):
+                self.session.import_zones(Path(p))
 
     def _export(self) -> None:
         start = str(self.session.project.root / "zones_html" / "zones_all.json") if self.session.project else "zones_all.json"

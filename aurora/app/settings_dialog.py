@@ -16,12 +16,13 @@ DEFAULTS = {
     "fluo_norm": "i0jump",
     "tey_norm": "i0jump",
     "open_last_project": True,
-    "report_author": "Sami Soudani",
+    "report_author": "",              # '' = resolved when a report is built (the OS account name); a value set is kept
     "map_colormap": "viridis",
     "reference_dir": "",
     "appearance": "system",          # system / light / dark
     "text_size": "normal",           # normal / large / larger
     "advanced_mode": False,          # Easy mode on first start
+    "update_check": False,           # opt-in: ask GitHub for a newer release at start (at most once a day)
 }
 COLORMAPS = ["viridis", "magma", "inferno", "plasma", "cividis"]
 
@@ -127,7 +128,7 @@ class SettingsDialog(QDialog):
         s.setValue("fluo_norm", self.fn.currentText())
         s.setValue("tey_norm", self.tn.currentText())
         s.setValue("map_colormap", self.cmap.currentText())
-        s.setValue("report_author", self.author.text().strip() or DEFAULTS["report_author"])
+        s.setValue("report_author", self.author.text().strip())
         s.setValue("open_last_project", self.open_last.isChecked())
         s.setValue("reference_dir", self.ref_dir.text().strip())
         s.setValue("appearance", self.appearance.currentData())

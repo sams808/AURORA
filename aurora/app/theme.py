@@ -625,8 +625,8 @@ def build_palette(t: dict[str, str]) -> QPalette:
 
 def _ui(name: str) -> str:
     """Style-sheet url of a small indicator image (aurora/resources/ui), forward slashes on every platform."""
-    from pathlib import Path
-    return (Path(__file__).resolve().parent.parent / "resources" / "ui" / name).as_posix()
+    from aurora import resources_dir
+    return (resources_dir() / "ui" / name).as_posix()
 
 
 def qss(t: dict[str, str] | None = None, size: int | None = None) -> str:

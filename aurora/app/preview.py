@@ -6,7 +6,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
-from aurora.core.zones import ZoneTraces
+from aurora.core.spectra import ZoneTraces
 
 
 class PreviewPlot(QWidget):

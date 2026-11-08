@@ -16,7 +16,9 @@ from aurora.app.widgets import Card, Worker
 from aurora.core.constants import DETS
 from aurora.core.io.config import ScanSettings, Zone
 from aurora.core.model import ScanInfo
-from aurora.core.zones import NORM_MODES, i0_score, members, zone_traces
+from aurora.core.names import short_time, split_stack_id
+from aurora.core.spectra import NORM_MODES
+from aurora.core.zones import members, zone_traces
 
 NORM_LABELS = {"raw": "raw counts", "i0": "/ I0", "i0pre": "/ I0 − pre-edge line", "i0jump": "/ I0, edge jump = 1",
                "area": "/ I0, area = 1", "max": "/ I0, max = 1"}
@@ -32,9 +34,13 @@ class _VirtualScan:
 class ScanSettingsCard(Card):
     """Per-zone, per-scan settings (the zone tool's scan card)."""
 
-    def __init__(self, session: Session, sid: str, scan: ScanInfo, settings: ScanSettings, lines: list[str], parent=None):
+    SIGNALS = (("pfy", "PFY"), ("ipfy", "IPFY"))
+
+    def __init__(self, session: Session, sid: str, scan: ScanInfo, settings: ScanSettings, lines: list[str], parent=None,
+                 zone_id: int | None = None):
         super().__init__(f"{scan.time}  {scan.label}  ·  {scan.edge_text}", parent)
         self.session, self.sid, self.scan, self.s = session, sid, scan, settings
+        self.zone_id = zone_id
         self.setObjectName("card")
         flags = []
         if scan.summary.get("sdd_saturated"):
@@ -53,6 +59,17 @@ class ScanSettingsCard(Card):
         self.line = QComboBox(); self.line.addItems(lines)
         self.line.setCurrentText(settings.line if settings.line in lines else (lines[0] if lines else ""))
         row1.addWidget(self.line)
+        row1.addWidget(QLabel("signal"))
+        self.signal = QComboBox()
+        for key, text in self.SIGNALS:
+            self.signal.addItem(text, key)
+        if self.signal.findData(settings.signal) < 0:          # a value this version does not offer is kept as is
+            self.signal.addItem(settings.signal, settings.signal)
+        self.signal.setCurrentIndex(self.signal.findData(settings.signal))
+        self.signal.setToolTip("PFY: counts in the emission line window / I0.\n"
+                               "IPFY: I0 / counts of a non-resonant line (inverse partial fluorescence yield). The choice "
+                               "is stored with the zone; this version still computes the traces as PFY.")
+        row1.addWidget(self.signal)
         row1.addStretch(1)
         self.body.addLayout(row1)
         row2 = QHBoxLayout()
@@ -84,7 +101,7 @@ class ScanSettingsCard(Card):
         self.body.addLayout(row3)
         for w in (self.inc, self.tey, self.ds, *self.sdd):
             w.toggled.connect(self._changed)
-        for w in (self.line, self.fn, self.tn, self.i0src):
+        for w in (self.line, self.signal, self.fn, self.tn, self.i0src):
             w.currentIndexChanged.connect(self._changed)
         self.k.valueChanged.connect(self._changed)
         self.pre.editingFinished.connect(self._changed)
@@ -106,22 +123,22 @@ class ScanSettingsCard(Card):
             return None
         return [min(a, b), max(a, b)]
 
+    def values(self) -> dict:
+        """The card's widgets as ScanSettings field values."""
+        return {"include": self.inc.isChecked(), "sdd": [c.isChecked() for c in self.sdd], "line": self.line.currentText(),
+                "signal": self.signal.currentData(), "fluo_norm": self.fn.currentData(), "tey": self.tey.isChecked(),
+                "tey_norm": self.tn.currentData(), "despike": self.ds.isChecked(), "k": float(self.k.value()),
+                "i0_source": self.i0src.currentData(), "pre": self._parse(self.pre.text()), "post": self._parse(self.post.text())}
+
     def _changed(self, *_) -> None:
-        s = self.s
-        before = s.to_json()
-        s.include = self.inc.isChecked()
-        s.sdd = [c.isChecked() for c in self.sdd]
-        s.line = self.line.currentText()
-        s.fluo_norm = self.fn.currentData()
-        s.tey = self.tey.isChecked()
-        s.tey_norm = self.tn.currentData()
-        s.despike = self.ds.isChecked()
-        s.k = float(self.k.value())
-        s.i0_source = self.i0src.currentData()
-        s.pre = self._parse(self.pre.text())
-        s.post = self._parse(self.post.text())
-        if s.to_json() != before:              # a focus-out with nothing changed (e.g. hidden by a mode switch) writes nothing
-            self.session.touch()
+        new = self.values()
+        if all(getattr(self.s, k) == v for k, v in new.items()):
+            return                              # a focus-out with nothing changed (e.g. hidden by a mode switch) writes nothing
+        zid = self.zone_id if self.zone_id is not None else self.session.current_zone
+        what = short_time(self.sid) or self.scan.name
+        with self.session.edit(f"change the settings of {what} in zone {zid}"):
+            for k, v in new.items():
+                setattr(self.s, k, v)
 
 
 class ReducePerspective(QWidget):
@@ -312,7 +329,7 @@ class ReducePerspective(QWidget):
             return
         if self._worker is not None and self._worker.isRunning():
             return
-        self.status_label.setText(f"reading {sid[11:]} …")
+        self.status_label.setText(f"reading {split_stack_id(sid)[1]} …")
         self._worker = Worker(lambda cb: self.session.stack(sid, progress=cb), self)
         self._worker.progress.connect(lambda i, n, m: self.status_label.setText(f"{m}  ({i}/{n})"), Qt.QueuedConnection)
         self._worker.done.connect(lambda sd, sid=sid: self._loaded(sid), Qt.QueuedConnection)
@@ -331,11 +348,11 @@ class ReducePerspective(QWidget):
 
         def job(cb):
             for i, sid in enumerate(sids):
-                cb(i, len(sids), f"reading {sid[11:]}")
+                cb(i, len(sids), f"reading {split_stack_id(sid)[1]}")
                 try:
                     session.stack(sid)
                 except Exception as err:
-                    cb(i, len(sids), f"{sid[11:]}: {err}")
+                    cb(i, len(sids), f"{split_stack_id(sid)[1]}: {err}")
             return sids
 
         self.status_label.setText(f"reading {len(sids)} scans …")
@@ -414,48 +431,52 @@ class ReducePerspective(QWidget):
                 txt += f" · px {hit[0]}"
         self.status_label.setText(txt)
 
-    def _target_zone(self, create: bool) -> Zone | None:
-        z = self.session.zone()
-        if z is None or (create and self.target_new.isChecked()):
-            z = self.session.new_zone() if create else None
-        return z
+    def _makes_new_zone(self, add: bool) -> bool:
+        """Whether an adding tool starts a new zone: no zone selected, or 'rect+ starts a new zone' ticked."""
+        return add and (self.session.zone() is None or self.target_new.isChecked())
 
     def _rect(self, x0: float, x1: float, y0: float, y1: float) -> None:
         tool = self.map.vb.tool
         if tool == "rect+":
-            z = self._target_zone(True)
-            z.rects.append([x0, x1, y0, y1])
+            new = self._makes_new_zone(True)
+            z = self.session.zone()
+            with self.session.edit("add a rectangle to a new zone" if new else f"add a rectangle to zone {z.id}"):
+                if new:
+                    z = self.session.new_zone()
+                z.rects.append([x0, x1, y0, y1])
         elif tool == "rect-":
-            z = self._target_zone(False)
+            z = self.session.zone()
             if z is None:
                 self.status_label.setText("select a zone first")
                 return
-            z.erects.append([x0, x1, y0, y1])
-        else:
-            return
-        self.session.touch()
+            with self.session.edit(f"remove a rectangle from zone {z.id}"):
+                z.erects.append([x0, x1, y0, y1])
 
     def _brush(self, x: float, y: float, add: bool) -> None:
         sd = self.session.stack_loaded(self.session.current_stack) if self.session.current_stack else None
         if sd is None:
             return
-        z = self._target_zone(add)
-        if z is None:
+        new = self._makes_new_zone(add)
+        z = self.session.zone()
+        if z is None and not new:
             self.status_label.setText("select a zone first")
             return
         best = int(np.argmin((sd.x - x) ** 2 + (sd.y - y) ** 2))
         cx, cy = float(sd.x[best]), float(sd.y[best])
         px, py = sd.pitch
         n = self.brush_n.value()
-        key = z.paint if add else z.erase
-        for i in range(-((n - 1) // 2), n // 2 + 1):
-            for j in range(-((n - 1) // 2), n // 2 + 1):
-                sx, sy = round(cx + i * px, 3), round(cy + j * py, 3)
-                if not any(abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6 for s in key):
-                    key.append([sx, sy, px, py])
-                if add:
-                    z.erase = [s for s in z.erase if not (abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6)]
-        self.session.touch()
+        verb = "paint" if add else "erase"
+        with self.session.edit(f"{verb} pixels in a new zone" if new else f"{verb} pixels in zone {z.id}"):
+            if new:
+                z = self.session.new_zone()
+            key = z.paint if add else z.erase
+            for i in range(-((n - 1) // 2), n // 2 + 1):
+                for j in range(-((n - 1) // 2), n // 2 + 1):
+                    sx, sy = round(cx + i * px, 3), round(cy + j * py, 3)
+                    if not any(abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6 for s in key):
+                        key.append([sx, sy, px, py])
+                    if add:
+                        z.erase = [s for s in z.erase if not (abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6)]
 
     # ------------------------------------------------------------------ zones
     def _fill_zone_list(self) -> None:
@@ -504,8 +525,9 @@ class ReducePerspective(QWidget):
                 new = zones_from_pads(pads_from_survey(sv), start)
         existing = {(round(r[0], 2), round(r[2], 2)) for z in hz.zones for r in z.rects}
         new = [z for z in new if (round(z.rects[0][0], 2), round(z.rects[0][2], 2)) not in existing]
-        hz.zones.extend(new)
-        self.session.touch()
+        if new:                                         # nothing proposed: nothing written
+            with self.session.edit(f"propose {len(new)} zones"):
+                hz.zones.extend(new)
         self.status_label.setText(f"{len(new)} zones proposed (edit or delete them)" if new else "nothing to propose (no summary, no pads)")
         return len(new)
 
@@ -566,17 +588,19 @@ class ReducePerspective(QWidget):
         z = self.session.zone()
         if z is None:
             return
-        before = (z.label, z.group, z.comment)
-        z.label = self.z_label.currentText().strip() or z.label
-        z.group = self.z_group.currentText().strip()
-        z.comment = self.z_comment.text().strip()
-        if not self.z_group.currentText().strip() and z.label:
-            m = next((r for r in self.session.sheet_rows if r.sample_id and r.sample_id.lower() in z.label.lower()), None)
+        label = self.z_label.currentText().strip() or z.label
+        group = self.z_group.currentText().strip()
+        comment = self.z_comment.text().strip()
+        if not group and label:
+            m = next((r for r in self.session.sheet_rows if r.sample_id and r.sample_id.lower() in label.lower()), None)
             if m:
-                z.group = m.group
-                self.z_group.setEditText(z.group)
-        if (z.label, z.group, z.comment) != before:     # nothing changed: nothing written
-            self.session.touch()
+                group = m.group
+                self.z_group.blockSignals(True); self.z_group.setEditText(group); self.z_group.blockSignals(False)
+        if (label, group, comment) == (z.label, z.group, z.comment):
+            return                                      # nothing changed: nothing written
+        what = "rename" if label != z.label else "edit"
+        with self.session.edit(f"{what} zone {z.id}"):
+            z.label, z.group, z.comment = label, group, comment
 
     # ------------------------------------------------------------------ per-scan settings
     def _clear_cards(self) -> None:
@@ -596,7 +620,7 @@ class ReducePerspective(QWidget):
             if sd is None:
                 continue
             scan = scans.get(sid) or _VirtualScan(sd)
-            card = ScanSettingsCard(self.session, sid, scan, st, sd.labels)
+            card = ScanSettingsCard(self.session, sid, scan, st, sd.labels, zone_id=z.id)
             self.cards_lay.insertWidget(self.cards_lay.count() - 1, card)
             self._cards.append(card)
         if not self._cards:
@@ -620,7 +644,7 @@ class ReducePerspective(QWidget):
             t = zone_traces(sd, pix, st, good)
             if t is None:
                 continue
-            label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {sid[11:16]}"
+            label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {short_time(sid) or sd.name}"
             n += len(self.library.add_traces(label, t.E, t.sum, t.tey if st.tey else None, source=f"zone {z.id} of {sid}"))
         self.status_label.setText(f"{n} traces sent to Compare" if n else "nothing to send: load the zone's scans first")
         return n
@@ -648,5 +672,5 @@ class ReducePerspective(QWidget):
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
             t = zone_traces(sd, pix, st, good)
             if t is not None:
-                traces.append((sid[11:16], t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text}))
+                traces.append((short_time(sid) or sd.name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text}))
         self.preview.set_traces(traces)

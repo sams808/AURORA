@@ -1,4 +1,5 @@
-"""Command line: `aurora` (GUI), `aurora gui <project>`, `aurora project <path>`, `aurora scan <path>`, `aurora --distcheck`.
+"""Command line: `aurora` (GUI), `aurora gui <project>` (also `aurora <project folder or .h5>`), `aurora project <path>`,
+`aurora scan <path>`, `aurora report <project>`, `aurora demo <folder>`, `aurora --distcheck`, `aurora --selftest`.
 
 The headless commands never import Qt, so `aurora.core` keeps working without a display.
 """
@@ -88,7 +89,9 @@ def cmd_demo(folder: Path) -> int:
     (root / "demo samples.csv").write_bytes(("measured demo,,,\n"
                                             "Paper,Final plate#,Sample group,Sample ID,Composition,F K edge,Other edges?,Notes\n"
                                             f",{holder},Minerals,1 alpha,CaF2,y,,demo mineral\n,{holder},Simple Glass,2 beta,NaF-glass,y,,demo glass\n").encode("cp1252"))
-    print(f"demo beamtime written to {root}\n  open it with:  aurora gui \"{root}\"")
+    extras = testdata.write_demo_extras(root)
+    print(f"demo beamtime written to {root}\n  reduced spectra in {extras['reduced']}, references in {extras['references']}"
+          f"\n  open it with:  aurora gui \"{root}\"")
     return 0
 
 
@@ -118,7 +121,21 @@ def cmd_distcheck() -> int:
     return 0
 
 
+COMMANDS = ("gui", "project", "scan", "report", "demo")
+
+
+def _as_gui_path(argv: list[str]) -> list[str]:
+    """`aurora <folder>` or `aurora <file>.h5` (a Finder / Explorer 'open with', a desktop shortcut) means
+    `aurora gui <path>`: a first argument that is no command or option and names an existing folder or an .h5 file."""
+    if argv and argv[0] not in COMMANDS and not argv[0].startswith("-"):
+        p = Path(argv[0])
+        if p.suffix.lower() == ".h5" or p.is_dir():
+            return ["gui", *argv]
+    return argv
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = _as_gui_path(list(sys.argv[1:] if argv is None else argv))
     p = argparse.ArgumentParser(prog="aurora", description=f"{APP_NAME} {__version__}")
     p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     p.add_argument("--distcheck", action="store_true", help="smoke-test this installation offscreen and exit")

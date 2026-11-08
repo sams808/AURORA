@@ -23,10 +23,11 @@ from aurora import APP_NAME, __version__  # noqa: E402
 from aurora.core.constants import DETS  # noqa: E402
 from aurora.core.io.config import ScanSettings, Zone, ZonesFile  # noqa: E402
 from aurora.core.model import Project, ScanInfo  # noqa: E402
-from aurora.core.names import pretty_edge  # noqa: E402
+from aurora.core.names import pretty_edge, short_time, split_stack_id  # noqa: E402
 from aurora.core.stack import StackData  # noqa: E402
 from aurora.core.survey import SurveyData  # noqa: E402
-from aurora.core.zones import ZoneTraces, good_i0_curve, members, zone_traces  # noqa: E402
+from aurora.core.spectra import ZoneTraces, good_i0_curve  # noqa: E402
+from aurora.core.zones import members, zone_traces  # noqa: E402
 
 log = logging.getLogger("aurora.report")
 
@@ -116,7 +117,7 @@ class ReportBuilder:
     # ------------------------------------------------------------------ data
     def stack(self, sid: str) -> StackData | None:
         if sid not in self._stacks:
-            scan = self.project.find(sid[11:])
+            scan = self.project.find(split_stack_id(sid)[1])
             if scan is None:
                 self._skip(f"{sid}: scan not in the project")
                 return None
@@ -145,20 +146,20 @@ class ReportBuilder:
         items = [(hk, hz, z, sid, st) for hk, hz in self.zones.holders.items() for z in hz.zones for sid, st in z.settings.items()]
         for i, (hk, hz, z, sid, st) in enumerate(items):
             if progress:
-                progress(i, len(items), f"{hz.holder} {z.label} {sid[11:16]}")
+                progress(i, len(items), f"{hz.holder} {z.label} {short_time(sid)}")
             group = z.group.strip() or UNGROUPED
             if self.groups and group not in self.groups:
                 continue
-            scan = self.project.find(sid[11:])
+            scan = self.project.find(split_stack_id(sid)[1])
             if not st.include:
-                self.not_included.append((hz.holder, z.label, sid[11:]))
+                self.not_included.append((hz.holder, z.label, split_stack_id(sid)[1]))
                 continue
             sd = self.stack(sid)
             if sd is None or scan is None:
                 continue
             pix = members(z, sd.x, sd.y, sd.pitch)
             if pix.size == 0:
-                self.skipped.append(f"{hz.holder} {z.label} {sid[11:]}: no pixel inside the zone")
+                self.skipped.append(f"{hz.holder} {z.label} {split_stack_id(sid)[1]}: no pixel inside the zone")
                 continue
             good = self.good_curve(sd.E) if st.i0_source == "good" else None
             t = zone_traces(sd, pix, st, good)

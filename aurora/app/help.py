@@ -13,7 +13,7 @@ from PySide6.QtGui import (QColor, QDesktopServices, QFont, QKeySequence, QShort
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTextBrowser, QVBoxLayout, QWidget)
 
-from aurora import APP_NAME
+from aurora import APP_NAME, resources_dir
 from aurora.app.theme import TOKENS, on_theme_changed
 
 DOCS = [
@@ -25,7 +25,8 @@ DOCS = [
 
 
 def docs_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "resources" / "docs"
+    """The bundled manuals (aurora/resources/docs): in the frozen app, the .app bundle and a source checkout."""
+    return resources_dir() / "docs"
 
 
 def slug(text: str) -> str:

@@ -34,6 +34,14 @@ def resonant_line(el: str, shell: str) -> str:
     return f"{el} {LINE_LABEL_BY_SHELL.get(shell[0].upper(), 'Kα')}"
 
 
+def default_signal(scan, summary: dict | None = None) -> str:
+    """The signal a new zone x scan uses: 'pfy' or 'ipfy' (ScanSettings.signal).
+
+    Foundation stub: always 'pfy'. The science package returns 'ipfy' when the summary mode starts with 'IPFY', or
+    when the chosen line's element differs from the edge element (a non-resonant line, the sgm_report rule)."""
+    return "pfy"
+
+
 def main_line(labels: list[str], edge: tuple[str, str] | None, mode: str | None = None) -> str:
     """The ROI used for the main trace: sgm_report's choice when a summary mode exists, else the resonant line of the
     target edge when it is among the labels, else the first line that is not the total."""

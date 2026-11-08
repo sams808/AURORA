@@ -33,7 +33,7 @@ def _set_range(plot, xs, ys) -> None:
 class FitPerspective(QWidget):
     def __init__(self, library: Library, parent: QWidget | None = None):
         super().__init__(parent)
-        self.lib = library
+        self.lib = self.library = library
         self.lcf_result: LcfResult | None = None
         self.pca_result: PcaResult | None = None
         self.mcr_result: McrResult | None = None

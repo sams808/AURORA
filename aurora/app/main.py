@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QKeySequence
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QToolButton,
                                QVBoxLayout, QWidget)
@@ -26,6 +26,7 @@ from aurora.app.survey import SurveyPerspective
 from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
 from aurora.app.theme import TOKENS, apply_theme, follow_system, on_theme_changed
 from aurora.app import mode as ui_mode
+from aurora.app import shortcuts
 
 PERSPECTIVES = [
     ("home", "Home"), ("survey", "Survey"), ("reduce", "Reduce"), ("check", "Check"), ("compare", "Compare"),
@@ -94,8 +95,9 @@ class MainWindow(QMainWindow):
         self.library = Library(self)
         self.compare = ComparePerspective(self.library)
         self.fit = FitPerspective(self.library)
-        self.reduce.library = self.library
         self.maps = MapsPerspective(self.session)
+        for w in (self.reduce, self.check, self.maps, self.fit):      # any perspective can send spectra to Compare
+            w.library = self.library
         self.pages: dict[str, QWidget] = {"home": self.home, "survey": self.survey, "reduce": self.reduce, "check": self.check,
                                           "compare": self.compare, "fit": self.fit, "maps": self.maps, "report": self.report}
         for w in (self.home, self.survey, self.reduce, self.check, self.compare, self.fit, self.maps, self.report):
@@ -112,7 +114,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{APP_NAME} {__version__}")
 
         self._menus()
+        shortcuts.adopt(self)                  # menu entries the perspectives added before they were inside the window
         self._help = None
+        self.setAcceptDrops(True)              # a folder or an .h5 dropped on the window opens it (home.open_path)
         for key in sorted(ADVANCED_PERSPECTIVES):
             ui_mode.mark_advanced_perspective(key)
         self._mode_seen: bool | None = None
@@ -194,7 +198,7 @@ class MainWindow(QMainWindow):
         a.setShortcut(QKeySequence.Refresh)
         a.triggered.connect(self.home.reload_btn.click)
         file.addAction(a)
-        file.addSeparator()
+        self.menu_anchors = {"file": file.addSeparator()}      # shortcuts.add(menu='file') inserts above Settings
         a = QAction("&Settings…", self)
         a.setShortcut(QKeySequence.Preferences)
         a.setMenuRole(QAction.PreferencesRole)          # macOS: the application menu's Settings entry
@@ -207,6 +211,8 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self.close)
         file.addAction(a)
 
+        edit = m.addMenu("&Edit")               # Undo / Redo / History arrive through shortcuts.add(menu='edit')
+        self.menus["edit"] = edit
         view = m.addMenu("&View")
         self.menus["view"] = view
         self.mode_action = QAction("&Advanced mode", self)
@@ -235,7 +241,7 @@ class MainWindow(QMainWindow):
             size.addAction(a)
             self.size_actions[key] = a
         self._sync_view_actions()
-        view.addSeparator()
+        self.menu_anchors["view"] = view.addSeparator()       # shortcuts.add(menu='view') inserts above Full screen
         a = QAction("&Full screen", self)
         a.setShortcut("F11")
         a.triggered.connect(self.toggle_fullscreen)
@@ -266,7 +272,7 @@ class MainWindow(QMainWindow):
         a.setMenuRole(QAction.NoRole)
         a.triggered.connect(self.open_log_folder)
         help_.addAction(a)
-        help_.addSeparator()
+        self.menu_anchors["help"] = help_.addSeparator()      # shortcuts.add(menu='help') inserts above About
         a = QAction(f"&About {APP_NAME}", self)
         a.setMenuRole(QAction.AboutRole)
         a.triggered.connect(self.show_about)
@@ -284,6 +290,22 @@ class MainWindow(QMainWindow):
             return False
         self.show_perspective(key)
         return True
+
+    def navigate(self, perspective: str, holder: str | None = None, zone: int | None = None, sid: str | None = None) -> bool:
+        """Select the holder (or the holder of `sid`), the zone and the stack, then show the perspective (nav.go).
+        Returns False when the perspective is hidden in Easy mode (a status hint says so instead)."""
+        ses = self.session
+        key = holder if holder in ses.holder_keys else (ses.holder_of_stack(sid) if sid else None)
+        if key is not None:
+            ses.set_holder(key)
+        if zone is not None and ses.zone(zone) is not None:
+            ses.select_zone(zone)
+        if sid is not None:
+            for i in range(self.reduce.scan_list.count()):
+                if self.reduce.scan_list.item(i).data(Qt.UserRole) == sid:
+                    self.reduce.scan_list.setCurrentRow(i)
+                    break
+        return self.go_to(perspective)
 
     @staticmethod
     def perspective_hint(key: str) -> str:
@@ -359,7 +381,10 @@ class MainWindow(QMainWindow):
         root = Path(user_data_dir(APP_NAME, appauthor=False)) / "demo_beamtime"
         if not (root / "raw").is_dir():
             cmd_demo(root)
-        self.home.open_project(root)
+        elif not (root / "references").is_dir():          # a demo written by an earlier version: add its spectra
+            from aurora.core.testdata import write_demo_extras
+            write_demo_extras(root)
+        self.home.open_path(root)
         self.show_perspective("home")
 
     def open_log_folder(self) -> None:
@@ -380,18 +405,44 @@ class MainWindow(QMainWindow):
                     self.reduce.scan_list.setCurrentRow(i)
                     break
 
+    @staticmethod
+    def _dropped_path(event) -> Path | None:
+        md = event.mimeData()
+        if md is None or not md.hasUrls():
+            return None
+        for url in md.urls():
+            if url.isLocalFile():
+                return Path(url.toLocalFile())
+        return None
+
+    def dragEnterEvent(self, event) -> None:
+        if self._dropped_path(event) is not None:      # no stat here: open_path checks the path in its worker
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        p = self._dropped_path(event)
+        if p is None:
+            super().dropEvent(event)
+            return
+        event.acceptProposedAction()
+        self.show_perspective("home")
+        self.home.open_path(p)
+
     def closeEvent(self, event) -> None:
         self.home.shutdown()
         for w in (self.reduce, self.check, self.maps, self.report):
             if w._worker is not None:
                 w._worker.wait(30000)
-        self.session.save()
+        self.session.flush()
         super().closeEvent(event)
 
     def _on_project(self, project) -> None:
         self.crumb.setText(f"{project.root.name}   ·   {len(project.days)} days   ·   {project.n_holders} holders")
         self.statusBar().showMessage(f"{len(project.scans)} scans in {project.root}")
         self.session.set_project(project)
+        self.library.set_project(project)
 
 
 def create_app(argv: list[str] | None = None) -> QApplication:
@@ -427,6 +478,19 @@ def shutdown_app(app: QApplication, *windows: QWidget) -> None:
     shiboken6.delete(app)
 
 
+def open_at_start(win: MainWindow, project: Path | None = None) -> None:
+    """The project to open once the window is up: the command-line folder, else the last project when Settings asks
+    for it. Both go through home.open_path, which looks at the path only in its worker, so an unreachable share
+    never blocks the start; the last project is opened from the event loop and fails quietly."""
+    if project is not None:                     # aurora <folder>, aurora gui <folder>
+        win.home.open_path(Path(project))
+    elif setting("open_last_project"):
+        rec = recent_projects()
+        if rec:
+            last = Path(rec[0])
+            QTimer.singleShot(0, win, lambda: win.home.open_path(last, quiet=True))
+
+
 def run(project: Path | None = None) -> int:
     from aurora.logsetup import setup_logging
     from aurora.app import crash
@@ -435,10 +499,7 @@ def run(project: Path | None = None) -> int:
     crash.install()
     win = MainWindow()
     win.show()
-    if project is None and setting("open_last_project") and recent_projects() and Path(recent_projects()[0]).is_dir():
-        project = Path(recent_projects()[0])
-    if project is not None:
-        win.home.open_project(Path(project))
+    open_at_start(win, project)
     code = app.exec()
     shutdown_app(app, win)
     return code

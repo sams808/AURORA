@@ -30,6 +30,7 @@ class HomePerspective(QWidget):
         self.project: Project | None = None
         self._worker: Worker | None = None
         self._shown: ScanInfo | None = None           # the scan in the detail panel (re-rendered on a mode / theme change)
+        self._quiet = False                           # the open in progress is the last project at start
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -46,7 +47,7 @@ class HomePerspective(QWidget):
         self.open_btn.clicked.connect(self.choose_project)
         self.reload_btn = QPushButton(icon("refresh", TOKENS["ink"]), " Reload")
         self.reload_btn.setEnabled(False)
-        self.reload_btn.clicked.connect(lambda: self.open_project(self.project.root) if self.project else None)
+        self.reload_btn.clicked.connect(lambda: self.open_path(self.project.root) if self.project else None)
         head.addWidget(self.open_btn)
         head.addWidget(self.reload_btn)
         root.addLayout(head)
@@ -107,20 +108,31 @@ class HomePerspective(QWidget):
         start = recent_projects()[0] if recent_projects() else str(Path.home())
         d = QFileDialog.getExistingDirectory(self, "Open a beamtime project folder (contains raw/)", start)
         if d:
-            self.open_project(Path(d))
+            self.open_path(Path(d))
 
-    def open_project(self, path: Path) -> None:
+    def open_path(self, path: Path, quiet: bool = False) -> None:
+        """Open a beamtime folder, a day or scan folder, or one .h5 file (its scan folder). The one entry point of
+        Open…, Reload, the demo, a folder dropped on the window, the command-line folder and the last project at
+        start. The path is only looked at in the discovery worker, so an unreachable share never blocks the window.
+        quiet: a failure is a calm note in the path line (the last project at start), not the failure panel."""
         if self._worker is not None and self._worker.isRunning():
             return
+        path = Path(path)
+        target = path.parent if path.suffix.lower() == ".h5" else path       # a string test, no stat
+        self._quiet = quiet
         self.path_label.setText(f"reading {path} …")
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)
         self.open_btn.setEnabled(False)
-        self._worker = Worker(lambda cb: Project.discover(path, progress=cb), self)
+        self._worker = Worker(lambda cb: Project.discover(target, progress=cb), self)
         self._worker.progress.connect(self._on_progress, Qt.QueuedConnection)
         self._worker.done.connect(self._on_done, Qt.QueuedConnection)
         self._worker.failed.connect(self._on_failed, Qt.QueuedConnection)
         self._worker.start()
+
+    def open_project(self, path: Path) -> None:
+        """Former name of open_path."""
+        self.open_path(path)
 
     def set_project(self, project: Project) -> None:
         """Show an already discovered project (tests, distcheck)."""
@@ -140,6 +152,7 @@ class HomePerspective(QWidget):
     def _on_done(self, project: Project) -> None:
         if self._worker is not None:
             self._worker.wait(30000)
+        self._quiet = False
         self.project = project
         self.progress.setVisible(False)
         self.open_btn.setEnabled(True)
@@ -155,6 +168,12 @@ class HomePerspective(QWidget):
             self._worker.wait(30000)
         self.progress.setVisible(False)
         self.open_btn.setEnabled(True)
+        if self._quiet:                               # the last project at start: say so, keep the welcome page
+            self._quiet = False
+            last = text.strip().splitlines()[-1] if text.strip() else ""
+            self.path_label.setText(f"the last project could not be opened ({last})" if last else
+                                    "the last project could not be opened")
+            return
         self.path_label.setText("could not open the project")
         self.details.setHtml(f"<h3>Could not open the project</h3><pre>{html.escape(text)}</pre>")
 

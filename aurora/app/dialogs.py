@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget)
 
+from aurora.core.names import split_stack_id
 from aurora.core.references import list_references
 from aurora.core.stitch import auto_trims, seams, stitch
 
@@ -67,7 +68,7 @@ class StitchDialog(QDialog):
         lay.addWidget(QLabel("tick the tiles (loaded stacks of the holder):"))
         self.list = QListWidget()
         for sid, sd in stacks.items():
-            it = QListWidgetItem(f"{sid[11:]}   x {sd.x.min():.2f}..{sd.x.max():.2f}  y {sd.y.min():.2f}..{sd.y.max():.2f} mm   {sd.n_pix} px")
+            it = QListWidgetItem(f"{split_stack_id(sid)[1]}   x {sd.x.min():.2f}..{sd.x.max():.2f}  y {sd.y.min():.2f}..{sd.y.max():.2f} mm   {sd.n_pix} px")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable); it.setCheckState(Qt.Unchecked); it.setData(Qt.UserRole, sid)
             self.list.addItem(it)
         lay.addWidget(self.list, 1)

@@ -28,6 +28,7 @@ class MapsPerspective(QWidget):
         self.session = session
         self.hc: Hypercube | None = None
         self._worker: Worker | None = None
+        self.library = None                          # the Compare library (MainWindow sets it)
         self._roi: np.ndarray | None = None          # pixel indices of the ROI (None = all)
         self._cluster = None
         root = QVBoxLayout(self)

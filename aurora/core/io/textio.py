@@ -1,0 +1,71 @@
+"""UTF-8 text files and atomic writes.
+
+write_text_atomic / write_json_atomic write a temporary file in the target folder, flush and fsync it, then move it
+over the target with os.replace, so a crash or a full disk never leaves a half-written session.json, qc.json,
+library.json or manifest behind. On Windows a virus scanner or an indexer may hold the new file for a moment:
+os.replace is retried. Every write goes through aurora.core.io.safety.assert_writable first.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+from pathlib import Path
+
+log = logging.getLogger("aurora.io")
+
+REPLACE_RETRIES = 6                     # os.replace attempts before giving up (PermissionError on Windows)
+REPLACE_WAIT_S = 0.1                    # first wait between attempts, growing linearly
+
+
+def read_json(path, default=None):
+    """The parsed JSON of a UTF-8 file, or `default` when it is missing or unreadable (the reason is logged)."""
+    path = Path(path)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
+    except (OSError, ValueError) as err:
+        log.warning("%s unreadable (%s); ignored", path, err)
+        return default
+
+
+def write_text_atomic(path, text: str, encoding: str = "utf-8") -> Path:
+    """Write `text` to `path` in one step: the old content stays intact until the new one is complete on disk."""
+    from aurora.core.io.safety import assert_writable
+    path = Path(path)
+    assert_writable(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    data = text.encode(encoding)
+    with open(tmp, "wb") as f:                  # explicit handle: closed before the rename (Windows refuses otherwise)
+        f.write(data)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:                         # some network shares refuse fsync; the rename still protects the file
+            pass
+    last: Exception | None = None
+    for attempt in range(REPLACE_RETRIES):
+        try:
+            os.replace(tmp, path)
+            return path
+        except PermissionError as err:          # the target or the new file is held for a moment
+            last = err
+            time.sleep(REPLACE_WAIT_S * (attempt + 1))
+        except FileNotFoundError as err:        # the temporary file vanished (seen in synced folders): write directly
+            log.warning("%s: temporary file vanished (%s); writing in place", path, err)
+            with open(path, "wb") as f:
+                f.write(data)
+            return path
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    raise last if last is not None else OSError(f"{path}: could not be replaced")
+
+
+def write_json_atomic(path, obj, indent: int | None = 1) -> Path:
+    """JSON (UTF-8, non-ASCII kept as is) written with write_text_atomic."""
+    return write_text_atomic(path, json.dumps(obj, indent=indent, ensure_ascii=False))

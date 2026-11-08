@@ -184,9 +184,22 @@ def summary_by_scan(summary: dict | None) -> dict[str, dict]:
 
 
 # ----------------------------------------------------------------------------- zones_all.json (manual zones)
+# Keys added after the zone tool's format. They are written only when set (or when the file read had them), so a file
+# without them reads and writes exactly as before, and the HTML zone tool keeps reading AURORA's files.
+
+
+def _unknown(d: dict, keys) -> dict:
+    """The keys of d that this version does not know, kept to be written back unchanged."""
+    return {k: v for k, v in d.items() if k not in keys}
+
+
+def _floats(v) -> list[float]:
+    return [float(a) for a in v]
+
+
 @dataclass
 class ScanSettings:
-    """Per-zone, per-scan settings of the zone tool (docs/HANDOFF.md section 4)."""
+    """Per-zone, per-scan settings of the zone tool (docs/HANDOFF.md section 4), plus the fields AURORA adds."""
     include: bool = True
     n: int = 0
     sdd: list[bool] = field(default_factory=lambda: [True, True, True, True])
@@ -200,18 +213,62 @@ class ScanSettings:
     pre: list[float] | None = None
     post: list[float] | None = None
     stack: str = ""
+    # added by AURORA ('roi', 'sig', 'ipm', 'dsm', 'pin' in the file)
+    roi: dict[str, list[int]] | None = None     # per-SDD emission window {sdd: [lo, hi)} in channels; None = the line's bins
+    signal: str = "pfy"                         # pfy | ipfy
+    ipfy_mode: str = "ratio"                    # IPFY definition: ratio (I0 / S) | cls | neg (compatibility forms)
+    despike_mode: str = "classic"               # classic (the zone tool's rule) | coherent (across the four SDDs)
+    pinned: list[str] = field(default_factory=list)     # fields set by hand, which rules leave alone
+    extra: dict = field(default_factory=dict)            # keys this version does not know, written back unchanged
+    _seen: frozenset = field(default=frozenset(), compare=False, repr=False)    # added keys present in the file read
+
+    BASE_KEYS = ("inc", "n", "sdd", "line", "fn", "tey", "tn", "ds", "k", "i0src", "pre", "post", "stack")
+    ADDED_KEYS = ("roi", "sig", "ipm", "dsm", "pin")
+    # the processing choices compared by differs_from (include, n, stack, pinned and extra are bookkeeping)
+    SETTINGS_FIELDS = ("sdd", "line", "fluo_norm", "tey", "tey_norm", "despike", "k", "i0_source", "pre", "post", "roi",
+                       "signal", "ipfy_mode", "despike_mode")
 
     @classmethod
     def from_json(cls, d: dict) -> "ScanSettings":
+        roi = d.get("roi")
+        if isinstance(roi, dict):
+            roi = {str(k): [int(v[0]), int(v[1])] for k, v in roi.items()}
+        else:
+            roi = None
         return cls(include=bool(d.get("inc", True)), n=int(d.get("n", 0)), sdd=[bool(v) for v in d.get("sdd", [1, 1, 1, 1])],
                    line=str(d.get("line", "")), fluo_norm=str(d.get("fn", "i0jump")), tey=bool(d.get("tey", True)),
                    tey_norm=str(d.get("tn", "i0jump")), despike=bool(d.get("ds", True)), k=float(d.get("k", 6)),
-                   i0_source=str(d.get("i0src", "own")), pre=d.get("pre"), post=d.get("post"), stack=str(d.get("stack", "")))
+                   i0_source=str(d.get("i0src", "own")), pre=d.get("pre"), post=d.get("post"), stack=str(d.get("stack", "")),
+                   roi=roi, signal=str(d.get("sig", "pfy")), ipfy_mode=str(d.get("ipm", "ratio")),
+                   despike_mode=str(d.get("dsm", "classic")), pinned=[str(p) for p in d.get("pin", [])],
+                   extra=_unknown(d, cls.BASE_KEYS + cls.ADDED_KEYS),
+                   _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
     def to_json(self) -> dict:
-        return {"inc": self.include, "n": self.n, "sdd": self.sdd, "line": self.line, "fn": self.fluo_norm,
-                "tey": self.tey, "tn": self.tey_norm, "ds": self.despike, "k": self.k, "i0src": self.i0_source,
-                "pre": self.pre, "post": self.post, "stack": self.stack}
+        out = {"inc": self.include, "n": self.n, "sdd": self.sdd, "line": self.line, "fn": self.fluo_norm,
+               "tey": self.tey, "tn": self.tey_norm, "ds": self.despike, "k": self.k, "i0src": self.i0_source,
+               "pre": self.pre, "post": self.post, "stack": self.stack}
+        added = {"roi": (self.roi, None), "sig": (self.signal, "pfy"), "ipm": (self.ipfy_mode, "ratio"),
+                 "dsm": (self.despike_mode, "classic"), "pin": (self.pinned, [])}
+        for key, (value, default) in added.items():
+            if value != default or key in self._seen:
+                out[key] = value
+        for key, value in self.extra.items():
+            out.setdefault(key, value)
+        return out
+
+    def differs_from(self, other: "ScanSettings", fields=None) -> list[str]:
+        """Names of the processing fields whose values differ from `other` (SETTINGS_FIELDS unless `fields` is given),
+        e.g. ['fluo_norm', 'sdd']. include, n, stack, pinned and extra never count."""
+        out = []
+        for f in (fields or self.SETTINGS_FIELDS):
+            a, b = getattr(self, f), getattr(other, f)
+            if isinstance(a, (list, tuple)) or isinstance(b, (list, tuple)):
+                a = list(a) if a is not None else None
+                b = list(b) if b is not None else None
+            if a != b:
+                out.append(f)
+        return out
 
 
 @dataclass
@@ -226,21 +283,35 @@ class Zone:
     erase: list[list[float]] = field(default_factory=list)
     settings: dict[str, ScanSettings] = field(default_factory=dict)     # '<day>_<scan>' -> settings
     members: dict[str, list[int]] = field(default_factory=dict)         # '<day>_<scan>' -> pixel indices
+    polys: list[list[list[float]]] = field(default_factory=list)       # polygons [[x, y], ...] mm (AURORA)
+    extra: dict = field(default_factory=dict)                           # keys this version does not know
+    _seen: frozenset = field(default=frozenset(), compare=False, repr=False)
+
+    BASE_KEYS = ("id", "label", "group", "comment", "rects", "erects", "paint", "erase", "st", "members")
+    ADDED_KEYS = ("polys",)
 
     @classmethod
     def from_json(cls, d: dict) -> "Zone":
         return cls(id=int(d.get("id", 0)), label=str(d.get("label", "")), group=str(d.get("group", "")),
-                   comment=str(d.get("comment", "")), rects=[list(map(float, r)) for r in d.get("rects", [])],
-                   erects=[list(map(float, r)) for r in d.get("erects", [])],
-                   paint=[list(map(float, r)) for r in d.get("paint", [])],
-                   erase=[list(map(float, r)) for r in d.get("erase", [])],
+                   comment=str(d.get("comment", "")), rects=[_floats(r) for r in d.get("rects", [])],
+                   erects=[_floats(r) for r in d.get("erects", [])],
+                   paint=[_floats(r) for r in d.get("paint", [])],
+                   erase=[_floats(r) for r in d.get("erase", [])],
                    settings={k: ScanSettings.from_json(v) for k, v in d.get("st", {}).items()},
-                   members={k: [int(i) for i in v] for k, v in d.get("members", {}).items()})
+                   members={k: [int(i) for i in v] for k, v in d.get("members", {}).items()},
+                   polys=[[_floats(p) for p in poly] for poly in d.get("polys", [])],
+                   extra=_unknown(d, cls.BASE_KEYS + cls.ADDED_KEYS),
+                   _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
     def to_json(self) -> dict:
-        return {"id": self.id, "label": self.label, "group": self.group, "comment": self.comment, "rects": self.rects,
-                "erects": self.erects, "paint": self.paint, "erase": self.erase,
-                "st": {k: v.to_json() for k, v in self.settings.items()}, "members": self.members}
+        out = {"id": self.id, "label": self.label, "group": self.group, "comment": self.comment, "rects": self.rects,
+               "erects": self.erects, "paint": self.paint, "erase": self.erase,
+               "st": {k: v.to_json() for k, v in self.settings.items()}, "members": self.members}
+        if self.polys or "polys" in self._seen:
+            out["polys"] = self.polys
+        for key, value in self.extra.items():
+            out.setdefault(key, value)
+        return out
 
 
 @dataclass
@@ -249,11 +320,28 @@ class HolderZones:
     day: str
     survey: str
     zones: list[Zone] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)                   # keys this version does not know
+
+    BASE_KEYS = ("holder", "day", "survey", "zones")
+
+    @classmethod
+    def from_json(cls, d: dict, name: str = "") -> "HolderZones":
+        return cls(holder=str(d.get("holder", name)), day=str(d.get("day", "")), survey=str(d.get("survey", "")),
+                   zones=[Zone.from_json(z) for z in d.get("zones", [])], extra=_unknown(d, cls.BASE_KEYS))
+
+    def to_json(self) -> dict:
+        out = {"holder": self.holder, "day": self.day, "survey": self.survey, "zones": [z.to_json() for z in self.zones]}
+        for key, value in self.extra.items():
+            out.setdefault(key, value)
+        return out
 
 
 @dataclass
 class ZonesFile:
-    """`zones_all.json` exported by the zone tool; AURORA reads it, edits it and can export it again unchanged."""
+    """`zones_all.json` exported by the zone tool; AURORA reads it, edits it and can export it again unchanged.
+
+    AURORA's session.json is the same format plus two blocks the tool ignores: 'ui' (view memory, Session.ui_value)
+    and 'rules' (batch-settings rules). Both are left out of an export (to_json(export=True))."""
     version: int = 1
     exported: str = ""
     project: str = ""
@@ -261,28 +349,51 @@ class ZonesFile:
     notes: str = ""
     good_i0: dict[str, bool] = field(default_factory=dict)
     holders: dict[str, HolderZones] = field(default_factory=dict)
+    ui: dict = field(default_factory=dict)                      # session view memory (AURORA)
+    rules: list = field(default_factory=list)                   # batch-settings rules, as JSON (AURORA)
+    extra: dict = field(default_factory=dict)                   # keys this version does not know
+    _seen: frozenset = field(default=frozenset(), compare=False, repr=False)
+
+    BASE_KEYS = ("version", "exported", "project", "built", "notes", "goodI0", "holders")
+    ADDED_KEYS = ("ui", "rules")
+
+    @classmethod
+    def from_json(cls, d: dict) -> "ZonesFile":
+        ui = d.get("ui")
+        rules = d.get("rules")
+        return cls(version=int(d.get("version", 1)), exported=str(d.get("exported", "")), project=str(d.get("project", "")),
+                   built=str(d.get("built", "")), notes=str(d.get("notes", "")),
+                   good_i0={k: bool(v) for k, v in d.get("goodI0", {}).items()},
+                   holders={name: HolderZones.from_json(h, name) for name, h in d.get("holders", {}).items()},
+                   ui=dict(ui) if isinstance(ui, dict) else {}, rules=list(rules) if isinstance(rules, list) else [],
+                   extra=_unknown(d, cls.BASE_KEYS + cls.ADDED_KEYS),
+                   _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
     @classmethod
     def load(cls, path: Path) -> "ZonesFile":
         d = json.loads(Path(path).read_text(encoding="utf-8"))
-        zf = cls(version=int(d.get("version", 1)), exported=str(d.get("exported", "")), project=str(d.get("project", "")),
-                 built=str(d.get("built", "")), notes=str(d.get("notes", "")),
-                 good_i0={k: bool(v) for k, v in d.get("goodI0", {}).items()})
-        for name, h in d.get("holders", {}).items():
-            zf.holders[name] = HolderZones(holder=str(h.get("holder", name)), day=str(h.get("day", "")),
-                                           survey=str(h.get("survey", "")),
-                                           zones=[Zone.from_json(z) for z in h.get("zones", [])])
+        if not isinstance(d, dict):
+            raise ValueError(f"{path}: not a zones file (a JSON object is expected)")
+        zf = cls.from_json(d)
         n = sum(len(h.zones) for h in zf.holders.values())
         log.info("%s: %d holders, %d zones", path, len(zf.holders), n)
         return zf
 
-    def to_json(self) -> dict:
-        return {"version": self.version, "exported": self.exported, "project": self.project, "built": self.built,
-                "notes": self.notes, "goodI0": self.good_i0,
-                "holders": {k: {"holder": h.holder, "day": h.day, "survey": h.survey,
-                                "zones": [z.to_json() for z in h.zones]} for k, h in self.holders.items()}}
+    def to_json(self, export: bool = False) -> dict:
+        """The file content. export=True gives the zone tool's zones_all.json: no 'ui' and no 'rules' block."""
+        out = {"version": self.version, "exported": self.exported, "project": self.project, "built": self.built,
+               "notes": self.notes, "goodI0": self.good_i0,
+               "holders": {k: h.to_json() for k, h in self.holders.items()}}
+        if not export:
+            if self.ui or "ui" in self._seen:
+                out["ui"] = self.ui
+            if self.rules or "rules" in self._seen:
+                out["rules"] = self.rules
+        for key, value in self.extra.items():
+            out.setdefault(key, value)
+        return out
 
-    def save(self, path: Path) -> None:
-        from aurora.core.io.safety import assert_writable
-        assert_writable(path)
-        Path(path).write_text(json.dumps(self.to_json(), indent=1, ensure_ascii=False), encoding="utf-8")
+    def save(self, path: Path, export: bool = False) -> None:
+        """Atomic write (aurora.core.io.textio): a crash mid-way never leaves a half-written file."""
+        from aurora.core.io.textio import write_text_atomic
+        write_text_atomic(path, json.dumps(self.to_json(export=export), indent=1, ensure_ascii=False))
