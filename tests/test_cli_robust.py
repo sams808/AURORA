@@ -1,5 +1,6 @@
 """Headless command line that always answers (I45): console twin, exit codes, logs, UTF-8, folder argument."""
 import ast
+import json
 import logging
 import os
 import subprocess
@@ -183,3 +184,139 @@ def test_the_encoding_check_finds_a_violation(tmp_path):
                  "Path('q').open('w')\nPath('k').write_text('t', encoding='utf-8')\n", encoding="utf-8")
     found = _missing_encoding(p)
     assert len(found) == 3, found
+
+
+# ----------------------------------------------------------------------------- the report flags (I39, I42)
+class _Builder:
+    """Records the ReportBuilder arguments of a command-line report; builds nothing."""
+    made: list = []
+
+    def __init__(self, project, zones, out, **kw):
+        from aurora.core.report import PRESETS
+        self.kw = kw
+        self.png_dpi = kw.get("png_dpi") or PRESETS[kw.get("preset", "final")]["png_dpi"]
+        _Builder.made.append(self)
+
+    def scope_keys(self):
+        return ["N5"]
+
+    def build(self, progress=None):
+        from types import SimpleNamespace
+        return SimpleNamespace(pdf=Path("r.pdf"), pages=5, entries=2, csvs=[], figures=[], skipped=[])
+
+
+@pytest.fixture
+def zones(demo) -> list[str]:
+    """The demo with make_fake_zones saved beside it: the '--zones <file>' arguments."""
+    from aurora.core import testdata
+    p = demo / "zones_test.json"
+    testdata.make_fake_zones(demo).save(p)
+    return ["--zones", str(p)]
+
+
+@pytest.fixture
+def fake_builder(monkeypatch):
+    from aurora.core import report
+    _Builder.made = []
+    monkeypatch.setattr(report, "ReportBuilder", _Builder)
+    return _Builder.made
+
+
+def test_report_flags_reach_the_builder(demo, zones, fake_builder, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "settings_author", lambda: "")
+    from aurora.core import report
+    monkeypatch.setattr(report, "os_full_name", lambda: "")
+    assert cli.main(["report", str(demo), *zones, "--holders", "N5", "N6", "--days", "2026-11-05", "--preset", "draft",
+                     "--author", "A B"]) == 0
+    kw = fake_builder[-1].kw
+    assert kw["holders"] == ["N5", "N6"] and kw["days"] == ["2026-11-05"] and kw["preset"] == "draft"
+    assert kw["author"] == "A B" and kw["png_dpi"] is None and kw["appendix"] is None and kw["maps"] is None
+    assert "draft report, figures at 110 dpi, author A B (from --author)" in capsys.readouterr().out
+    # the defaults: Final, every holder, the preset's dpi and appendices; --no-appendix / --no-maps / --dpi win
+    assert cli.main(["report", str(demo), *zones, "--no-appendix", "--no-maps", "--dpi", "150"]) == 0
+    kw = fake_builder[-1].kw
+    assert kw["preset"] == "final" and kw["holders"] is None and kw["days"] is None
+    assert kw["appendix"] is False and kw["maps"] is False and kw["png_dpi"] == 150
+    assert kw["author"] == "" and "no author line" in capsys.readouterr().out
+
+
+def test_report_author_order_settings_then_system_account(demo, zones, fake_builder, monkeypatch, tmp_path, capsys):
+    from aurora.core import report
+    monkeypatch.setattr(report, "os_full_name", lambda: "Test User")
+    monkeypatch.setenv("AURORA_SETTINGS_DIR", str(tmp_path / "settings"))
+    assert cli.settings_author() == ""
+    assert cli.main(["report", str(demo), *zones]) == 0
+    assert fake_builder[-1].kw["author"] == "Test User"
+    assert "author Test User (from the system account)" in capsys.readouterr().out
+    pytest.importorskip("PySide6")
+    from aurora.app.settings import settings
+    s = settings()
+    s.setValue("report_author", "Settings Name")
+    s.sync()
+    assert cli.settings_author() == "Settings Name"
+    assert cli.main(["report", str(demo), *zones]) == 0
+    assert fake_builder[-1].kw["author"] == "Settings Name"
+    assert cli.main(["report", str(demo), *zones, "--author", ""]) == 0          # explicitly none
+    assert fake_builder[-1].kw["author"] == ""
+    assert cli.report_author(None) == ("Settings Name", "Settings") and cli.report_author(" X ") == ("X", "--author")
+
+
+def test_a_draft_of_one_holder_from_the_command_line(tmp_path):
+    """A real build: --preset draft --holders N5 --author on a two-holder beamtime gives a Draft of N5 only, by A B."""
+    from wp7_support import project, two_holder_zones
+    proj = project(tmp_path, n_holders=2)
+    zf = two_holder_zones(proj)
+    zpath = tmp_path / "zones.json"
+    zf.save(zpath)
+    out = tmp_path / "reports"
+    assert cli.main(["report", str(proj.root), "--zones", str(zpath), "--out", str(out), "--preset", "draft",
+                     "--holders", "N5", "--author", "A B"]) == 0
+    latest = json.loads((out / "latest.json").read_text(encoding="utf-8"))
+    folders = [p for p in out.iterdir() if p.is_dir()]
+    assert len(folders) == 1 and folders[0].name.endswith("_N5_draft"), [p.name for p in folders]
+    man = json.loads((folders[0] / "report_manifest.json").read_text(encoding="utf-8"))
+    assert man["options"]["preset"] == "draft" and man["options"]["holders"] == ["N5"] and man["options"]["png_dpi"] == 110
+    assert man["author"] == "A B" and {e["holder"] for e in man["entries"]} == {"N5"}
+    assert latest
+
+
+def test_a_holder_that_does_not_exist_is_named(demo, zones, capsys):
+    assert cli.main(["report", str(demo), *zones, "--holders", "N9"]) == 1
+    err = capsys.readouterr().err
+    assert "no holder of demo beamtime matches N9 (holders: N5)" in err and "Traceback" not in err
+
+
+def test_the_cli_presets_are_the_reports():
+    from aurora.core.report import PRESETS
+    assert sorted(cli.REPORT_PRESETS) == sorted(PRESETS)
+
+
+def test_every_option_and_argument_is_documented_by_help():
+    import argparse
+    parser = cli.build_parser()
+    undocumented = []
+
+    def walk(p, prefix):
+        for a in p._actions:
+            name = "/".join(a.option_strings) or a.dest
+            if isinstance(a, argparse._SubParsersAction):
+                assert a.help, f"{prefix} commands"
+                helps = {c.dest: c.help for c in a._choices_actions}
+                for cmd, sp in a.choices.items():
+                    if not helps.get(cmd):
+                        undocumented.append(f"{prefix} {cmd}")
+                    walk(sp, f"{prefix} {cmd}")
+            elif not a.help or a.help == argparse.SUPPRESS:
+                undocumented.append(f"{prefix} {name}")
+    walk(parser, "aurora")
+    assert not undocumented, undocumented
+    text = parser.format_help()
+    for flag in ("--selftest", "--distcheck", "--platform", "--no-gui", "--keep", "--verbose", "--version"):
+        assert flag in text, flag
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), pytest.raises(SystemExit):
+        cli.main(["report", "--help"])
+    for flag in ("--author", "--holders", "--days", "--preset", "--zones", "--out", "--dpi", "--no-appendix", "--no-maps"):
+        assert flag in buf.getvalue(), flag

@@ -1,7 +1,8 @@
 """Command line: `aurora` (GUI), `aurora gui <project>` (also `aurora <project folder or .h5>`), `aurora project <path>`,
 `aurora scan <path>`, `aurora report <project>`, `aurora demo <folder>`, `aurora --distcheck`, `aurora --selftest`.
 
-The headless commands never import Qt, so `aurora.core` keeps working without a display. Every command logs to the
+The headless commands never import Qt's GUI modules, so `aurora.core` keeps working without a display (`aurora report`
+reads the Settings author through QtCore when PySide6 is installed, which needs no display). Every command logs to the
 AURORA log file (aurora.logsetup); a headless command that fails writes its traceback to the log and to stderr and
 returns 1, so neither the console twin aurora-cli.exe nor the windowed AURORA.exe ever stops on an error window.
 Output is UTF-8 whatever the console or pipe.
@@ -125,16 +126,50 @@ def cmd_scan(path: Path) -> int:
     return 0
 
 
+REPORT_PRESETS = ("final", "draft")          # aurora.core.report.PRESETS (tests/test_cli_robust.py keeps them equal)
+
+
+def settings_author() -> str:
+    """Settings > report author, read through QtCore (no display needed); '' when unset or PySide6 is missing."""
+    try:
+        from aurora.app.settings import settings
+    except ImportError:
+        return ""
+    try:
+        return str(settings().value("report_author", "") or "").strip()
+    except Exception:                         # noqa: BLE001  an unreadable settings store means no Settings value
+        return ""
+
+
+def report_author(given: str | None) -> tuple[str, str]:
+    """(author, source) of a command-line report: --author when given ('' prints no author line), else Settings >
+    report author, else the system account's full name (aurora.core.report.resolve_author), else no author line."""
+    from aurora.core.report import resolve_author
+    if given is not None:
+        return given.strip(), "--author"
+    return resolve_author(settings_author())
+
+
 def cmd_report(args) -> int:
     from aurora.core.io.config import ZonesFile
     from aurora.core.model import Project
-    from aurora.core.report import ReportBuilder
+    from aurora.core.report import ReportBuilder, holder_keys
     proj = Project.discover(args.project)
     zpath = args.zones or (proj.root / ".aurora" / "session.json")
     zones = ZonesFile.load(zpath)
     out = args.out or (proj.root / "reports" / "aurora")
-    builder = ReportBuilder(proj, zones, out, title=args.title, groups=args.groups or None,
-                            appendix=not args.no_appendix, maps=not args.no_maps, png_dpi=args.dpi)
+    author, source = report_author(args.author)
+    builder = ReportBuilder(proj, zones, out, title=args.title, groups=args.groups or None, holders=args.holders,
+                            days=args.days, preset=args.preset, author=author,
+                            appendix=False if args.no_appendix else None, maps=False if args.no_maps else None,
+                            png_dpi=args.dpi)
+    if (args.holders or args.days) and not builder.scope_keys():
+        known = ", ".join(sorted(set(holder_keys(proj)) | set(zones.holders))) or "none"
+        asked = " ".join([*(args.holders or []), *(args.days or [])])
+        sys.stderr.write(f"aurora report: no holder of {proj.root.name} matches {asked} (holders: {known})\n")
+        return 1
+    print(f"{args.preset} report, figures at {builder.png_dpi} dpi, "
+          + (f"author {author} (from {source})" if author else "no author line"))
     res = builder.build(progress=lambda i, n, m: print(f"  {i + 1}/{n} {m}", end="\r"))
     print(f"\n{res.pdf}: {res.pages} pages, {res.entries} zone spectra, {len(res.csvs)} CSV, {len(res.figures)} figures")
     for s in res.skipped:
@@ -202,35 +237,53 @@ def _as_gui_path(argv: list[str]) -> list[str]:
     return argv
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = _as_gui_path(list(sys.argv[1:] if argv is None else argv))
+def build_parser() -> argparse.ArgumentParser:
+    """The command line; every option and argument carries its help text (tests/test_cli_robust.py checks it)."""
     p = argparse.ArgumentParser(prog="aurora", description=f"{APP_NAME} {__version__}")
-    p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
+    p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}",
+                   help="print the version and exit")
     p.add_argument("--distcheck", action="store_true", help="smoke-test this installation offscreen and exit")
-    p.add_argument("--selftest", action="store_true", help="deep self-test of this installation (every core path and perspective)")
+    p.add_argument("--selftest", action="store_true",
+                   help="deep self-test of this installation (every core path and perspective); the exit code is the "
+                        "number of failed checks")
     p.add_argument("--out", type=Path, help="with --selftest: write the JSON report here")
     p.add_argument("--platform", choices=["offscreen", "native"], help="with --selftest: Qt platform (default offscreen)")
     p.add_argument("--keep", action="store_true", help="with --selftest: keep the temporary folder")
     p.add_argument("--no-gui", action="store_true", help="with --selftest: core checks only")
-    p.add_argument("-v", "--verbose", action="store_true")
-    sub = p.add_subparsers(dest="cmd")
+    p.add_argument("-v", "--verbose", action="store_true", help="print the log messages too, not only the warnings")
+    sub = p.add_subparsers(dest="cmd", metavar="{gui,project,scan,report,demo}",
+                           help="a command (default: gui, which also opens a folder or .h5 given alone)")
     g = sub.add_parser("gui", help="open the application (default)")
-    g.add_argument("project", nargs="?", type=Path)
+    g.add_argument("project", nargs="?", type=Path, help="a beamtime folder, a loose folder of scans or a scan's .h5 file")
     s = sub.add_parser("project", help="list the days, holders and scans of a beamtime folder")
-    s.add_argument("path", type=Path)
+    s.add_argument("path", type=Path, help="the beamtime folder (or a loose folder of scan folders)")
     s = sub.add_parser("scan", help="describe one scan folder and read its first energy")
-    s.add_argument("path", type=Path)
+    s.add_argument("path", type=Path, help="the scan folder")
     r = sub.add_parser("report", help="build the group-organised report from a zones file (headless)")
-    r.add_argument("project", type=Path)
+    r.add_argument("project", type=Path, help="the beamtime folder")
     r.add_argument("--zones", type=Path, help="zones_all.json (default: <project>/.aurora/session.json)")
     r.add_argument("--out", type=Path, help="output folder (default: <project>/reports/aurora)")
-    r.add_argument("--title")
+    r.add_argument("--title", help="the title on the cover (default: 'AURORA report · <project>')")
     r.add_argument("--groups", nargs="*", help="only these sample groups")
-    r.add_argument("--no-appendix", action="store_true")
-    r.add_argument("--no-maps", action="store_true")
-    r.add_argument("--dpi", type=int, default=600, help="resolution of the figure PNGs (default 600)")
+    r.add_argument("--holders", nargs="+", metavar="HOLDER",
+                   help="only these holders, by name or key (for example N5 N6; default: every holder)")
+    r.add_argument("--days", nargs="+", metavar="YYYY-MM-DD", help="only the holders of these days")
+    r.add_argument("--preset", choices=REPORT_PRESETS, default="final",
+                   help="final: Appendix A and B, figures at 600 dpi (default); draft: no Appendix A or B, 110 dpi")
+    r.add_argument("--author", help="the author named on the cover, footers and PDF metadata; '' for none (default: "
+                                    "Settings > report author, else the system account's full name)")
+    r.add_argument("--no-appendix", action="store_true",
+                   help="leave out Appendix A, the four detectors per zone (Appendix C is always printed)")
+    r.add_argument("--no-maps", action="store_true", help="leave out Appendix B, the plate maps with the zones")
+    r.add_argument("--dpi", type=int, help="resolution of the figure PNGs (default: the preset's, 600 final, 110 draft)")
     dm = sub.add_parser("demo", help="create a small synthetic beamtime folder (the tutorials use it)")
-    dm.add_argument("folder", type=Path)
+    dm.add_argument("folder", type=Path, help="where to write the demo beamtime")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = _as_gui_path(list(sys.argv[1:] if argv is None else argv))
+    p = build_parser()
     _utf8_streams()
     args = p.parse_args(argv)
     console = _logging(args.verbose)
