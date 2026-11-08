@@ -1,28 +1,54 @@
-"""Reduce perspective: the zone tool. Stack map with rect / brush zone editing, zone card, per-scan settings, preview."""
+"""Reduce perspective: the zone tool. Stack map with rectangle / brush / lasso / polygon zone editing, the XRF windows
+of step 2, the zone card, per-scan settings with copy and rules, preview.
+
+Easy mode shows John Bussey's four numbered steps: '1 ·' the scans of the holder, '2 ·' the XRF window, '3 ·' the
+region (navigate / rectangle / lasso, Clear, New sample, Delete, the sample label), '4 ·' a read-only line of the
+settings used and 'Add to Check'. Advanced mode shows every control. The same widgets serve both modes (containers are
+marked with mode.mark_advanced / mark_easy), so a switch never changes a value.
+"""
 from __future__ import annotations
 
-import numpy as np
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSpinBox, QSplitter,
-                               QToolButton, QVBoxLayout, QWidget)
+import json
 
-from aurora.app import jobs, nav
+import numpy as np
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+                               QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QToolButton, QVBoxLayout, QWidget)
+
+from aurora.app import jobs, nav, shortcuts
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import MapView, TOOLS
-from aurora.app.mode import mark_advanced
+from aurora.app.mapview import TOOLS, MapView
+from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
-from aurora.app.session import Session
+from aurora.app.reduce_window import XrfWindowCard
+from aurora.app.session import CheckItem, Session
 from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
-from aurora.app.widgets import Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair, set_enabled
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair,
+                                set_enabled)
+from aurora.core import rules as rl
+from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
 from aurora.core.model import ScanInfo
-from aurora.core.names import short_time, split_stack_id
+from aurora.core.names import pretty_edge, short_time, split_stack_id
 from aurora.core.spectra import NORM_MODES
-from aurora.core.zones import members, zone_traces
+from aurora.core.zones import geometry, members, set_geometry, shape_text, zone_bbox, zone_traces
 
 NO_PROJECT = "open a project first"
+GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy geometry'
+# fields the 'advanced settings in use' chip compares (line and windows are shown in step 2, also in Easy)
+CHIP_FIELDS = tuple(f for f in ScanSettings.SETTINGS_FIELDS if f not in ("line", "roi"))
+COPY_FIELDS_SETTING = "reduce/copy_fields"
+
+
+def popup(menu: QMenu, pos) -> QMenu:
+    """Show a menu without blocking (deleted when it closes). PySide6 6.12 ignores a monkeypatched QMenu.exec, so a
+    blocking menu would also hang the click-everything test."""
+    menu.setAttribute(Qt.WA_DeleteOnClose)
+    menu.popup(pos)
+    return menu
 
 
 class _VirtualScan:
@@ -30,6 +56,31 @@ class _VirtualScan:
 
     def __init__(self, sd):
         self.time, self.label, self.edge_text, self.summary, self.name = "stitch", sd.name, sd.edge_text, {}, sd.name
+        self.edge = sd.edge
+        self.day = sd.day
+
+
+def _field_words(attr: str, value) -> str:
+    """'fluorescence normalisation: / I0, maximum = 1', 'SDD3 off', 'de-spike: off' for the chip's tooltip."""
+    key = rl.ATTRS.get(attr, attr)
+    if key == "sdd":
+        return rl.describe_value("sdd", value)
+    return f"{rl.FIELD_LABELS.get(key, attr)}: {rl.describe_value(key, value)}"
+
+
+def easy_differences(st: ScanSettings, easy: ScanSettings) -> list[str]:
+    """The fields (ScanSettings attribute names) where st differs from the Easy defaults, in CHIP_FIELDS order."""
+    return st.differs_from(easy, fields=CHIP_FIELDS)
+
+
+def differences_text(st: ScanSettings, diffs: list[str]) -> str:
+    parts = []
+    for f in diffs:
+        if f == "sdd":
+            parts.append(rl.describe_value("sdd", st.sdd))
+        else:
+            parts.append(_field_words(f, getattr(st, f)))
+    return "; ".join(parts)
 
 
 class EnergySpin(QSpinBox):
@@ -62,15 +113,18 @@ class EnergySpin(QSpinBox):
 
 
 class ScanSettingsCard(Card):
-    """Per-zone, per-scan settings (the zone tool's scan card), in a two-column grid that fits 420 px."""
+    """Per-zone, per-scan settings (the zone tool's scan card), in a two-column grid that fits 420 px. A manual edit
+    pins the fields it changes (rules leave them alone); 'Copy to…' and the right-click menu copy the card."""
 
     SIGNALS = (("pfy", "PFY"), ("ipfy", "IPFY"))
+    copy_requested = Signal(object, str)              # card, target ('zone' | 'scan' | 'edge')
 
     def __init__(self, session: Session, sid: str, scan: ScanInfo, settings: ScanSettings, lines: list[str], parent=None,
                  zone_id: int | None = None):
         super().__init__(f"{scan.time}  {scan.label}  ·  {scan.edge_text}", parent, help_anchor="45-one-card-per-attached-scan")
         self.session, self.sid, self.scan, self.s = session, sid, scan, settings
         self.zone_id = zone_id
+        self.owner = None                             # the ReducePerspective (copy, paste, the field checklist)
         self.setObjectName("card")
         flags = []
         if scan.summary.get("sdd_saturated"):
@@ -80,6 +134,9 @@ class ScanSettingsCard(Card):
         fl = ElidedLabel(" · ".join(flags) if flags else plural(settings.n, "px"), Qt.ElideRight)
         fl.setProperty("tone", "warn" if flags else "muted")
         self.header.addWidget(fl)
+        self.chip = Chip("advanced settings in use", "warn")          # Easy only, when the card differs (I22)
+        self.chip.hide()
+        self.header.addWidget(self.chip)
         dets = QWidget()
         dl = FlowLayout(dets, spacing=8)
         self.inc = QCheckBox("include"); self.inc.setChecked(settings.include); dl.addWidget(self.inc)
@@ -91,7 +148,9 @@ class ScanSettingsCard(Card):
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(6)
         self.line = QComboBox(); self.line.addItems(lines)
-        self.line.setCurrentText(settings.line if settings.line in lines else (lines[0] if lines else ""))
+        if settings.line and settings.line not in lines:       # a window line the stack has no fixed bins for
+            self.line.addItem(settings.line)
+        self.line.setCurrentText(settings.line if settings.line else (lines[0] if lines else ""))
         self.signal = QComboBox()
         for key, text in self.SIGNALS:
             self.signal.addItem(text, key)
@@ -132,8 +191,14 @@ class ScanSettingsCard(Card):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         self.body.addLayout(grid)
+        cr = QHBoxLayout()
+        self.copy_btn = QPushButton("Copy to…")
+        self.copy_btn.clicked.connect(self._copy_menu_at_button)
+        cr.addWidget(self.copy_btn); cr.addStretch(1)
+        self.body.addLayout(cr)
         explain_all([(self.inc, "reduce.include"), (self.tey, "reduce.tey"), (self.tn, "reduce.tey_norm"),
-                     (self.ds, "reduce.despike"), (self.k, "reduce.k")] + [(c, "reduce.sdd") for c in self.sdd])
+                     (self.ds, "reduce.despike"), (self.k, "reduce.k"), (self.copy_btn, "reduce.copy")]
+                    + [(c, "reduce.sdd") for c in self.sdd])
         for c, d in zip(self.sdd, DET_LABELS):
             c.setAccessibleName(f"{d} in the sum")
         for w in (self.inc, self.tey, self.ds, *self.sdd):
@@ -169,13 +234,45 @@ class ScanSettingsCard(Card):
 
     def _changed(self, *_) -> None:
         new = self.values()
-        if all(getattr(self.s, k) == v for k, v in new.items()):
+        changed = [k for k, v in new.items() if getattr(self.s, k) != v]
+        if not changed:
             return                              # a focus-out with nothing changed (e.g. hidden by a mode switch) writes nothing
         zid = self.zone_id if self.zone_id is not None else self.session.current_zone
         what = short_time(self.sid) or self.scan.name
         with self.session.edit(f"change the settings of {what} in zone {zid}"):
-            for k, v in new.items():
-                setattr(self.s, k, v)
+            for k in changed:
+                setattr(self.s, k, new[k])
+            pins = [rl.ATTRS[k] for k in changed if k in rl.ATTRS]
+            self.s.pinned = list(self.s.pinned) + [p for p in pins if p not in self.s.pinned]
+
+    # ------------------------------------------------------------------ copy
+    def copy_menu(self) -> QMenu:
+        """The three copy targets, copy / paste, and the checklist of the fields that travel."""
+        m = QMenu(self)
+        for target, words in rl.COPY_TARGETS.items():
+            a = m.addAction(f"Copy to {words}")
+            a.setData(target)
+            a.triggered.connect(lambda _c=False, t=target: self.copy_requested.emit(self, t))
+        m.addSeparator()
+        if self.owner is not None:
+            m.addAction("Copy these settings (Ctrl+Shift+C)", lambda: self.owner.copy_card(self))
+            pa = m.addAction("Paste settings here (Ctrl+Shift+V)", lambda: self.owner.paste_card(self))
+            pa.setEnabled(self.owner.copied is not None)
+            sub = m.addMenu("Fields that travel")
+            on = set(self.owner.copy_fields())
+            for group, words, _keys, _default in rl.COPY_GROUPS:
+                a = sub.addAction(words)
+                a.setCheckable(True)
+                a.setChecked(group in on)
+                a.toggled.connect(lambda checked, g=group: self.owner.set_copy_field(g, checked))
+        return m
+
+    def _copy_menu_at_button(self) -> None:
+        self.last_menu = popup(self.copy_menu(), self.copy_btn.mapToGlobal(self.copy_btn.rect().bottomLeft()))
+
+    def contextMenuEvent(self, ev) -> None:
+        self.last_menu = popup(self.copy_menu(), ev.globalPos())
+        ev.accept()
 
 
 class ReducePerspective(QWidget):
@@ -184,6 +281,10 @@ class ReducePerspective(QWidget):
         self.session = session
         self._cards: list[ScanSettingsCard] = []
         self._placeholder: QLabel | None = None
+        self._choices: dict[tuple[str, str], dict] = {}        # (holder, edge) -> the step-2 window choice
+        self._window_failed: set[str] = set()                   # window jobs that failed (not retried)
+        self.copied: tuple[ScanSettings, list[str], str] | None = None      # Ctrl+Shift+C: settings, keys, from
+        self._badges: list[QLabel] = []
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -201,7 +302,7 @@ class ReducePerspective(QWidget):
 
         split = QSplitter(Qt.Horizontal)
 
-        # ---- left: scans of the holder + zones
+        # ---- left: 1 · the scans of the holder, 2 · the XRF window
         left = QSplitter(Qt.Vertical)
         self.scans_card = sc = Card("Scans of the holder", help_anchor="41-scans-of-the-holder")
         self.load_all_btn = QPushButton("Load all")
@@ -213,38 +314,26 @@ class ReducePerspective(QWidget):
         self.scan_list.currentItemChanged.connect(self._scan_picked)
         sc.body.addWidget(self.scan_list, 1)
         left.addWidget(sc)
-        zc = Card("Zones", help_anchor="43-zones")
-        zb = QGridLayout()                               # 2 x 2: never clipped in the narrow left column
-        zb.setSpacing(6)
-        self.new_zone_btn = QPushButton("New sample"); self.new_zone_btn.clicked.connect(self._new_zone)
-        self.del_zone_btn = QPushButton("Delete"); self.del_zone_btn.clicked.connect(self._delete_zone)
-        self.propose_btn = QPushButton("Propose zones")         # no dialog: no ellipsis
-        self.propose_btn.clicked.connect(lambda: self.propose_zones())
-        self.stitch_btn = QPushButton("Stitch…"); self.stitch_btn.clicked.connect(self.stitch_tiles)
-        for i, b in enumerate((self.new_zone_btn, self.del_zone_btn, self.propose_btn, self.stitch_btn)):
-            zb.addWidget(b, i // 2, i % 2)
-        zc.body.addLayout(zb)
-        self.zone_list = QListWidget()
-        self.zone_list.setTextElideMode(Qt.ElideRight)
-        self.zone_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.zone_list.setAccessibleName("zones of the holder")
-        self.zone_list.currentItemChanged.connect(self._zone_picked)
-        zc.body.addWidget(self.zone_list, 1)
-        left.addWidget(zc)
+        self.window_card = XrfWindowCard(session, self.taskbar)
+        self.window_card.committed.connect(self._window_committed)
+        self.window_card.remember_requested.connect(self.remember_windows)
+        left.addWidget(self.window_card)
+        left.setStretchFactor(0, 1); left.setStretchFactor(1, 3)
+        left.setSizes([170, 470])
         split.addWidget(left)
 
-        # ---- centre: stack map with tools
-        centre = Card("Stack map", help_anchor="42-stack-map")
+        # ---- centre: 3 · the region: tools, sample row, zone list | stack map, caption
+        self.map_card = centre = Card("Stack map", help_anchor="42-stack-map")
         tools_box = QWidget()
         tools = FlowLayout(tools_box, spacing=6)
         self.tool_group = QButtonGroup(self)
         self.tool_buttons: dict[str, QToolButton] = {}
-        for i, t in enumerate(TOOLS):
-            b = QToolButton(); b.setText(t); b.setCheckable(True); b.setChecked(i == 1)
+        for t in ("navigate", "rect+", "lasso+", "polygon+", "rect-", "brush+", "brush-"):
+            b = QToolButton(); b.setText(t); b.setCheckable(True); b.setChecked(t == "rect+")
             explain(b, f"reduce.tool.{t}")
-            self.tool_group.addButton(b, i); tools.addWidget(b)
+            self.tool_group.addButton(b, TOOLS.index(t)); tools.addWidget(b)
             self.tool_buttons[t] = b
-        self.tool_group.idClicked.connect(lambda i: self.map.set_tool(TOOLS[i]))
+        self.tool_group.idClicked.connect(lambda i: self.set_tool(TOOLS[i]))
         self.brush_box = QWidget()                      # brush size and 'rect+ starts a new zone': Advanced
         bl = QHBoxLayout(self.brush_box); bl.setContentsMargins(0, 0, 0, 0)
         self.brush_n = QSpinBox(); self.brush_n.setRange(1, 9); self.brush_n.setValue(1)
@@ -252,7 +341,19 @@ class ReducePerspective(QWidget):
         bl.addWidget(pair(labelled("brush", self.brush_n, "reduce.brush"), self.brush_n))
         self.target_new = QCheckBox("rect+ starts a new zone"); bl.addWidget(self.target_new)
         tools.addWidget(self.brush_box)
+        self.clear_btn = QPushButton("Clear"); self.clear_btn.clicked.connect(self.clear_zone)
+        tools.addWidget(self.clear_btn)
         centre.body.addWidget(tools_box)
+        zone_row = QWidget()
+        zr = FlowLayout(zone_row, spacing=6)
+        self.new_zone_btn = QPushButton("New sample"); self.new_zone_btn.clicked.connect(self._new_zone)
+        self.del_zone_btn = QPushButton("Delete"); self.del_zone_btn.clicked.connect(self._delete_zone)
+        self.z_label = QComboBox(); self.z_label.setEditable(True); self.z_label.setMinimumWidth(150)
+        self.z_label.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.z_label.setMinimumContentsLength(12)
+        zr.addWidget(self.new_zone_btn); zr.addWidget(self.del_zone_btn)
+        zr.addWidget(pair(labelled("sample", self.z_label, "reduce.label"), self.z_label))
+        centre.body.addWidget(zone_row)
         self.show_row = QWidget()                       # map line / SDD / mode / energy / I0 / log: Advanced
         show = FlowLayout(self.show_row, spacing=6)
         self.map_line = QComboBox()
@@ -268,24 +369,49 @@ class ReducePerspective(QWidget):
         self.map_i0 = QCheckBox("/ I0"); self.map_i0.setChecked(True); show.addWidget(self.map_i0)
         self.map_log = QCheckBox("log"); show.addWidget(self.map_log)
         centre.body.addWidget(self.show_row)
+        self.zone_split = QSplitter(Qt.Horizontal)
+        self.zone_list = QListWidget()
+        self.zone_list.setTextElideMode(Qt.ElideRight)
+        self.zone_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.zone_list.setAccessibleName("zones of the holder")
+        self.zone_list.currentItemChanged.connect(self._zone_picked)
+        self.zone_list.setMinimumWidth(110)
+        self.zone_split.addWidget(self.zone_list)
         self.map = MapView()
         self.map.setAccessibleName("stack map")
+        self.map.set_zone_tools(True)
         self.map.set_tool("rect+")
         self.map.rect_drawn.connect(self._rect)
         self.map.brush_at.connect(self._brush)
+        self.map.polygon_drawn.connect(self._polygon)
+        self.map.zone_clicked.connect(self._zone_clicked)
+        self.map.context_requested.connect(self._context)
         self.map.hovered.connect(self._hover)
-        centre.body.addWidget(self.map, 1)
+        self.zone_split.addWidget(self.map)
+        self.zone_split.setStretchFactor(0, 0); self.zone_split.setStretchFactor(1, 1)
+        self.zone_split.setSizes([120, 480])
+        centre.body.addWidget(self.zone_split, 1)
+        self.region_caption = ElidedLabel("", Qt.ElideMiddle)
+        centre.body.addWidget(self.region_caption)
         self.map_hint = ElidedLabel("", Qt.ElideMiddle); self.map_hint.setObjectName("muted")
         centre.body.addWidget(self.map_hint)
         split.addWidget(centre)
 
-        # ---- right: zone card, per-scan settings, preview
-        right = QSplitter(Qt.Vertical)
+        # ---- right: 4 · reduce (the zone card), per-scan settings, preview
+        self.right_split = right = QSplitter(Qt.Vertical)
         self.zone_card = Card("Zone", help_anchor="44-the-zone-card")
-        zr = QHBoxLayout()
-        self.z_label = QComboBox(); self.z_label.setEditable(True); self.z_label.setMinimumWidth(140)
-        zr.addWidget(labelled("label", self.z_label, "reduce.label")); zr.addWidget(self.z_label, 1)
-        self.zone_card.body.addLayout(zr)
+        self.step4_line = QLabel("")                    # Easy: the settings used, read-only
+        self.step4_line.setWordWrap(True)
+        self.step4_line.setObjectName("muted")
+        self.step4_line.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.zone_card.body.addWidget(self.step4_line)
+        self.chip_box = QWidget()                       # 'advanced settings in use' (Easy, when a field differs)
+        cl = FlowLayout(self.chip_box, spacing=6)
+        self.chip = Chip("advanced settings in use", "warn")
+        self.reset_btn = QPushButton("Reset to Easy defaults")
+        self.reset_btn.clicked.connect(self.reset_to_easy)
+        cl.addWidget(self.chip); cl.addWidget(self.reset_btn)
+        self.zone_card.body.addWidget(self.chip_box)
         self.group_box = QWidget()                      # group and comment fields: Advanced
         gl = QHBoxLayout(self.group_box); gl.setContentsMargins(0, 0, 0, 0)
         self.z_group = QComboBox(); self.z_group.setEditable(True); self.z_group.setMinimumWidth(140)
@@ -298,11 +424,24 @@ class ReducePerspective(QWidget):
         self.zone_card.body.addWidget(self.comment_box)
         self.z_info = ElidedLabel("", Qt.ElideRight); self.z_info.setObjectName("muted")
         self.zone_card.body.addWidget(self.z_info)
-        zb2 = QHBoxLayout()
+        zb2 = QWidget()
+        zl2 = FlowLayout(zb2, spacing=6)
+        self.add_check_btn = QPushButton("Add to Check")
+        self.add_check_btn.setObjectName("primary")
+        self.add_check_btn.clicked.connect(lambda: self.add_to_check())
         self.send_btn = QPushButton("Send the zone's traces to Compare")
         self.send_btn.clicked.connect(self.send_to_compare)
-        zb2.addWidget(self.send_btn); zb2.addStretch(1)
-        self.zone_card.body.addLayout(zb2)
+        self.rules_btn = QPushButton("Rules…")
+        self.rules_btn.clicked.connect(self.open_rules)
+        self.propose_btn = QPushButton("Propose zones")         # no dialog: no ellipsis
+        self.propose_btn.clicked.connect(lambda: self.propose_zones())
+        self.stitch_btn = QPushButton("Stitch…"); self.stitch_btn.clicked.connect(self.stitch_tiles)
+        self.load_poly_btn = QPushButton("Load polygon…"); self.load_poly_btn.clicked.connect(lambda: self.load_polygon())
+        self.save_poly_btn = QPushButton("Save polygon…"); self.save_poly_btn.clicked.connect(lambda: self.save_polygon())
+        for b in (self.add_check_btn, self.send_btn, self.rules_btn, self.propose_btn, self.stitch_btn,
+                  self.load_poly_btn, self.save_poly_btn):
+            zl2.addWidget(b)
+        self.zone_card.body.addWidget(zb2)
         self.library = None
         self.z_label.lineEdit().editingFinished.connect(self._zone_edited)
         self.z_group.lineEdit().editingFinished.connect(self._zone_edited)
@@ -316,6 +455,7 @@ class ReducePerspective(QWidget):
         right.addWidget(self.cards_area)
         self.preview_card = pc = Card("Preview", help_anchor="47-preview")
         self.preview = PreviewPlot()
+        self.preview.all_scans.setText("all scans of the sample")
         self.preview.all_scans.toggled.connect(self.update_preview)
         pc.body.addWidget(self.preview, 1)
         right.addWidget(pc)
@@ -325,8 +465,8 @@ class ReducePerspective(QWidget):
         right.setSizes([190, 230, 420])
         split.addWidget(right)
         left.setMinimumWidth(250)
-        split.setStretchFactor(0, 0); split.setStretchFactor(1, 2); split.setStretchFactor(2, 3)
-        split.setSizes([260, 560, 640])                 # the scan cards need about 420 px; the map is square
+        split.setStretchFactor(0, 0); split.setStretchFactor(1, 3); split.setStretchFactor(2, 2)
+        split.setSizes([280, 650, 530])                 # the scan cards need about 420 px; the map is square
         self.body = overlay_host(split)
         root.addWidget(self.body, 1)
 
@@ -347,18 +487,135 @@ class ReducePerspective(QWidget):
                      (self.propose_btn, "reduce.propose"), (self.stitch_btn, "reduce.stitch"),
                      (self.target_new, "reduce.target_new"), (self.map_sdd, "reduce.map_sdd"),
                      (self.map_mode, "reduce.map_mode"), (self.map_energy, "reduce.map_energy"),
-                     (self.map_i0, "reduce.map_i0"), (self.map_log, "reduce.map_log"), (self.send_btn, "reduce.send")])
-        session.project_changed.connect(lambda _p: self.update_actions())
+                     (self.map_i0, "reduce.map_i0"), (self.map_log, "reduce.map_log"), (self.send_btn, "reduce.send"),
+                     (self.clear_btn, "reduce.clear"), (self.load_poly_btn, "reduce.load_polygon"),
+                     (self.save_poly_btn, "reduce.save_polygon"), (self.add_check_btn, "reduce.add_to_check"),
+                     (self.reset_btn, "reduce.reset_easy"), (self.rules_btn, "reduce.rules"),
+                     (self.zone_list, "reduce.zones")])
+        self.chip.setAccessibleName("advanced settings in use")
+        self._badge(self.scans_card, "1 ·"); self._badge(self.window_card, "2 ·")
+        self._badge(self.map_card, "3 ·"); self._badge(self.zone_card, "4 ·")
+        session.project_changed.connect(self._project_changed)
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(self._zone_selected)
         session.stack_selected.connect(self._stack_selected)
+        session.add_settings_default(self._settings_default)
         on_theme_changed(self, lambda _s: (self.redraw_map(), refill_tones(self.scan_list)))
-        # Easy mode: John Bussey's basic path (scan, region, preview); everything else is Advanced
-        mark_advanced(self.load_all_btn, self.propose_btn, self.stitch_btn, self.tool_buttons["rect-"],
+        self._shortcuts()
+        # Easy mode: John Bussey's four steps (scan, XRF window, region, reduce); everything else is Advanced
+        mark_advanced(self.load_all_btn, self.tool_buttons["rect-"], self.tool_buttons["polygon+"],
                       self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.show_row,
-                      self.group_box, self.comment_box, self.send_btn, self.cards_area)
+                      self.propose_btn, self.stitch_btn, self.load_poly_btn, self.save_poly_btn, self.group_box,
+                      self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
+        mark_easy(self.step4_line, self.add_check_btn, *self._badges)
+        on_mode_changed(self, self._mode_changed)
         self.update_actions()
+
+    # ------------------------------------------------------------------ steps and modes
+    def _badge(self, card: Card, text: str) -> None:
+        """The step number before a card's title, shown in Easy mode ('1 ·', '2 ·', ...)."""
+        lab = QLabel(text)
+        lab.setObjectName("cardtitle")
+        card._top.insertWidget(0, lab)
+        self._badges.append(lab)
+
+    @staticmethod
+    def _min_height(card: Card) -> int:
+        """The height a card needs at its width: wrapped rows at their wrapped height, the plot at its minimum."""
+        lay = card.layout()
+        m = lay.contentsMargins()
+        w = card.width() - m.left() - m.right()
+        hs = []
+        for i in range(lay.count()):
+            it = lay.itemAt(i)
+            wid = it.widget()
+            if wid is not None and wid.isHidden():
+                continue
+            if wid is not None and wid is getattr(card, "plot", None):
+                hs.append(wid.minimumHeight())
+            elif it.hasHeightForWidth():
+                hs.append(it.heightForWidth(w))
+            else:
+                hs.append(max(it.minimumSize().height(), it.sizeHint().height() if it.layout() is not None else 0))
+        return sum(hs) + lay.spacing() * max(0, len(hs) - 1) + m.top() + m.bottom()
+
+    def fit_cards(self) -> None:
+        """The splitters ignore wrapped rows: give the zone card and the XRF window card the height their rows need at
+        their width, so no control is cut at the smallest window."""
+        for card in (self.zone_card, self.window_card):
+            if card.width() > 0:
+                need = self._min_height(card)
+                if need > 0 and need != card.minimumHeight():
+                    card.setMinimumHeight(need)
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self.fit_cards)
+
+    def step_titles(self) -> list[str]:
+        """The titles of the numbered step cards as shown ('1 · Scans of holder N5', ...), Easy mode."""
+        out = []
+        for lab, card in zip(self._badges, (self.scans_card, self.window_card, self.map_card, self.zone_card)):
+            out.append(f"{lab.text()} {card.title.text()}" if not lab.isHidden() else card.title.text())
+        return out
+
+    def _mode_changed(self, adv: bool) -> None:
+        self.map_card.set_title("Stack map" if adv else "Region")
+        self.zone_card.set_title("Zone" if adv else "Reduce")
+        h = max(self.right_split.height(), 600)          # Easy: step 4 is short, the preview takes the rest
+        self.right_split.setSizes([int(0.3 * h), int(0.27 * h), int(0.43 * h)] if adv else [170, 0, h - 170])
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self.fit_cards)
+        self._refresh_easy()
+
+    def _shortcuts(self) -> None:
+        """Reduce shortcuts (Help > Keyboard shortcuts lists them under 'Reduce')."""
+        add = lambda text, key, fn: shortcuts.add(self, text, key, fn, section="Reduce")   # noqa: E731
+        a = self.shortcut_actions = {
+            "navigate": add("Navigate tool", "V", lambda: self.set_tool("navigate")),
+            "rect+": add("Rectangle tool (rect+)", "R", lambda: self.set_tool("rect+")),
+            "rect-": add("Remove-rectangle tool (rect-)", "E", lambda: self.set_tool("rect-")),
+            "brush+": add("Brush tool (brush+)", "B", lambda: self.set_tool("brush+")),
+            "brush-": add("Erase-brush tool (brush-)", "Shift+B", lambda: self.set_tool("brush-")),
+            "lasso+": add("Lasso tool (lasso+)", "L", lambda: self.set_tool("lasso+")),
+            "polygon+": add("Polygon tool (polygon+)", "P", lambda: self.set_tool("polygon+")),
+            "bigger": add("Larger brush", "+", lambda: self.brush_n.setValue(self.brush_n.value() + 1)),
+            "smaller": add("Smaller brush", "-", lambda: self.brush_n.setValue(self.brush_n.value() - 1)),
+            "new": add("New sample", "N", self._new_zone),
+            "delete": add("Delete the sample", "Delete", self._delete_zone),
+            "prev_zone": add("Previous sample", "Alt+Up", lambda: self.step_zone(-1)),
+            "next_zone": add("Next sample", "Alt+Down", lambda: self.step_zone(1)),
+            "prev_scan": add("Previous scan", "[", lambda: self.step_scan(-1)),
+            "next_scan": add("Next scan", "]", lambda: self.step_scan(1)),
+            "fit": add("Fit the view", "F", lambda: self.map.autorange()),
+            "copy": add("Copy the scan settings", "Ctrl+Shift+C", lambda: self.copy_card(self.current_card())),
+            "paste": add("Paste the scan settings", "Ctrl+Shift+V", lambda: self.paste_card(self.current_card())),
+        }
+        mark_advanced_action(self, a["rect-"], a["brush+"], a["brush-"], a["polygon+"], a["bigger"], a["smaller"],
+                             a["copy"], a["paste"])
+
+    def set_tool(self, tool: str) -> None:
+        """Switch the map tool and its button (shortcuts and the tool buttons)."""
+        if tool not in TOOLS:
+            return
+        self.map.set_tool(tool)
+        b = self.tool_buttons.get(tool)
+        if b is not None and not b.isChecked():
+            b.setChecked(True)
+
+    def step_zone(self, d: int) -> None:
+        n = self.zone_list.count()
+        if n:
+            r = self.zone_list.currentRow()
+            self.zone_list.setCurrentRow((r + d) % n if r >= 0 else 0)
+
+    def step_scan(self, d: int) -> None:
+        n = self.scan_list.count()
+        if n:
+            r = self.scan_list.currentRow()
+            self.scan_list.setCurrentRow((r + d) % n if r >= 0 else 0)
 
     # ------------------------------------------------------------------ actions and states
     def update_actions(self) -> None:
@@ -369,20 +626,52 @@ class ReducePerspective(QWidget):
         loaded = [s for s in ses.stacks_of() if ses.stack_loaded(ses.stack_id(s)) is not None] if has else []
         set_enabled(self.new_zone_btn, has and h is not None, NO_PROJECT if not has else "this project has no holder")
         set_enabled(self.del_zone_btn, z is not None, NO_PROJECT if not has else "select a zone first")
+        set_enabled(self.clear_btn, z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys),
+                    NO_PROJECT if not has else ("select a zone first" if z is None else "the zone is empty"))
         set_enabled(self.send_btn, z is not None and self.library is not None and bool(z.settings),
                     NO_PROJECT if not has else ("select a zone first" if z is None else "load a scan that covers the zone"))
         set_enabled(self.load_all_btn, has and bool(ses.stacks_of()), NO_PROJECT if not has else "the holder has no complete stack")
         set_enabled(self.propose_btn, has and h is not None, NO_PROJECT)
         set_enabled(self.stitch_btn, len(loaded) >= 2,
                     NO_PROJECT if not has else "load at least two stacks of the holder first (Load all)")
+        set_enabled(self.load_poly_btn, has and h is not None, NO_PROJECT)
+        one_poly = z is not None and len(z.polys) == 1 and not (z.rects or z.paint or z.erects or z.erase)
+        set_enabled(self.save_poly_btn, one_poly,
+                    NO_PROJECT if not has else ("select a zone first" if z is None else
+                                                "John Bussey's file holds one polygon: the zone must be exactly one polygon"))
+        set_enabled(self.rules_btn, has, NO_PROJECT)
+        k, _m, _sd = self.region_count()
+        set_enabled(self.add_check_btn, k > 0,
+                    NO_PROJECT if not has else ("pick a scan in step 1" if _sd is None else
+                                                "nothing selected: draw over the stack footprint"))
         self.scans_card.set_title(f"Scans of holder {h.name}" if h else "Scans of the holder")
         self.empty_state.set_shown(not has)
         hz = ses.holder_zones(create=False) if has else None
         self.zone_state.set_shown(has and h is not None and not (hz and hz.zones))
+        self._caption()
+        self._refresh_easy()
 
     def _new_zone(self) -> None:
         if self.session.new_zone() is None:
             self.status_label.setText(NO_PROJECT)
+
+    def _project_changed(self, project) -> None:
+        xw.register_project(project)
+        self._choices.clear()
+        self._window_failed.clear()
+        self.update_actions()
+
+    def current_stack(self):
+        return self.session.stack_loaded(self.session.current_stack) if self.session.current_stack else None
+
+    def _attach(self, sd) -> None:
+        """Tie a loaded stack to its raw folders (the XRF windows read them)."""
+        if sd is None or self.session.project is None or str(sd.id).startswith("stitched_"):
+            return
+        if getattr(sd, "_xrf_source", None) is None:
+            scan = self.session.scan_of(sd.id)
+            if scan is not None:
+                xw.attach(sd, scan, self.session.project.root)
 
     # ------------------------------------------------------------------ holder / scans
     def _holder_changed(self, key: str) -> None:
@@ -448,6 +737,8 @@ class ReducePerspective(QWidget):
     def _all_loaded(self, sids) -> None:
         n = sum(1 for s in sids if self.session.stack_loaded(s) is not None)
         self.status_label.setText(f"{n} of {plural(len(sids), 'scan')} read")
+        for s in sids:
+            self._attach(self.session.stack_loaded(s))
         self.session.touch()
         cur = self.scan_list.currentItem()
         if cur is not None and self.session.current_stack is None:
@@ -457,12 +748,14 @@ class ReducePerspective(QWidget):
 
     def _loaded(self, sid: str) -> None:
         self.status_label.setText("")
+        self._attach(self.session.stack_loaded(sid))
         self.session.touch()                      # memberships for the newly loaded stack
         cur = self.scan_list.currentItem()
         if cur is not None and cur.data(Qt.UserRole) == sid:        # still the scan the user wants to see
             self.session.select_stack(sid)
 
     def _stack_selected(self, sd) -> None:
+        self._attach(sd)
         self.map_line.blockSignals(True)
         self.map_energy.blockSignals(True)
         self.map_line.clear()
@@ -470,8 +763,12 @@ class ReducePerspective(QWidget):
             self.map_line.addItems(sd.labels)
             self.map_line.setCurrentText(sd.main)
             self.map_energy.set_energies(sd.E)
+            self.map.set_points(sd.x, sd.y, sd.pitch)
+        else:
+            self.map.set_points(None, None, None)
         self.map_line.blockSignals(False)
         self.map_energy.blockSignals(False)
+        self._show_window_step()
         self.redraw_map()
         if sd is not None:
             self.map.autorange()
@@ -479,17 +776,177 @@ class ReducePerspective(QWidget):
         self.update_preview()
         self.update_actions()
 
+    # ------------------------------------------------------------------ step 2: the XRF window
+    def _edge_key(self, scan_or_sd) -> str:
+        return pretty_edge(getattr(scan_or_sd, "edge", None))
+
+    def current_choice(self) -> dict | None:
+        """The window shown in step 2: the current zone's settings for the current stack, else the choice remembered
+        for the holder and edge, else None (the stack's main line)."""
+        sd = self.current_stack()
+        if sd is None:
+            return None
+        z = self.session.zone()
+        st = z.settings.get(sd.id) if z is not None else None
+        if st is not None:
+            return {"line": st.line or sd.main, "roi": st.roi}
+        return self._choices.get((self.session.current_holder or "", self._edge_key(sd)))
+
+    def _show_window_step(self) -> None:
+        sd = self.current_stack()
+        scan = self.session.scan_of(sd.id) if sd is not None else None
+        self.window_card.set_stack(sd, scan, self.current_choice())
+        self._sync_map_line()
+
+    def _show_choice(self) -> None:
+        """The step-2 card follows the selected zone's window on the current stack (nothing is written)."""
+        if self.current_stack() is not None:
+            self.window_card.show_choice(self.current_choice())
+            self._sync_map_line()
+
+    def _sync_map_line(self) -> None:
+        """The map follows the step-2 window: its fixed line, or the 'XRF window' entry for custom windows."""
+        sd = self.current_stack()
+        if sd is None:
+            return
+        ch = self.current_choice() or {"line": sd.main, "roi": None}
+        self.map_line.blockSignals(True)
+        i = self.map_line.findText(xw.WINDOW_LABEL)
+        if ch.get("roi"):
+            if i < 0:
+                self.map_line.addItem(xw.WINDOW_LABEL)
+            self.map_line.setCurrentText(xw.WINDOW_LABEL)
+        else:
+            if i >= 0:
+                self.map_line.removeItem(i)
+            if ch.get("line") in sd.labels:
+                self.map_line.setCurrentText(ch["line"])
+        self.map_line.blockSignals(False)
+
+    def _window_committed(self, choice: dict) -> None:
+        """A window chosen in step 2: remembered for the holder and edge (new zones take it), and written into the
+        current zone's scans of that edge in one edit."""
+        sd = self.current_stack()
+        if sd is None:
+            return
+        edge = self._edge_key(sd)
+        self._choices[(self.session.current_holder or "", edge)] = dict(choice)
+        z = self.session.zone()
+        if z is not None:
+            targets = []
+            for sid, st in z.settings.items():
+                other = self.session.stack_loaded(sid) or self.session.scan_of(sid)
+                if sid == sd.id or (other is not None and self._edge_key(other) == edge):
+                    if st.line != choice["line"] or not xw.same(st.roi, choice["roi"]):
+                        targets.append(st)
+            if targets:
+                with self.session.edit(f"set the XRF window of zone {z.id}"):
+                    for st in targets:
+                        st.line, st.roi = choice["line"], (dict(choice["roi"]) if choice["roi"] else None)
+                        st.pinned = list(st.pinned) + [p for p in ("line", "roi") if p not in st.pinned]
+                self.status_label.setText(f"XRF window {self._window_words(choice)} set for "
+                                          f"{plural(len(targets), 'scan')} of zone {z.id}")
+            else:
+                self.status_label.setText(f"XRF window {self._window_words(choice)}")
+        else:
+            self.status_label.setText(f"XRF window {self._window_words(choice)}: new samples of this holder take it")
+        self._sync_map_line()
+        self.redraw_map()
+        self.update_preview()
+        self._refresh_easy()
+
+    @staticmethod
+    def _window_words(choice: dict) -> str:
+        return f"{choice['line']} · {xw.describe(choice['roi'])}" if choice.get("roi") else f"{choice['line']} (fixed bins)"
+
+    def _ensure_windows(self, sd, roi) -> bool:
+        """True when the window counts of the stack are ready; otherwise a job reads them and redraws when done."""
+        if not roi or xw.stack_window_ready(sd, roi):
+            return True
+        key = f"windows:{sd.id}:{xw.key(roi)}"
+        if key in self._window_failed:
+            return True                                 # read once and failed: zone_sums falls back with a note
+        jobs.of(self).submit(key, lambda cb, s=sd, w=dict(roi): xw.stack_window_counts(s, w, cb),
+                             on_done=lambda _wc: (self.redraw_map(), self.update_preview()),
+                             on_failed=lambda t, k=key: self._windows_failed(k, t),
+                             label=f"reading the XRF windows of {sd.name}", taskbar=self.taskbar)
+        return False
+
+    def _windows_failed(self, key: str, trace: str) -> None:
+        self._window_failed.add(key)
+        self.status_label.setText("could not read the windows: " + trace.strip().splitlines()[-1])
+        self.redraw_map()
+        self.update_preview()
+
+    def remember_windows(self, choice: dict) -> None:
+        """'Remember these windows for <edge>': a saved default rule {edge -> line, roi} (new scans inherit it)."""
+        sd = self.current_stack()
+        if sd is None or self.session.project is None:
+            return
+        edge = self._edge_key(sd)
+        name = f"XRF window for {edge}"
+        rules = rl.rules_from_json(self.session.zones.rules)
+        rule = next((r for r in rules if r.name == name), None)
+        if rule is None:
+            rule = rl.Rule(scope={"kind": "project"}, scan_filter={"edge": edge}, name=name)
+            rules.append(rule)
+        rule.patch = {"line": choice["line"], "roi": choice["roi"]}
+        rule.enabled = True
+        with self.session.edit(f"remember the XRF window for {edge}"):
+            self.session.zones.rules = rl.rules_to_json(rules)
+        self.status_label.setText(f"new {edge} scans will use {self._window_words(choice)} (Rules…)")
+
+    # ------------------------------------------------------------------ settings defaults (new zone x scan)
+    def _zone_being_attached(self, sid: str):
+        """The zone whose settings for sid are being created (members set, settings not yet): rules scoped to groups
+        or zones need it. None when it cannot be told."""
+        cands = []
+        for hk, hz in self.session.zones.holders.items():
+            for z in hz.zones:
+                if sid in z.members and sid not in z.settings:
+                    cands.append((hk, z))
+        return cands[0] if len(cands) == 1 else (None, None)
+
+    def _settings_default(self, scan, st: ScanSettings) -> None:
+        """Every new zone x scan settings: the saved rules (ZonesFile.rules) in order, then the step-2 window chosen
+        for the holder and edge in this session."""
+        sid = f"{scan.day}_{scan.name}"
+        holder = self.session.holder_of_stack(sid)
+        saved = rl.rules_from_json(self.session.zones.rules)
+        if saved:
+            hk, z = self._zone_being_attached(sid)
+            rl.apply_to_new(saved, hk or holder, z, scan, st, flags_of=self.session.flags_of)
+        ch = self._choices.get((holder or "", self._edge_key(scan)))
+        if ch is not None:
+            st.line, st.roi = ch["line"], (dict(ch["roi"]) if ch["roi"] else None)
+
     # ------------------------------------------------------------------ map
     def redraw_map(self) -> None:
-        sd = self.session.stack_loaded(self.session.current_stack) if self.session.current_stack else None
+        sd = self.current_stack()
         self.map.clear_overlays()
         if sd is None:
             self.map.set_grid(None)
+            self._caption()
             return
         label = self.map_line.currentText() or sd.main
         det = None if self.map_sdd.currentIndex() == 0 else self.map_sdd.currentIndex() - 1
-        vals = sd.map_values(label, det=det, mode=self.map_mode.currentData(), energy_index=self.map_energy.value(),
-                             per_i0=self.map_i0.isChecked())
+        view, note = sd, ""
+        if label == xw.WINDOW_LABEL:
+            ch = self.current_choice() or {}
+            roi = ch.get("roi")
+            wc = None
+            if roi and self._ensure_windows(sd, roi):
+                try:
+                    wc = xw.stack_window_counts(sd, roi)
+                except (OSError, ValueError) as err:
+                    note = f" · windows not read ({err})"
+            if wc is not None:
+                view = xw.window_view(sd, wc)
+            else:
+                label = sd.main
+                note = note or " · reading the windows …"
+        vals = view.map_values(label, det=det, mode=self.map_mode.currentData(), energy_index=self.map_energy.value(),
+                               per_i0=self.map_i0.isChecked())
         if self.map_log.isChecked():
             with np.errstate(all="ignore"):
                 vals = np.log10(np.maximum(vals, 0) + 1.0)
@@ -504,10 +961,32 @@ class ReducePerspective(QWidget):
                 self.map.draw_pixels(sd.x[pix], sd.y[pix], sd.pitch, curve(i))
         self.map_hint.setText(f"{sd.name}: {plural(sd.n_energies, 'energy')} x {sd.n_pix} px, pitch {sd.pitch[0]:.3f} x "
                               f"{sd.pitch[1]:.3f} mm, main line {sd.main}"
-                              + (f", edge {sd.edge_text} {sd.edge_ev:.1f} eV" if sd.edge_ev else "") + f" · {sd.source}")
+                              + (f", edge {sd.edge_text} {sd.edge_ev:.1f} eV" if sd.edge_ev else "") + f" · {sd.source}" + note)
+        self._caption()
+
+    def region_count(self) -> tuple[int, int, object]:
+        """(K members of the current zone on the current stack, M points of the stack, the stack)."""
+        sd = self.current_stack()
+        z = self.session.zone() if self.session.project is not None else None
+        if sd is None:
+            return 0, 0, None
+        k = int(members(z, sd.x, sd.y, sd.pitch).size) if z is not None else 0
+        return k, sd.n_pix, sd
+
+    def _caption(self) -> None:
+        k, m, sd = self.region_count()
+        z = self.session.zone() if self.session.project is not None else None
+        if sd is None:
+            text = "Region: pick a scan in step 1" if self.session.project is not None else ""
+        elif k == 0:
+            text = "Region: nothing selected: draw over the stack footprint"
+        else:
+            text = f"Region: {shape_text(z)} · {k} of {m} points of {sd.name}"
+        self.region_caption.setText(text)
+        self.window_card.set_region(members(z, sd.x, sd.y, sd.pitch) if (sd is not None and z is not None) else None)
 
     def _hover(self, x: float, y: float) -> None:
-        sd = self.session.stack_loaded(self.session.current_stack) if self.session.current_stack else None
+        sd = self.current_stack()
         txt = f"x {x:.2f} mm, y {y:.2f} mm"
         if sd is not None:
             px, py = sd.pitch
@@ -525,7 +1004,7 @@ class ReducePerspective(QWidget):
         if self.session.holder() is None:
             self.status_label.setText(NO_PROJECT)
             return
-        if tool == "rect+":
+        if tool in ("rect+", "lasso+", "polygon+"):
             new = self._makes_new_zone(True)
             z = self.session.zone()
             with self.session.edit("add a rectangle to a new zone" if new else f"add a rectangle to zone {z.id}"):
@@ -541,8 +1020,23 @@ class ReducePerspective(QWidget):
             with self.session.edit(f"remove a rectangle from zone {z.id}"):
                 z.erects.append([x0, x1, y0, y1])
 
+    def _polygon(self, pts) -> None:
+        """A lasso or polygon closed on the map: added to the current zone (a new zone when none is selected)."""
+        if self.session.holder() is None:
+            self.status_label.setText(NO_PROJECT)
+            return
+        if len(pts) < 3:
+            return
+        new = self._makes_new_zone(True)
+        z = self.session.zone()
+        with self.session.edit("add a polygon to a new zone" if new else f"add a polygon to zone {z.id}"):
+            if new:
+                z = self.session.new_zone()
+            if z is not None:
+                z.polys.append([[float(p[0]), float(p[1])] for p in pts])
+
     def _brush(self, x: float, y: float, add: bool) -> None:
-        sd = self.session.stack_loaded(self.session.current_stack) if self.session.current_stack else None
+        sd = self.current_stack()
         if sd is None:
             return
         new = self._makes_new_zone(add)
@@ -568,6 +1062,208 @@ class ReducePerspective(QWidget):
                         key.append([sx, sy, px, py])
                     if add:
                         z.erase = [s for s in z.erase if not (abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6)]
+
+    def _zone_clicked(self, zid: int) -> None:
+        if zid != self.session.current_zone:
+            self.session.select_zone(zid)
+
+    def clear_zone(self) -> None:
+        """Clear the current zone's drawing (rectangles, polygons, painted and erased pixels) in one edit."""
+        z = self.session.zone()
+        if z is None:
+            return
+        with self.session.edit(f"clear zone {z.id}"):
+            z.rects, z.erects, z.paint, z.erase, z.polys = [], [], [], [], []
+        self.status_label.setText(f"zone {z.id} cleared: draw its region again")
+
+    # ------------------------------------------------------------------ right-click menus
+    def zone_menu(self, zid: int) -> QMenu:
+        """The menu of a zone on the map: Rename, Set group, Duplicate, Delete, Send to Compare, Copy geometry, Zoom."""
+        m = QMenu(self)
+        z = self.session.zone(zid)
+        if z is None:
+            return m
+        m.addAction("Rename…", lambda: self.rename_zone(zid))
+        if is_advanced():                                # group: an Advanced field (Easy never writes it)
+            hz = self.session.holder_zones(create=False)
+            groups = sorted({r.group for r in self.session.sheet_rows if r.group} |
+                            {zz.group for zz in (hz.zones if hz else []) if zz.group})
+            sub = m.addMenu("Set group")
+            for g in groups + [""]:
+                a = sub.addAction(g or "(none)")
+                a.setCheckable(True)
+                a.setChecked((z.group or "") == g)
+                a.triggered.connect(lambda _c=False, gg=g: self.set_zone_group(zid, gg))
+        m.addAction("Duplicate", lambda: self.duplicate_zone(zid))
+        m.addAction("Delete", lambda: self.session.delete_zone(zid))
+        if is_advanced():
+            sa = m.addAction("Send to Compare", lambda: (self.session.select_zone(zid), self.send_to_compare()))
+            sa.setEnabled(self.library is not None and bool(z.settings))
+        m.addSeparator()
+        m.addAction("Copy geometry", lambda: self.copy_geometry(zid))
+        za = m.addAction("Zoom to zone", lambda: self.zoom_to_zone(zid))
+        za.setEnabled(zone_bbox(z) is not None)
+        return m
+
+    def map_menu(self, x: float, y: float) -> QMenu:
+        """The menu of the empty map: New zone here, Paste zone (centred here), Fit view."""
+        m = QMenu(self)
+        a = m.addAction("New zone here", lambda: self.new_zone_at(x, y))
+        a.setEnabled(self.session.holder() is not None)
+        p = m.addAction("Paste zone", lambda: self.paste_geometry(x, y))
+        p.setEnabled(self.session.holder() is not None and self._clipboard_geometry() is not None)
+        m.addAction("Fit view", self.map.autorange)
+        return m
+
+    def _context(self, x: float, y: float, zid) -> None:
+        menu = self.zone_menu(zid) if zid is not None else self.map_menu(x, y)
+        self.last_menu = popup(menu, QCursor.pos())
+
+    def rename_zone(self, zid: int, label: str | None = None) -> None:
+        z = self.session.zone(zid)
+        if z is None:
+            return
+        if label is None:
+            label, ok = QInputDialog.getText(self, "Rename the sample", "label", text=z.label)
+            if not ok:
+                return
+        label = (label or "").strip()
+        if not label or label == z.label:
+            return
+        with self.session.edit(f"rename zone {zid}"):
+            z.label = label
+        if zid == self.session.current_zone:
+            self._fill_zone_card(z)
+
+    def set_zone_group(self, zid: int, group: str) -> None:
+        z = self.session.zone(zid)
+        if z is None or (z.group or "") == group:
+            return
+        with self.session.edit(f"edit zone {zid}"):
+            z.group = group
+        if zid == self.session.current_zone:
+            self._fill_zone_card(z)
+
+    def duplicate_zone(self, zid: int):
+        """A copy of the zone (drawing and settings) as a new zone, selected."""
+        z = self.session.zone(zid)
+        hz = self.session.holder_zones(create=False)
+        if z is None or hz is None:
+            return None
+        import copy as _copy
+        nid = max((zz.id for zz in hz.zones), default=0) + 1
+        with self.session.edit(f"duplicate zone {zid}"):
+            dup = Zone(id=nid, label=f"{z.label} (copy)", group=z.group, comment=z.comment)
+            set_geometry(dup, geometry(z))
+            dup.settings = {sid: _copy.deepcopy(st) for sid, st in z.settings.items()}
+            hz.zones.append(dup)
+            self.session.current_zone = nid
+        self.session.select_zone(nid)
+        return dup
+
+    def copy_geometry(self, zid: int) -> str:
+        z = self.session.zone(zid)
+        if z is None:
+            return ""
+        text = json.dumps({GEOMETRY_MARK: 1, "label": z.label, **geometry(z)})
+        QApplication.clipboard().setText(text)
+        self.status_label.setText(f"geometry of zone {zid} copied (right-click the map: Paste zone)")
+        return text
+
+    def _clipboard_geometry(self) -> dict | None:
+        try:
+            d = json.loads(QApplication.clipboard().text() or "")
+        except (ValueError, TypeError):
+            return None
+        return d if isinstance(d, dict) and d.get(GEOMETRY_MARK) else None
+
+    def paste_geometry(self, x: float | None = None, y: float | None = None):
+        """A new zone with the copied geometry, centred on (x, y) when given (its own place otherwise)."""
+        geo = self._clipboard_geometry()
+        if geo is None or self.session.holder() is None:
+            return None
+        tmp = Zone(id=0, label="")
+        set_geometry(tmp, geo)
+        bb = zone_bbox(tmp)
+        dx = dy = 0.0
+        if bb is not None and x is not None and y is not None:
+            dx, dy = x - (bb[0] + bb[1]) / 2, y - (bb[2] + bb[3]) / 2
+        with self.session.edit("paste a zone"):
+            z = self.session.new_zone(f"{geo.get('label', 'zone')} (pasted)".strip())
+            if z is not None:
+                set_geometry(z, geo, dx, dy)
+        return z
+
+    def new_zone_at(self, x: float, y: float):
+        """A new zone holding the pixel under (x, y)."""
+        with self.session.edit("new zone here"):
+            z = self.session.new_zone()
+            if z is not None:
+                z.rects.append([round(x, 3), round(x, 3), round(y, 3), round(y, 3)])
+        return z
+
+    def zoom_to_zone(self, zid: int) -> None:
+        z = self.session.zone(zid)
+        bb = zone_bbox(z) if z is not None else None
+        if bb is not None:
+            self.map.zoom_to(*bb)
+
+    # ------------------------------------------------------------------ John Bussey's polygon files
+    def load_polygon(self, path=None):
+        """'Load polygon…': John Bussey's _polygon_roi.json (>= 3 [x, y] vertices, mm) into a new zone."""
+        from pathlib import Path
+        from aurora.app.widgets import default_dir, remember_dir
+        if self.session.holder() is None:
+            self.status_label.setText(NO_PROJECT)
+            return None
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Load a polygon ROI (John Bussey's GUI)",
+                                                  default_dir("zones", self.session),
+                                                  "Polygon ROI (*_polygon_roi.json *.json);;All files (*)")
+            if not path:
+                return None
+            remember_dir("zones", path)
+        p = Path(path)
+        try:
+            pts = json.loads(p.read_text(encoding="utf-8"))
+            poly = [[float(v[0]), float(v[1])] for v in pts]
+            if len(poly) < 3:
+                raise ValueError("fewer than 3 vertices")
+        except (OSError, ValueError, TypeError, IndexError, KeyError) as err:
+            self.status_label.setText(f"{p.name} is not a polygon ROI ({err})")
+            return None
+        label = p.stem[:-len("_polygon_roi")] if p.stem.endswith("_polygon_roi") else p.stem
+        with self.session.edit(f"load the polygon {p.name}"):
+            z = self.session.new_zone(label)
+            if z is not None:
+                z.polys.append(poly)
+        self.status_label.setText(f"{p.name}: a polygon with {len(poly)} vertices as zone {z.id if z else ''}")
+        return z
+
+    def save_polygon(self, path=None):
+        """'Save polygon…': the current zone (one polygon) as John Bussey's _polygon_roi.json."""
+        from pathlib import Path
+        from aurora.app.widgets import default_path, guarded_write, notify_saved, remember_dir
+        from aurora.core.io.textio import write_json_atomic
+        z = self.session.zone()
+        if z is None or len(z.polys) != 1 or z.rects or z.paint or z.erects or z.erase:
+            self.status_label.setText("John Bussey's file holds one polygon: the zone must be exactly one polygon")
+            return None
+        if path is None:
+            name = "".join(c if c.isalnum() or c in "-_" else "_" for c in z.label) or f"zone{z.id}"
+            path, _ = QFileDialog.getSaveFileName(self, "Save the polygon ROI (John Bussey's GUI)",
+                                                  default_path("zones", f"{name}_polygon_roi.json", self.session),
+                                                  "Polygon ROI (*_polygon_roi.json)")
+            if not path:
+                return None
+            remember_dir("zones", path)
+        p = Path(path)
+        with guarded_write(self, p.name) as g:
+            write_json_atomic(p, [[float(a), float(b)] for a, b in z.polys[0]], indent=2)
+        if g.ok:
+            notify_saved(self.status_label, [p])
+            return p
+        return None
 
     # ------------------------------------------------------------------ zones
     def _fill_zone_list(self) -> None:
@@ -650,18 +1346,24 @@ class ReducePerspective(QWidget):
         self.status_label.setText(f"{sd.name}: {sd.n_pix} px, {plural(sd.n_energies, 'energy')} ({sd.source})")
 
     def _zones_changed(self) -> None:
-        self._fill_zone_list(); self.redraw_map()
+        self._fill_zone_list()
+        self._show_choice()
+        self.redraw_map()
         z = self.session.zone()
         have = [c.sid for c in self._cards]
         want = [sid for sid in (z.settings if z is not None else {}) if self.session.stack_loaded(sid) is not None]
         if have != want:
             self._rebuild_cards()
+        else:
+            for c in self._cards:
+                self._card_chip(c)
         self.update_preview()
         self.update_actions()
 
     def _zone_selected(self, z: Zone | None) -> None:
         self._fill_zone_list()
         self._fill_zone_card(z)
+        self._show_choice()
         self.redraw_map(); self._rebuild_cards(); self.update_preview()
         self.update_actions()
 
@@ -678,9 +1380,9 @@ class ReducePerspective(QWidget):
             self.z_info.setText("no zone selected: draw a rectangle with rect+ to create one")
         else:
             self.z_label.setEditText(z.label); self.z_group.setEditText(z.group); self.z_comment.setText(z.comment)
-            self.z_info.setText(f"zone {z.id}: {plural(len(z.rects), 'rect')}, {plural(len(z.erects), 'erase rect')}, "
-                                f"{len(z.paint)} painted px, {len(z.erase)} erased px · covered by "
-                                f"{plural(len(z.members), 'loaded scan')}")
+            self.z_info.setText(f"zone {z.id}: {plural(len(z.rects), 'rect')}, {plural(len(z.polys), 'polygon')}, "
+                                f"{plural(len(z.erects), 'erase rect')}, {len(z.paint)} painted px, {len(z.erase)} erased px "
+                                f"· covered by {plural(len(z.members), 'loaded scan')}")
         for w in (self.z_label, self.z_group, self.z_comment):
             w.blockSignals(False)
 
@@ -702,6 +1404,207 @@ class ReducePerspective(QWidget):
         with self.session.edit(f"{what} zone {z.id}"):
             z.label, z.group, z.comment = label, group, comment
 
+    # ------------------------------------------------------------------ step 4 and the Easy chip
+    def easy_settings_for(self, sid: str) -> ScanSettings | None:
+        """mode.easy_scan_settings for one zone x scan (the scan's flags; the stack's labels when loaded)."""
+        from aurora.app.mode import easy_scan_settings
+        scan = self.session.scan_of(sid)
+        if scan is None:
+            return None
+        sd = self.session.stack_loaded(sid)
+        return easy_scan_settings(scan, self.session.flags_of(scan), labels=list(sd.labels) if sd is not None else None)
+
+    def step4_text(self, sid: str | None = None) -> str:
+        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3
+        saturated, left out)': the Easy settings of the current stack, read-only."""
+        sd = self.current_stack()
+        sid = sid or (sd.id if sd is not None else None)
+        easy = self.easy_settings_for(sid) if sid else None
+        if easy is None:
+            return "pick a scan in step 1: the settings used are listed here"
+        from aurora.core.flags import saturated_dets
+        scan = self.session.scan_of(sid)
+        sat = sorted(saturated_dets(self.session.flags_of(scan)))
+        dets = "SDD1-4" + (f" ({', '.join(d.upper() for d in sat)} saturated, left out)" if sat else "")
+        i0 = "I0 mcc ch1 (Au mesh)" + (" · good-I0 mean (I0 invalid)" if easy.i0_source == "good" else "")
+        return " · ".join([i0, "TEY mcc ch4", "zone sum", f"fluorescence {NORM_LABELS.get(easy.fluo_norm, easy.fluo_norm)}",
+                           f"de-spike k = {easy.k:g}", dets])
+
+    def zone_differences(self, z: Zone | None = None) -> dict[str, list[str]]:
+        """sid -> the fields of the zone's settings that differ from the Easy defaults (empty lists left out)."""
+        z = z if z is not None else self.session.zone()
+        out = {}
+        for sid, st in (z.settings.items() if z is not None else []):
+            easy = self.easy_settings_for(sid)
+            if easy is None:
+                continue
+            d = easy_differences(st, easy)
+            if d:
+                out[sid] = d
+        return out
+
+    def _refresh_easy(self) -> None:
+        adv = is_advanced()
+        self.step4_line.setText(self.step4_text())
+        z = self.session.zone() if self.session.project is not None else None
+        diffs = self.zone_differences(z) if (z is not None and not adv) else {}
+        if diffs:
+            lines = []
+            for sid, fields in diffs.items():
+                text = differences_text(z.settings[sid], fields)
+                lines.append(f"{short_time(sid) or split_stack_id(sid)[1]}: {text}" if len(z.settings) > 1 else text)
+            tip = "\n".join(lines)
+            self.chip.setToolTip(tip)
+            self.reset_btn.setToolTip("Rewrite these fields with the Easy defaults (one undo step):\n" + tip)
+        if self.chip_box.isVisibleTo(self.zone_card) != bool(diffs):
+            self.chip_box.setVisible(bool(diffs))
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.fit_cards)
+        for c in self._cards:
+            self._card_chip(c)
+
+    def _card_chip(self, card: ScanSettingsCard) -> None:
+        if is_advanced():
+            card.chip.hide()
+            return
+        easy = self.easy_settings_for(card.sid)
+        d = easy_differences(card.s, easy) if easy is not None else []
+        card.chip.setVisible(bool(d))
+        card.chip.setToolTip(differences_text(card.s, d) if d else "")
+
+    def reset_to_easy(self) -> int:
+        """'Reset to Easy defaults': the differing fields of the current zone's settings rewritten in one edit."""
+        z = self.session.zone()
+        diffs = self.zone_differences(z)
+        if z is None or not diffs:
+            return 0
+        with self.session.edit(f"reset zone {z.id} to the Easy defaults"):
+            for sid, fields in diffs.items():
+                easy = self.easy_settings_for(sid)
+                st = z.settings[sid]
+                for f in fields:
+                    setattr(st, f, getattr(easy, f))
+                keys = {rl.ATTRS.get(f, f) for f in fields}
+                st.pinned = [p for p in st.pinned if p not in keys]
+        n = sum(len(v) for v in diffs.values())
+        self.status_label.setText(f"zone {z.id}: {plural(n, 'field')} back to the Easy defaults")
+        self._rebuild_cards()
+        self._refresh_easy()
+        return n
+
+    def add_to_check(self) -> int:
+        """'Add to Check': the zone x current stack queued for Easy Check. Settings that do not exist yet come from
+        mode.easy_scan_settings (plus the step-2 window); existing settings are kept (the chip names what differs)."""
+        from aurora.app.mode import easy_scan_settings
+        k, _m, sd = self.region_count()
+        z = self.session.zone()
+        if z is None or sd is None or k == 0:
+            self.status_label.setText("nothing selected: draw over the stack footprint")
+            return 0
+        scan = self.session.scan_of(sd.id)
+        with self.session.edit(f"add zone {z.id} to Check"):
+            if sd.id not in z.settings and scan is not None:
+                st = easy_scan_settings(scan, self.session.flags_of(scan), labels=list(sd.labels))
+                ch = self.current_choice() or self._choices.get((self.session.current_holder or "", self._edge_key(sd)))
+                if ch:
+                    st.line, st.roi = ch["line"], (dict(ch["roi"]) if ch.get("roi") else None)
+                st.n = k
+                z.settings[sd.id] = st
+        n = self.session.queue_for_check([CheckItem(self.session.current_holder, z.id, sd.id)])
+        self.status_label.setText(f"{z.label} on {short_time(sd.id) or sd.name} added to Check" if n else
+                                  f"{z.label} on {short_time(sd.id) or sd.name} is already in Check")
+        return n
+
+    # ------------------------------------------------------------------ batch settings: copy, paste, rules
+    def copy_fields(self) -> list[str]:
+        """The copy groups ticked under 'Fields that travel' (rules.COPY_GROUPS)."""
+        from aurora.app.settings import settings
+        v = settings().value(COPY_FIELDS_SETTING, None)
+        if v is None:
+            return [g for g, _w, _k, on in rl.COPY_GROUPS if on]
+        if isinstance(v, str):
+            v = [x for x in v.split(",") if x]
+        return [g for g in v if g in {c[0] for c in rl.COPY_GROUPS}]
+
+    def set_copy_field(self, group: str, on: bool) -> None:
+        from aurora.app.settings import settings
+        cur = set(self.copy_fields())
+        cur = (cur | {group}) if on else (cur - {group})
+        s = settings()
+        s.setValue(COPY_FIELDS_SETTING, ",".join(g for g, _w, _k, _o in rl.COPY_GROUPS if g in cur))
+        s.sync()
+
+    def copy_keys(self) -> list[str]:
+        on = set(self.copy_fields())
+        return [k for g, _w, keys, _d in rl.COPY_GROUPS if g in on for k in keys]
+
+    def current_card(self) -> ScanSettingsCard | None:
+        """The card with the keyboard focus, else the card of the current stack, else the first card."""
+        fw = QApplication.focusWidget()
+        for c in self._cards:
+            if fw is not None and (fw is c or c.isAncestorOf(fw)):
+                return c
+        return next((c for c in self._cards if c.sid == self.session.current_stack), self._cards[0] if self._cards else None)
+
+    def _scan_map(self) -> dict:
+        proj = self.session.project
+        return {f"{s.day}_{s.name}": s for s in proj.scans} if proj is not None else {}
+
+    def copy_card_to(self, card: ScanSettingsCard, target: str) -> list:
+        """Copy one card to many: 'zone' (all scans of this zone), 'scan' (this scan in every zone of the holder),
+        'edge' (every scan with the same edge in every zone of the holder). The ticked fields travel; include and n
+        never do. One edit; the status line counts the cards and zones."""
+        zid = card.zone_id if card.zone_id is not None else self.session.current_zone
+        holder = self.session.current_holder
+        targets = rl.copy_targets(self.session.zones, holder, zid, card.sid, target, self._scan_map())
+        if not targets:
+            self.status_label.setText(f"nothing to copy to: no other card for '{rl.COPY_TARGETS[target]}'")
+            return []
+        what = short_time(card.sid) or card.scan.name
+        keys = self.copy_keys()
+        smap = self._scan_map()
+        edge = getattr(smap.get(card.sid) or card.scan, "edge", None)
+        same = [t for t in targets if getattr(smap.get(t[2]), "edge", None) == edge]
+        other = [t for t in targets if t not in same]
+        with self.session.edit(f"copy the settings of {what} in zone {zid} to {rl.COPY_TARGETS[target]}"):
+            changes = rl.copy_settings(card.s, same, keys)
+            # the line and its windows belong to the edge: never copied to a scan of another edge
+            changes += rl.copy_settings(card.s, other, [k for k in keys if k not in ("line", "roi")])
+        msg = (f"settings copied to {rl.summary(changes)}" if changes else
+               f"the settings were already the same in {plural(len(targets), 'card')}")
+        if other and any(k in keys for k in ("line", "roi")):
+            msg += f" (line and windows kept on {plural(len(other), 'card')} of another edge)"
+        self.status_label.setText(msg)
+        self._rebuild_cards()
+        return changes
+
+    def copy_card(self, card: ScanSettingsCard | None) -> None:
+        """Ctrl+Shift+C: remember the card's ticked fields for a paste."""
+        if card is None:
+            return
+        import copy as _copy
+        self.copied = (_copy.deepcopy(card.s), self.copy_keys(), short_time(card.sid) or card.scan.name)
+        self.status_label.setText(f"settings of {self.copied[2]} copied (Ctrl+Shift+V pastes them into a card)")
+
+    def paste_card(self, card: ScanSettingsCard | None) -> list:
+        """Ctrl+Shift+V: the copied fields into this card, in one edit."""
+        if card is None or self.copied is None:
+            return []
+        src, keys, name = self.copied
+        zid = card.zone_id if card.zone_id is not None else self.session.current_zone
+        with self.session.edit(f"paste settings into {short_time(card.sid) or card.scan.name} of zone {zid}"):
+            changes = rl.copy_settings(src, [(self.session.current_holder, self.session.zone(zid), card.sid, card.s)], keys)
+        self.status_label.setText(f"settings of {name} pasted ({plural(len(changes), 'field')} changed)")
+        self._rebuild_cards()
+        return changes
+
+    def open_rules(self):
+        """Rules…: the ordered rule list, an editor and the live table of what would change."""
+        from aurora.app.rules_dialog import RulesDialog
+        d = RulesDialog(self.session, self)
+        d.exec()
+        return d
+
     # ------------------------------------------------------------------ per-scan settings
     def _clear_cards(self) -> None:
         for c in self._cards + ([self._placeholder] if self._placeholder else []):
@@ -721,8 +1624,11 @@ class ReducePerspective(QWidget):
                 continue
             scan = scans.get(sid) or _VirtualScan(sd)
             card = ScanSettingsCard(self.session, sid, scan, st, sd.labels, zone_id=z.id)
+            card.owner = self
+            card.copy_requested.connect(self.copy_card_to)
             self.cards_lay.insertWidget(self.cards_lay.count() - 1, card)
             self._cards.append(card)
+            self._card_chip(card)
         if not self._cards:
             lab = QLabel("no loaded scan covers this zone (pick the scans in the list to load them)")
             lab.setObjectName("muted")
@@ -736,9 +1642,13 @@ class ReducePerspective(QWidget):
         if z is None or self.library is None:
             return 0
         n = 0
+        waiting = 0
         for sid, st in z.settings.items():
             sd = self.session.stack_loaded(sid)
             if sd is None or not st.include:
+                continue
+            if st.roi and not self._ensure_windows(sd, st.roi):
+                waiting += 1
                 continue
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
@@ -747,7 +1657,10 @@ class ReducePerspective(QWidget):
                 continue
             label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {short_time(sid) or sd.name}"
             n += len(self.library.add_traces(label, t.E, t.sum, t.tey if st.tey else None, source=f"zone {z.id} of {sid}"))
-        self.status_label.setText(f"{plural(n, 'trace')} sent to Compare" if n else "nothing to send: load the zone's scans first")
+        msg = f"{plural(n, 'trace')} sent to Compare" if n else "nothing to send: load the zone's scans first"
+        if waiting:
+            msg += f" ({plural(waiting, 'scan')} still reading its XRF windows: send again in a moment)"
+        self.status_label.setText(msg)
         return n
 
     # ------------------------------------------------------------------ preview
@@ -769,6 +1682,8 @@ class ReducePerspective(QWidget):
             if sd is None:
                 continue
             st = z.settings[sid]
+            if st.roi and not self._ensure_windows(sd, st.roi):
+                continue                                # drawn when the windows are read
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
             t = zone_traces(sd, pix, st, good)
