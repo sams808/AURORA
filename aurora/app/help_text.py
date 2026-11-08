@@ -19,6 +19,26 @@ HELP: dict[str, tuple[str, str, str]] = {
                   "Advanced mode: every option. Ctrl+Shift+A switches.", "Easy or Advanced mode", "1-the-window"),
     "main.holder": ("The holder on screen. Choose another one here, or with Ctrl+PgUp / Ctrl+PgDown.", "holder",
                     "1-the-window"),
+    "main.save_state": ("Whether the zones are saved: 'unsaved' while a change waits for the autosave (under a "
+                        "second), 'saved HH:MM' once it is written, 'read-only' when edits here cannot be saved.",
+                        "save state", "1-the-window"),
+    "main.undo": ("Undo the last zone, settings or good-I0 edit (Ctrl+Z). A brush stroke, or a run of edits of the "
+                  "same kind, undoes at once.", "Undo", "1-the-window"),
+    "main.redo": ("Redo the edit just undone (Ctrl+Y or Ctrl+Shift+Z).", "Redo", "1-the-window"),
+    "main.history": ("Every edit since the project was opened (the last 100); click a line to go back to that point.",
+                     "Edit history", "1-the-window"),
+    "main.history_list": ("The edits, oldest first; the highlighted line is the current state.", "edit history",
+                          "1-the-window"),
+    "main.restore": ("Put back the zones of a backup: one every 10 minutes while you edit, one before every import, "
+                     "proposal, rule and restore, and the previous save (session.json.bak).",
+                     "Restore zones from a backup", "12-files-aurora-reads-and-writes"),
+    "restore.table": ("The backups of this project, newest first, with the holders and zones each holds.", "backups",
+                      "12-files-aurora-reads-and-writes"),
+    "import.table": ("The holders of the file that already have other zones in this session.", "holders to import",
+                     "3-survey"),
+    "import.policy": ("Merge: add the file's zones with new numbers, skipping those with the same rectangles, painted "
+                      "pixels and polygons as a zone here. Replace: the file's zones replace this holder's. Skip: keep "
+                      "this holder as it is.", "what to do with this holder", "3-survey"),
     # ------------------------------------------------------------------ home
     "home.open": ("Open a beamtime folder (the one that holds raw/), a day or scan folder, or one .h5 file (Ctrl+O).",
                   "Open project", "2-home"),
