@@ -106,8 +106,9 @@ def _destroy_leftover_windows(_isolated_settings):
     app = QApplication.instance()
     if app is None:
         return
+    from aurora.app.nav import top_level_widgets      # the GC is paused while the wrappers are made (3.11 segfault)
     doomed = []
-    for w in list(QApplication.topLevelWidgets()):
+    for w in top_level_widgets():
         if not shiboken6.isValid(w) or w.parentWidget() is not None or not isinstance(w, QMainWindow):
             continue
         threads = [t for t in w.findChildren(QThread) if t.isRunning()]

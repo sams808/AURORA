@@ -659,7 +659,8 @@ def shutdown_app(app: QApplication, *windows: QWidget) -> None:
     for w in windows:
         if shiboken6.isValid(w):
             w.close()
-    for w in list(QApplication.topLevelWidgets()):
+    from aurora.app.nav import top_level_widgets
+    for w in top_level_widgets():
         if shiboken6.isValid(w):
             w.close()
             w.deleteLater()

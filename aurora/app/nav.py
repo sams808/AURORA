@@ -6,11 +6,28 @@ The main window is found from the widget (also through a dialog's parent), so no
 """
 from __future__ import annotations
 
+import gc
 import logging
 
 from PySide6.QtWidgets import QApplication, QWidget
 
 log = logging.getLogger("aurora.nav")
+
+
+def top_level_widgets() -> list[QWidget]:
+    """QApplication.topLevelWidgets() with the garbage collector paused while the Python wrappers are made: a
+    collection triggered by that allocation can delete a parentless, Python-owned widget (a dropped dialog, a plot
+    menu) that the C++ list still points to, and the next wrapper then reads freed memory (segfault seen on Python
+    3.11 CI). The returned list holds references, so nothing in it is collected afterwards."""
+    if QApplication.instance() is None:
+        return []
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        return list(QApplication.topLevelWidgets())
+    finally:
+        if enabled:
+            gc.enable()
 
 
 def window_of(widget: QWidget | None):
@@ -21,8 +38,7 @@ def window_of(widget: QWidget | None):
         if hasattr(top, "navigate"):
             return top
         w = top.parentWidget()
-    app = QApplication.instance()
-    wins = [t for t in (app.topLevelWidgets() if app else []) if hasattr(t, "navigate")]
+    wins = [t for t in top_level_widgets() if hasattr(t, "navigate")]
     return wins[0] if len(wins) == 1 else None
 
 
