@@ -54,14 +54,17 @@ def _write_john_csv(path: Path, label: str, E, y) -> None:
                     "sdd3_roi_hi,sdd4,sdd4_roi_lo,sdd4_roi_hi,I0,TEY,sdd_total,sdd_mean,bad_point\n" + rows, encoding="utf-8")
 
 
-def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui: bool = True) -> int:
+def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui: bool = True,
+        native: bool = False) -> int:
+    """native=True runs the GUI checks on the platform's own windowing system (Cocoa, Windows, xcb/wayland) and
+    never falls back to offscreen; the JSON records the platform Qt actually used."""
     from aurora import __version__
     base = Path(tempfile.mkdtemp(prefix="aurora selftest é "))
     os.environ["AURORA_SETTINGS_DIR"] = str(base / "settings")
     os.environ["AURORA_LOG_DIR"] = str(base / "logs")
     if qpa:
         os.environ["QT_QPA_PLATFORM"] = qpa
-    elif "QT_QPA_PLATFORM" not in os.environ and gui:
+    elif not native and "QT_QPA_PLATFORM" not in os.environ and gui:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     r = _Runner()
     print(f"AURORA {__version__} self-test in {base}", flush=True)
@@ -231,7 +234,8 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
     summary = {
         "app": "AURORA", "version": __version__, "ok": r.ok, "frozen": bool(getattr(sys, "frozen", False)),
         "python": sys.version.split()[0], "platform": platform.platform(), "machine": platform.machine(),
-        "qt_platform": os.environ.get("QT_QPA_PLATFORM", ""), "folder": str(base), "checks": r.results,
+        "qt_platform": ctx.get("qt_platform") or os.environ.get("QT_QPA_PLATFORM", ""), "native": native,
+        "folder": str(base), "checks": r.results,
     }
     try:
         import PySide6
@@ -276,7 +280,8 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         win.show()
         state["app"].processEvents()
         from PySide6.QtGui import QGuiApplication
-        return f"Qt platform {QGuiApplication.platformName()}, window {win.width()}x{win.height()}"
+        ctx["qt_platform"] = QGuiApplication.platformName()
+        return f"Qt platform {ctx['qt_platform']}, window {win.width()}x{win.height()}"
     if r.check("application window", app) is None and "win" not in state:
         return
     app_, win = state["app"], state["win"]

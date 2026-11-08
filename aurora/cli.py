@@ -15,6 +15,16 @@ from pathlib import Path
 from aurora import APP_NAME, __version__
 
 
+def _utf8_streams() -> None:
+    """Print UTF-8 whatever the console or pipe: a cp1252 pipe (Windows CI, a redirected aurora-cli.exe) raised
+    UnicodeEncodeError on 'Kα'. The windowed frozen app has no streams at all (None)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def _logging(verbose: bool) -> None:
     logging.basicConfig(level=logging.INFO if verbose else logging.WARNING, format="%(message)s", stream=sys.stdout)
 
@@ -163,16 +173,18 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--dpi", type=int, default=600, help="resolution of the figure PNGs (default 600)")
     dm = sub.add_parser("demo", help="create a small synthetic beamtime folder (the tutorials use it)")
     dm.add_argument("folder", type=Path)
+    _utf8_streams()
     args = p.parse_args(argv)
     _logging(args.verbose)
     if args.distcheck:
         return cmd_distcheck()
     if args.selftest:
         from aurora.selftest import run as selftest
-        qpa = None if args.platform == "native" else "offscreen"
-        if args.platform == "native":
+        native = args.platform == "native"
+        if native:
             os.environ.pop("QT_QPA_PLATFORM", None)
-        return selftest(out=args.out, qpa=qpa, keep=args.keep, gui=not args.no_gui)
+        return selftest(out=args.out, qpa=None if native else "offscreen", keep=args.keep, gui=not args.no_gui,
+                        native=native)
     if args.cmd == "project":
         return cmd_project(args.path)
     if args.cmd == "scan":
