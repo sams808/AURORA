@@ -1,22 +1,27 @@
 name: ci
 
-# Every push to main, every pull request and every v* tag:
+# Every push to main, every pull request, by hand, and called by release.yml for a v* tag:
 #   tests          the test suite from source on Windows, Linux, macOS 15 (Apple silicon and Intel) and macOS 26
-#   build-windows  frozen app + aurora-cli.exe, frozen self-test (offscreen and native), per-user installer, silent
-#                  install, installed self-test, desktop shortcut, uninstall, portable zip
+#   build-windows  frozen app + aurora-cli.exe: version resource, licences, self-tests (offscreen and native), the
+#                  headless CLI and a frozen report; per-user installer: silent install, installed self-test, Start-menu
+#                  and desktop shortcuts, folder verb, upgrade (the old runtime is wiped), uninstall (settings and logs
+#                  kept); portable zip
 #   test-windows   the installer on Windows Server 2022 and Windows 11 on ARM (x64 emulation)
-#   build-macos    AURORA.app for arm64 (macos-15) and x86_64 (macos-15-intel): signature, architecture, minimum
-#                  macOS, self-test direct and through `open` (the way Finder starts it), disk image
-#   test-macos     each disk image on every macOS available: launch from the read-only image, copy to Applications,
-#                  self-test there, the quarantine workaround of the first-launch note
-#   release        on a v* tag: a DRAFT GitHub release with every installer and SHA256SUMS.txt
+#   build-macos    AURORA.app for arm64 (macos-15) and x86_64 (macos-15-intel): signature, architecture, measured
+#                  minimum macOS (packaging/min_macos.txt), self-test direct and through `open` (the way Finder starts
+#                  it), a frozen report, disk image
+#   test-macos     each disk image on macOS 15, macOS 26 and macOS 15 Intel: mounted read-only, self-test from the
+#                  image directly and the Finder way, architecture and minimum macOS, copy to Applications, the
+#                  quarantine workaround of the first-launch note
+# Every job stops after 30 minutes and every step that runs the frozen app after 5: a frozen app that waits on a window
+# fails the run instead of holding a runner for hours.
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 env:
   PYTHONIOENCODING: utf-8
@@ -36,12 +41,12 @@ jobs:
           - {os: macos-15, python: "3.11"}
           - {os: macos-15, python: "3.13"}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -51,10 +56,13 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Tests
+        env:
+          AURORA_LOG_DIR: ${{ runner.temp }}/aurora-logs
         run: python -m pytest -q
       - name: Self-test from source
+        timeout-minutes: 10
         run: python -m aurora --selftest --out selftest-source.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: selftest-source-${{ matrix.os }}-py${{ matrix.python }}
@@ -63,27 +71,40 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install (non-editable, clean environment)
+      - name: Install (non-editable, pinned, clean environment)
         run: python -m pip install ".[build]" -c packaging/constraints.txt
       - name: Version
         id: v
         shell: bash
-        run: echo "version=$(python -c 'import aurora; print(aurora.__version__)')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(python packaging/specutil.py version)" >> "$GITHUB_OUTPUT"
       - name: Freeze
+        timeout-minutes: 20
         run: pyinstaller --noconfirm --clean packaging/aurora.spec
-      - name: Licences next to the executable
-        shell: bash
+      - name: Version resource, licences, build provenance
+        timeout-minutes: 5
+        shell: pwsh
         run: |
-          python packaging/third_party_licenses.py dist/AURORA/THIRD_PARTY_LICENSES.txt
-          mkdir -p dist/AURORA/LICENSES && cp packaging/LICENSES/*.txt dist/AURORA/LICENSES/
+          $v = "${{ steps.v.outputs.version }}"
+          foreach ($exe in "AURORA.exe", "aurora-cli.exe") {
+            $vi = (Get-Item "dist\AURORA\$exe").VersionInfo
+            "$exe : $($vi.ProductName) $($vi.ProductVersion) / $($vi.FileVersion), $($vi.CompanyName), $($vi.LegalCopyright)"
+            if ($vi.ProductVersion -ne "$v.0" -or $vi.FileVersion -ne "$v.0") { throw "$exe carries version $($vi.ProductVersion), not $v.0" }
+          }
+          foreach ($f in "LICENSE", "CREDITS.md", "THIRD_PARTY_LICENSES.txt", "LICENSES\LGPL-3.0.txt",
+                         "_internal\aurora\resources\licenses\THIRD_PARTY_LICENSES.txt", "_internal\aurora\_build.json") {
+            if (-not (Test-Path "dist\AURORA\$f")) { throw "dist\AURORA\$f is missing" }
+          }
+          Get-Content dist\AURORA\_internal\aurora\_build.json
+          Get-ChildItem dist\AURORA\_internal\PySide6\plugins\tls | Format-Table Name, Length
       - name: Frozen self-test (offscreen, console twin)
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $before = Get-ChildItem -Recurse dist\AURORA | Measure-Object | Select-Object -ExpandProperty Count
@@ -92,62 +113,134 @@ jobs:
           $after = Get-ChildItem -Recurse dist\AURORA | Measure-Object | Select-Object -ExpandProperty Count
           if ($before -ne $after) { throw "the self-test wrote into the application folder ($before -> $after files)" }
       - name: Frozen self-test (native Windows platform, windowed AURORA.exe)
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $p = Start-Process -FilePath "dist\AURORA\AURORA.exe" -ArgumentList "--selftest --platform native --out `"$PWD\selftest-frozen-native.json`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content selftest-frozen-native.json -ErrorAction SilentlyContinue; throw "native self-test failed ($($p.ExitCode))" }
           $j = Get-Content selftest-frozen-native.json -Raw | ConvertFrom-Json
           if (-not $j.ok) { throw "native self-test report says not ok" }
-          "frozen native self-test: $($j.checks.Count) checks ok on $($j.platform)"
-      - name: Headless CLI from the frozen build
+          "frozen native self-test: $($j.checks.Count) checks ok on $($j.qt_platform), build $($j.build.describe)"
+      - name: Headless CLI from the frozen build (exit codes, no error window)
+        timeout-minutes: 5
         shell: pwsh
         run: |
+          & dist\AURORA\aurora-cli.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "--version failed" }
           & dist\AURORA\aurora-cli.exe demo "$env:RUNNER_TEMP\demo beamtime"
           if ($LASTEXITCODE -ne 0) { throw "demo failed" }
-          & dist\AURORA\aurora-cli.exe project "$env:RUNNER_TEMP\demo beamtime"
+          $out = & dist\AURORA\aurora-cli.exe project "$env:RUNNER_TEMP\demo beamtime" | Out-String
           if ($LASTEXITCODE -ne 0) { throw "project failed" }
-          & dist\AURORA\aurora-cli.exe --version
-      - name: Installer (Inno Setup, per user)
+          if ($out -notmatch "F K") { throw "project printed no fixed ROI bins" }
+          & dist\AURORA\aurora-cli.exe report "$env:RUNNER_TEMP\no such beamtime"
+          if ($LASTEXITCODE -ne 1) { throw "a failing report must exit 1, not $LASTEXITCODE" }
+          # the windowed exe with a failing headless command: exit code 1, no modal window (the step timeout catches one)
+          $p = Start-Process -FilePath "dist\AURORA\AURORA.exe" -ArgumentList "report `"$env:RUNNER_TEMP\no such beamtime`"" -Wait -PassThru
+          if ($p.ExitCode -ne 1) { throw "windowed AURORA.exe report on a missing folder exited $($p.ExitCode), not 1" }
+          exit 0                                                       # the expected exit code 1 above is no failure
+      - name: Frozen report (PDF of 5+ pages, an SVG next to every PNG)
+        timeout-minutes: 5
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DMyAppVersion=${{ steps.v.outputs.version }}" packaging\aurora.iss
+          $demo = "$env:RUNNER_TEMP\report demo"
+          & dist\AURORA\aurora-cli.exe demo $demo
+          if ($LASTEXITCODE -ne 0) { throw "demo failed" }
+          python -c "import sys; from pathlib import Path; from aurora.core import testdata; r = Path(sys.argv[1]); testdata.make_fake_zones(r).save(r / 'zones_selftest.json')" $demo
+          Remove-Item -Recurse -Force "$demo\.aurora\cache"            # the frozen app reduces the stack itself
+          & dist\AURORA\aurora-cli.exe report $demo --zones "$demo\zones_selftest.json" --out "$env:RUNNER_TEMP\frozen report" --dpi 150
+          if ($LASTEXITCODE -ne 0) { throw "frozen report failed ($LASTEXITCODE)" }
+          python -m aurora.core.reportcheck "$env:RUNNER_TEMP\frozen report" --min-pages 5
+          if ($LASTEXITCODE -ne 0) { throw "the frozen report is incomplete" }
+      - name: Installer (Inno Setup 6, per user)
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed" } }
+          & $iscc /Q "/DMyAppVersion=${{ steps.v.outputs.version }}" packaging\aurora.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-          Get-Item dist\AURORA-*-windows-setup.exe | Format-List Name, Length
-      - name: Silent install, installed self-test, shortcut, uninstall
+          Get-Item "dist\AURORA-${{ steps.v.outputs.version }}-windows-x64-setup.exe" | Format-List Name, Length
+      - name: Silent per-user install (Start-menu and desktop shortcuts, no folder verb by default)
+        timeout-minutes: 5
         shell: pwsh
         run: |
-          $setup = (Get-Item dist\AURORA-*-windows-setup.exe).FullName
+          $setup = (Get-Item "dist\AURORA-${{ steps.v.outputs.version }}-windows-x64-setup.exe").FullName
+          $app = "$env:LOCALAPPDATA\Programs\AURORA"
+          # /CURRENTUSER: the per-user mode a colleague without administrator rights gets (%LOCALAPPDATA%\Programs)
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /TASKS=desktopicon /LOG=`"$PWD\install.log`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content install.log; throw "install failed ($($p.ExitCode))" }
+          $startLnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\AURORA\AURORA.lnk"
+          $deskLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "AURORA.lnk"
+          foreach ($f in "$app\AURORA.exe", "$app\aurora-cli.exe", "$app\LICENSE", "$app\THIRD_PARTY_LICENSES.txt", $startLnk, $deskLnk) {
+            if (-not (Test-Path $f)) { throw "$f missing after the install" }
+          }
+          if (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E4B9D82B-3D95-4DE5-805B-887FAFE5BFA1}_is1")) { throw "no per-user uninstall entry (HKCU)" }
+          if (Test-Path "HKCU:\Software\Classes\Directory\shell\AURORA") { throw "the folder verb is optional and unchecked by default" }
+          $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($startLnk)
+          "Start-menu shortcut: $($sh.TargetPath), working folder $($sh.WorkingDirectory)"
+      - name: Installed self-tests (windowed AURORA.exe native, console twin offscreen)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
           $app = "$env:LOCALAPPDATA\Programs\AURORA"
-          if (-not (Test-Path "$app\AURORA.exe")) { throw "AURORA.exe not installed in $app" }
-          $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "AURORA.lnk"
-          if (-not (Test-Path $lnk)) { throw "no desktop shortcut at $lnk" }
+          $p = Start-Process -FilePath "$app\AURORA.exe" -ArgumentList "--selftest --platform native --out `"$PWD\selftest-installed-native.json`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installed native self-test failed ($($p.ExitCode))" }
           & "$app\aurora-cli.exe" --selftest --out selftest-installed.json
           if ($LASTEXITCODE -ne 0) { throw "installed self-test failed" }
-          # upgrade in place over itself (same AppId): must succeed silently
-          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "reinstall failed" }
-          $p = Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait -PassThru
-          Start-Sleep -Seconds 3
-          if (Test-Path "$app\AURORA.exe") { throw "uninstall left AURORA.exe behind" }
-          if (Test-Path $lnk) { throw "uninstall left the desktop shortcut" }
-          "install / self-test / reinstall / uninstall ok"
+      - name: Upgrade over the installed copy (the old runtime is wiped, the folder verb added)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $setup = (Get-Item "dist\AURORA-${{ steps.v.outputs.version }}-windows-x64-setup.exe").FullName
+          $app = "$env:LOCALAPPDATA\Programs\AURORA"
+          # settings and logs of a user, which the uninstaller must keep later
+          New-Item -Path "HKCU:\Software\AURORA\AURORA" -Force | Out-Null
+          New-ItemProperty -Path "HKCU:\Software\AURORA\AURORA" -Name "ci_marker" -Value "keep" -Force | Out-Null
+          New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\AURORA\Logs" | Out-Null
+          Set-Content "$env:LOCALAPPDATA\AURORA\Logs\ci-marker.txt" "keep"
+          Set-Content "$app\_internal\stale.txt" "left by an older version"
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /MERGETASKS=folderverb" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "upgrade failed ($($p.ExitCode))" }
+          if (Test-Path "$app\_internal\stale.txt") { throw "the upgrade kept the old _internal (stale.txt)" }
+          if (-not (Test-Path "$app\AURORA.exe")) { throw "AURORA.exe gone after the upgrade" }
+          $verb = "HKCU:\Software\Classes\Directory\shell\AURORA\command"
+          if (-not (Test-Path $verb)) { throw "the folder verb was not registered" }
+          "folder verb: $((Get-ItemProperty $verb).'(default)')"
+          & "$app\aurora-cli.exe" --version
+      - name: Uninstall (the app, shortcuts, verb and uninstall entry go; settings and logs stay)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\AURORA"
+          Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path $app); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $app) { Get-ChildItem -Recurse $app | Select-Object -First 20; throw "uninstall left $app" }
+          $deskLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "AURORA.lnk"
+          foreach ($f in $deskLnk, "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\AURORA\AURORA.lnk",
+                         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E4B9D82B-3D95-4DE5-805B-887FAFE5BFA1}_is1",
+                         "HKCU:\Software\Classes\Directory\shell\AURORA") {
+            if (Test-Path $f) { throw "uninstall left $f" }
+          }
+          if (-not (Test-Path "HKCU:\Software\AURORA\AURORA")) { throw "uninstall removed the user's settings" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\AURORA\Logs\ci-marker.txt")) { throw "uninstall removed the log folder" }
+          "install / self-test / upgrade / uninstall ok"
       - name: Portable zip
         shell: pwsh
-        run: Compress-Archive -Path dist\AURORA -DestinationPath "dist\AURORA-${{ steps.v.outputs.version }}-windows-portable.zip"
-      - uses: actions/upload-artifact@v4
+        run: Compress-Archive -Path dist\AURORA -DestinationPath "dist\AURORA-${{ steps.v.outputs.version }}-windows-x64.zip"
+      - uses: actions/upload-artifact@v7
         with:
           name: AURORA-windows
           path: |
-            dist/AURORA-*-windows-setup.exe
-            dist/AURORA-*-windows-portable.zip
+            dist/AURORA-*-windows-x64-setup.exe
+            dist/AURORA-*-windows-x64.zip
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: selftest-windows-build
-          path: selftest-*.json
+          path: |
+            selftest-*.json
+            install.log
           if-no-files-found: ignore
 
   test-windows:
@@ -159,23 +252,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: AURORA-windows
           path: pkg
-      - name: Install, self-test, uninstall
+      - name: Install for this user
+        timeout-minutes: 5
         shell: pwsh
         run: |
-          $setup = (Get-Item pkg\AURORA-*-windows-setup.exe).FullName
+          $setup = (Get-Item pkg\AURORA-*-windows-x64-setup.exe).FullName
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "install failed ($($p.ExitCode))" }
+      - name: Installed self-tests
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
           $app = "$env:LOCALAPPDATA\Programs\AURORA"
           & "$app\aurora-cli.exe" --selftest --out "$PWD\selftest-${{ matrix.os }}.json"
           if ($LASTEXITCODE -ne 0) { throw "installed self-test failed on ${{ matrix.os }}" }
           $p = Start-Process -FilePath "$app\AURORA.exe" -ArgumentList "--selftest --platform native --out `"$PWD\selftest-${{ matrix.os }}-native.json`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "native self-test failed on ${{ matrix.os }}" }
+      - name: Uninstall
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\AURORA"
           Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-      - uses: actions/upload-artifact@v4
+          for ($i = 0; $i -lt 60 -and (Test-Path $app); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $app) { throw "uninstall left $app" }
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: selftest-${{ matrix.os }}
@@ -190,71 +295,68 @@ jobs:
           - {runner: macos-15, arch: arm64}
           - {runner: macos-15-intel, arch: x86_64}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install (non-editable, clean environment)
+      - name: Install (non-editable, pinned, clean environment)
         run: python -m pip install ".[build]" -c packaging/constraints.txt
       - name: Version
         id: v
-        run: echo "version=$(python -c 'import aurora; print(aurora.__version__)')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(python packaging/specutil.py version)" >> "$GITHUB_OUTPUT"
       - name: Freeze
+        timeout-minutes: 20
         run: pyinstaller --noconfirm --clean packaging/aurora.spec
-      - name: Licences, re-sign, verify signature, architecture, minimum macOS
+      - name: Signature, architecture, measured minimum macOS, licences, TLS backend
+        timeout-minutes: 5
         run: |
           APP=dist/AURORA.app
-          python packaging/third_party_licenses.py "$APP/Contents/Resources/THIRD_PARTY_LICENSES.txt"
-          mkdir -p "$APP/Contents/Resources/LICENSES" && cp packaging/LICENSES/*.txt "$APP/Contents/Resources/LICENSES/"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           file "$APP/Contents/MacOS/AURORA"
-          lipo -archs "$APP/Contents/MacOS/AURORA" | grep -q "${{ matrix.arch }}"
           /usr/libexec/PlistBuddy -c 'Print' "$APP/Contents/Info.plist"
-          echo "LSMinimumSystemVersion: $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
-          # the highest minos of every bundled Mach-O file must not exceed what Info.plist promises
-          MIN=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")
-          python - "$APP" "$MIN" <<'EOF'
-          import subprocess, sys, pathlib
-          app, declared = pathlib.Path(sys.argv[1]), tuple(int(x) for x in sys.argv[2].split(".")[:2])
-          worst, who = (0, 0), ""
-          for p in app.rglob("*"):
-              if p.is_file() and not p.is_symlink() and (p.suffix in (".so", ".dylib") or p.parent.name == "MacOS" or "." not in p.name):
-                  out = subprocess.run(["otool", "-l", str(p)], capture_output=True, text=True).stdout
-                  lines = out.splitlines()
-                  for i, l in enumerate(lines):
-                      if "minos" in l or ("LC_VERSION_MIN_MACOSX" in l and i + 2 < len(lines)):
-                          v = l.split()[-1] if "minos" in l else lines[i + 2].split()[-1]
-                          try:
-                              t = tuple(int(x) for x in v.split(".")[:2])
-                          except ValueError:
-                              continue
-                          if t > worst:
-                              worst, who = t, str(p.relative_to(app))
-          print(f"highest minos {worst[0]}.{worst[1]} ({who}); Info.plist declares {declared[0]}.{declared[1]}")
-          sys.exit(1 if worst > declared else 0)
-          EOF
+          DECLARED=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")
+          test "$DECLARED" = "$(python packaging/specutil.py min-macos)" || { echo "Info.plist says $DECLARED"; exit 1; }
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "${{ steps.v.outputs.version }}"
+          # every bundled Mach-O: no file may need a newer macOS than min_macos.txt promises, each carries the arch
+          python packaging/macos_minos.py "$APP" --check packaging/min_macos.txt --arch ${{ matrix.arch }}
+          test -f "$APP/Contents/Resources/aurora/resources/licenses/THIRD_PARTY_LICENSES.txt"
+          test -f "$APP/Contents/Resources/aurora/resources/licenses/LICENSE"
+          cat "$APP/Contents/Resources/aurora/_build.json"
+          find "$APP" -path '*plugins/tls/*' | grep . || { echo "no Qt TLS backend in the bundle"; exit 1; }
       - name: Self-test, direct (offscreen and native Cocoa)
+        timeout-minutes: 5
         run: |
           dist/AURORA.app/Contents/MacOS/AURORA --selftest --out "$PWD/selftest-${{ matrix.arch }}-offscreen.json"
           dist/AURORA.app/Contents/MacOS/AURORA --selftest --platform native --out "$PWD/selftest-${{ matrix.arch }}-native.json"
       - name: Self-test through `open` (LaunchServices, the way Finder starts the app)
+        timeout-minutes: 5
         run: |
           open -W -n dist/AURORA.app --args --selftest --platform native --out "$PWD/selftest-${{ matrix.arch }}-open.json"
-          python -c "import json,sys; d=json.load(open('selftest-${{ matrix.arch }}-open.json')); print(d['platform'], sum(c['ok'] for c in d['checks']), '/', len(d['checks'])); sys.exit(0 if d['ok'] else 1)"
+          python -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['qt_platform'], d['cwd'], d['machine'], sum(c['ok'] for c in d['checks']), '/', len(d['checks'])); sys.exit(0 if d['ok'] and d['cwd'] == '/' and d['machine'] == sys.argv[2] else 1)" "selftest-${{ matrix.arch }}-open.json" ${{ matrix.arch }}
+      - name: Frozen report (PDF of 5+ pages, an SVG next to every PNG)
+        timeout-minutes: 5
+        run: |
+          BIN=dist/AURORA.app/Contents/MacOS/AURORA
+          DEMO="$RUNNER_TEMP/report demo"
+          "$BIN" demo "$DEMO"
+          python -c "import sys; from pathlib import Path; from aurora.core import testdata; r = Path(sys.argv[1]); testdata.make_fake_zones(r).save(r / 'zones_selftest.json')" "$DEMO"
+          rm -rf "$DEMO/.aurora/cache"                              # the frozen app reduces the stack itself
+          "$BIN" report "$DEMO" --zones "$DEMO/zones_selftest.json" --out "$RUNNER_TEMP/frozen report" --dpi 150
+          python -m aurora.core.reportcheck "$RUNNER_TEMP/frozen report" --min-pages 5
       - name: Disk image
         run: |
           chmod +x packaging/make_dmg.sh
           packaging/make_dmg.sh dist/AURORA.app "dist/AURORA-${{ steps.v.outputs.version }}-macos-${{ matrix.arch }}.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: AURORA-macos-${{ matrix.arch }}
-          path: dist/AURORA-*-macos-*.dmg
+          path: dist/AURORA-*-macos-${{ matrix.arch }}.dmg
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: selftest-macos-build-${{ matrix.arch }}
@@ -273,72 +375,64 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: packaging
+      - uses: actions/download-artifact@v8
         with:
           name: AURORA-macos-${{ matrix.arch }}
           path: pkg
-      - name: Mount read-only, verify, run from the image, copy to Applications, run, quarantine workaround
+      - name: Mount read-only, check the image, architecture, minimum macOS
+        timeout-minutes: 5
         run: |
           sw_vers; uname -m
-          DMG=$(ls pkg/*.dmg)
-          MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
-          echo "mounted at $MNT"; ls -la "$MNT"
-          test -L "$MNT/Applications" && test -f "$MNT/If macOS blocks AURORA - read me.txt"
+          MNT="$RUNNER_TEMP/aurora-dmg"
+          mkdir -p "$MNT"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$(ls pkg/*.dmg)"
+          ls -la "$MNT"
+          test -L "$MNT/Applications"
+          test -f "$MNT/If macOS blocks AURORA.txt" && grep -q "Open Anyway" "$MNT/If macOS blocks AURORA.txt"
+          grep -q "xattr -dr com.apple.quarantine" "$MNT/If macOS blocks AURORA.txt"
+          grep -q "macOS $(tr -d '[:space:]' < packaging/min_macos.txt) or later" "$MNT/If macOS blocks AURORA.txt"
+          test -f "$MNT/LICENSE" && test -f "$MNT/CREDITS.md" && test -f "$MNT/THIRD_PARTY_LICENSES.txt"
           codesign --verify --deep --strict --verbose=2 "$MNT/AURORA.app"
-          # 1. straight from the read-only image (a colleague double-clicking without copying)
-          "$MNT/AURORA.app/Contents/MacOS/AURORA" --selftest --out "$PWD/selftest-${{ matrix.runner }}-from-dmg.json"
-          # 2. copied to ~/Applications the way the image suggests
+          python3 packaging/macos_minos.py "$MNT/AURORA.app" --check packaging/min_macos.txt --arch ${{ matrix.arch }}
+      - name: Self-test from the read-only image, directly
+        timeout-minutes: 5
+        run: |
+          # as a colleague double-clicking without copying would
+          "$RUNNER_TEMP/aurora-dmg/AURORA.app/Contents/MacOS/AURORA" --selftest --out "$PWD/selftest-${{ matrix.runner }}-direct.json"
+      - name: Self-test from the read-only image, the Finder way (open, LaunchServices)
+        timeout-minutes: 5
+        run: |
+          MNT="$RUNNER_TEMP/aurora-dmg"
+          open -W -n "$MNT/AURORA.app" --args --selftest --platform native --out "$PWD/selftest-${{ matrix.runner }}-open.json"
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('open:', d['qt_platform'], 'cwd', d['cwd']); sys.exit(0 if d['cwd'] == '/' else 1)" "selftest-${{ matrix.runner }}-open.json"
+          codesign --verify --deep --strict "$MNT/AURORA.app"              # still intact after the round trip
+          spctl --assess --type execute -vv "$MNT/AURORA.app" || echo "Gatekeeper: not notarised (expected; see the first-launch note)"
+          hdiutil detach "$MNT"
+      - name: Copy to Applications, run, quarantine workaround
+        timeout-minutes: 5
+        run: |
+          MNT="$RUNNER_TEMP/aurora-dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$(ls pkg/*.dmg)"
           mkdir -p "$HOME/Applications"
           ditto "$MNT/AURORA.app" "$HOME/Applications/AURORA.app"
           hdiutil detach "$MNT"
           codesign --verify --deep --strict "$HOME/Applications/AURORA.app"
           "$HOME/Applications/AURORA.app/Contents/MacOS/AURORA" --selftest --platform native --out "$PWD/selftest-${{ matrix.runner }}-native.json"
-          open -W -n "$HOME/Applications/AURORA.app" --args --selftest --platform native --out "$PWD/selftest-${{ matrix.runner }}-open.json"
-          # 3. a downloaded copy carries the quarantine flag; the first-launch note's command removes it
+          # a downloaded copy carries the quarantine flag; the first-launch note's command removes it
           xattr -w com.apple.quarantine "0083;$(printf %x $(date +%s));Safari;" "$HOME/Applications/AURORA.app"
           xattr -dr com.apple.quarantine "$HOME/Applications/AURORA.app"
           if xattr -p com.apple.quarantine "$HOME/Applications/AURORA.app" 2>/dev/null; then echo "quarantine flag still set"; exit 1; fi
-          spctl --assess --type execute -vv "$HOME/Applications/AURORA.app" || echo "Gatekeeper: not notarised (expected; see the first-launch note)"
-          for f in selftest-*.json; do python3 -c "import json,sys; d=json.load(open('$f')); print('$f', d['platform'], d['machine'], sum(c['ok'] for c in d['checks']), '/', len(d['checks'])); sys.exit(0 if d['ok'] else 1)"; done
-      - uses: actions/upload-artifact@v4
+      - name: Every self-test passed on the expected architecture
+        run: |
+          for f in selftest-*.json; do
+            python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[1], d['platform'], d['machine'], sum(c['ok'] for c in d['checks']), '/', len(d['checks'])); sys.exit(0 if d['ok'] and d['machine'] == sys.argv[2] else 1)" "$f" ${{ matrix.arch }}
+          done
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: selftest-${{ matrix.runner }}-${{ matrix.arch }}
           path: selftest-*.json
           if-no-files-found: ignore
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tests, build-windows, test-windows, build-macos, test-macos]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: AURORA-*
-          path: assets
-          merge-multiple: true
-      - name: Draft release with checksums
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt && cd ..
-          TAG="${GITHUB_REF_NAME}"
-          python3 - "$TAG" > notes.md <<'EOF'
-          import re, sys
-          tag = sys.argv[1].lstrip("v")
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          m = re.search(rf"^## {re.escape(tag)}.*?(?=^## |\Z)", text, re.S | re.M)
-          print(m.group(0) if m else f"AURORA {tag}")
-          print("\n### Downloads\n- Windows 10/11: `AURORA-<v>-windows-setup.exe` (per-user, no administrator rights) or the portable zip")
-          print("- macOS on Apple silicon (M1 and later): `AURORA-<v>-macos-arm64.dmg`; on an Intel Mac: `AURORA-<v>-macos-x86_64.dmg`")
-          print("- First launch on macOS: read the note inside the disk image (Privacy & Security > Open Anyway).")
-          print("- `SHA256SUMS.txt`: checksums of every file.")
-          EOF
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" assets/* --clobber
-          else
-            gh release create "$TAG" assets/* --draft --title "AURORA ${TAG#v}" --notes-file notes.md
-          fi

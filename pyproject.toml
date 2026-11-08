@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]               # PEP 639: license = "MIT" and license-files
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "aurora-sgm"
-version = "0.3.0"
+dynamic = ["version"]                       # aurora.__version__, the one version source
 description = "AURORA: soft X-ray XAS and XRF stack analysis for the SGM beamline (Canadian Light Source)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "Sami Soudani"}]
 dependencies = [
     "numpy>=1.26",
@@ -21,12 +22,19 @@ dependencies = [
     "platformdirs>=4.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/sams808/AURORA"
+Issues = "https://github.com/sams808/AURORA/issues"
+
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pyyaml>=6"]
 build = ["pyinstaller>=6.6"]
 
 [project.scripts]
 aurora = "aurora.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "aurora.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["aurora*"]

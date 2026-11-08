@@ -1,7 +1,8 @@
 """Log file for bug reports: one rotating file per user, also used by the frozen app (which has no console).
 
 Location: platformdirs' user log folder for AURORA (Windows %LOCALAPPDATA%\\AURORA\\Logs, macOS ~/Library/Logs/AURORA),
-or $AURORA_LOG_DIR when set (tests, the self-test). Crashes of the interpreter itself (segfaults) go to faults.log.
+or $AURORA_LOG_DIR when set (tests, the self-test). A test run without $AURORA_LOG_DIR logs into a temporary folder,
+never into the user's log. Crashes of the interpreter itself (segfaults) go to faults.log.
 """
 from __future__ import annotations
 
@@ -20,6 +21,9 @@ def log_dir() -> Path:
     d = os.environ.get("AURORA_LOG_DIR")
     if d:
         p = Path(d)
+    elif os.environ.get("PYTEST_CURRENT_TEST"):          # a test run never writes the user's real log
+        import tempfile
+        p = Path(tempfile.gettempdir()) / "AURORA-test-logs"
     else:
         from platformdirs import user_log_dir
         p = Path(user_log_dir("AURORA", appauthor=False))
@@ -36,10 +40,21 @@ def log_file() -> Path:
     return log_dir() / "aurora.log"
 
 
+def _same_file(a, b) -> bool:
+    return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+
+
 def setup_logging(level: int = logging.INFO) -> Path:
-    """Attach a rotating file handler to the root logger (idempotent) and enable faulthandler. Returns the log path."""
+    """Attach a rotating file handler to the root logger and enable faulthandler. Returns the log path.
+
+    Idempotent for one log folder; when $AURORA_LOG_DIR now names another folder (the self-test, a test), the handler
+    moves there."""
     path = log_file()
     root = logging.getLogger()
+    for h in [h for h in root.handlers if getattr(h, "_aurora", False)]:
+        if not _same_file(getattr(h, "baseFilename", ""), path):
+            root.removeHandler(h)
+            h.close()
     if not any(getattr(h, "_aurora", False) for h in root.handlers):
         try:
             h = logging.handlers.RotatingFileHandler(path, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
