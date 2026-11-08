@@ -294,7 +294,9 @@ def test_history_is_capped_and_shown_in_advanced(qapp, fake_project):
 def test_shortcuts_are_listed(qapp, fake_project):
     from aurora.app.diagnostics import shortcut_rows
     win = window(qapp, Project.discover(fake_project))
-    rows = {(sec, text): keys for sec, text, keys, _a in shortcut_rows(win)}
-    assert rows[("Edit", "Undo")] == "Ctrl+Z" and "Ctrl+Y" in rows[("Edit", "Redo")] and \
-        "Ctrl+Shift+Z" in rows[("Edit", "Redo")]
+    from PySide6.QtGui import QKeySequence
+    native = {k: QKeySequence(k).toString(QKeySequence.NativeText) for k in ("Ctrl+Z", "Ctrl+Y", "Ctrl+Shift+Z")}
+    rows = {(sec, text): keys for sec, text, keys, _a in shortcut_rows(win)}      # native text: macOS lists ⌘Z
+    assert rows[("Edit", "Undo")] == native["Ctrl+Z"] and native["Ctrl+Y"] in rows[("Edit", "Redo")] and \
+        native["Ctrl+Shift+Z"] in rows[("Edit", "Redo")]
     win.close()
