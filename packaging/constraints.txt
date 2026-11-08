@@ -1,9 +1,40 @@
-# Pins for the FROZEN builds (packaging/build_win.bat, packaging/build_mac.sh, CI build jobs):
+# Pins for the FROZEN builds (packaging/build_win.bat, packaging/build_mac.sh, the CI build jobs):
 #   pip install ".[build]" -c packaging/constraints.txt
+# Every package of the build environment, as installed by the last green CI build (run 42466289069, 2026-11-08,
+# Python 3.12, build-windows and build-macos). A build is reproducible from these pins; raise them deliberately, after a
+# green CI run with the new versions (the test jobs install without pins and see new releases first).
+#
 # PySide6 6.12.0's macOS binaries are built for macOS 26 (LC_BUILD_VERSION minos 26.0, measured 2026-11-07 on the
 # wheels; Finder refuses to open such an app on macOS 15 with error -10825). 6.11.3 requires macOS 15 (minos 15.0)
-# and paints pyqtgraph items (6.9 does not). Re-measure before raising this pin (see docs/DEVELOPER.md).
+# and paints pyqtgraph items (6.9 does not). Re-measure with packaging/macos_minos.py before raising this pin.
 PySide6==6.11.3
 PySide6-Essentials==6.11.3
 PySide6-Addons==6.11.3
 shiboken6==6.11.3
+numpy==2.5.4
+scipy==1.18.1
+h5py==3.16.0
+matplotlib==3.11.2
+pyqtgraph==0.14.0
+xraydb==4.5.8
+platformdirs==4.14.5
+sqlalchemy==2.1.8
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.68.0
+kiwisolver==1.5.1
+packaging==26.3
+pillow==13.0.0
+pyparsing==3.3.3
+python-dateutil==4.0.0
+typing-extensions==4.16.0
+tzdata==2026.6
+colorama==0.4.6
+# build tools (not bundled)
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+altgraph==0.17.5
+macholib==1.16.4; sys_platform == "darwin"
+pefile==2024.8.26; sys_platform == "win32"
+pywin32-ctypes==0.2.3; sys_platform == "win32"
+setuptools==84.2.1

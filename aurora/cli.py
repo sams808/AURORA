@@ -1,7 +1,10 @@
 """Command line: `aurora` (GUI), `aurora gui <project>` (also `aurora <project folder or .h5>`), `aurora project <path>`,
 `aurora scan <path>`, `aurora report <project>`, `aurora demo <folder>`, `aurora --distcheck`, `aurora --selftest`.
 
-The headless commands never import Qt, so `aurora.core` keeps working without a display.
+The headless commands never import Qt, so `aurora.core` keeps working without a display. Every command logs to the
+AURORA log file (aurora.logsetup); a headless command that fails writes its traceback to the log and to stderr and
+returns 1, so neither the console twin aurora-cli.exe nor the windowed AURORA.exe ever stops on an error window.
+Output is UTF-8 whatever the console or pipe.
 """
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ import logging
 import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 from aurora import APP_NAME, __version__
@@ -25,8 +29,62 @@ def _utf8_streams() -> None:
             pass
 
 
-def _logging(verbose: bool) -> None:
-    logging.basicConfig(level=logging.INFO if verbose else logging.WARNING, format="%(message)s", stream=sys.stdout)
+log = logging.getLogger("aurora.cli")
+FILE_ONLY = "aurora_file_only"            # LogRecord attribute: written to the log file, not echoed on the console
+
+
+def _console_logging(verbose: bool) -> logging.Handler | None:
+    """Log messages on stdout (warnings, or everything with -v), only when there is a stdout: the windowed frozen app
+    has none. Replaces the handler of an earlier main() call in the same process (its stream may be gone)."""
+    root = logging.getLogger()
+    for h in [h for h in root.handlers if getattr(h, "_aurora_console", False)]:
+        root.removeHandler(h)
+    if sys.stdout is None:
+        return None
+    h = logging.StreamHandler(sys.stdout)
+    h._aurora_console = True
+    h.setFormatter(logging.Formatter("%(message)s"))
+    h.setLevel(logging.INFO if verbose else logging.WARNING)
+    h.addFilter(lambda rec: not getattr(rec, FILE_ONLY, False))
+    root.addHandler(h)
+    if verbose and (root.level > logging.INFO or root.level == logging.NOTSET):
+        root.setLevel(logging.INFO)
+    return h
+
+
+def _drop_console(h: logging.Handler | None) -> None:
+    if h is not None:
+        logging.getLogger().removeHandler(h)
+
+
+def _logging(verbose: bool) -> logging.Handler | None:
+    """The log file for every command, plus the console when there is one."""
+    from aurora.logsetup import setup_logging
+    try:
+        setup_logging()
+    except Exception:                         # noqa: BLE001  a log folder that cannot be made never stops a command
+        pass
+    return _console_logging(verbose)
+
+
+def _guarded(name: str, fn, *args) -> int:
+    """Run a headless command: its return code, or 1 with the traceback in the log and on stderr when it raises."""
+    try:
+        rc = fn(*args)
+        return int(rc or 0)
+    except KeyboardInterrupt:
+        log.warning("aurora %s interrupted", name)
+        return 130
+    except Exception as err:                  # noqa: BLE001  every failure ends as exit code 1, never a hang
+        tb = traceback.format_exc()
+        log.error("aurora %s failed: %s: %s\n%s", name, type(err).__name__, err, tb, extra={FILE_ONLY: True})
+        if sys.stderr is not None:
+            try:
+                sys.stderr.write(f"aurora {name} failed: {type(err).__name__}: {err}\n{tb}")
+                sys.stderr.flush()
+            except (OSError, ValueError):
+                pass
+        return 1
 
 
 def cmd_project(path: Path) -> int:
@@ -175,26 +233,40 @@ def main(argv: list[str] | None = None) -> int:
     dm.add_argument("folder", type=Path)
     _utf8_streams()
     args = p.parse_args(argv)
-    _logging(args.verbose)
-    if args.distcheck:
-        return cmd_distcheck()
-    if args.selftest:
-        from aurora.selftest import run as selftest
-        native = args.platform == "native"
-        if native:
-            os.environ.pop("QT_QPA_PLATFORM", None)
-        return selftest(out=args.out, qpa=None if native else "offscreen", keep=args.keep, gui=not args.no_gui,
-                        native=native)
-    if args.cmd == "project":
-        return cmd_project(args.path)
-    if args.cmd == "scan":
-        return cmd_scan(args.path)
-    if args.cmd == "report":
-        return cmd_report(args)
-    if args.cmd == "demo":
-        return cmd_demo(args.folder)
-    from aurora.app.main import run
-    return run(getattr(args, "project", None))
+    console = _logging(args.verbose)
+    name = "--distcheck" if args.distcheck else "--selftest" if args.selftest else (args.cmd or "gui")
+    log.info("command %s %s", name, " ".join(argv), extra={FILE_ONLY: True})
+    try:
+        if args.distcheck:
+            return _guarded(name, cmd_distcheck)
+        if args.selftest:
+            return _guarded(name, _selftest, args)
+        if args.cmd == "project":
+            return _guarded(name, cmd_project, args.path)
+        if args.cmd == "scan":
+            return _guarded(name, cmd_scan, args.path)
+        if args.cmd == "report":
+            return _guarded(name, cmd_report, args)
+        if args.cmd == "demo":
+            return _guarded(name, cmd_demo, args.folder)
+        from aurora.app.main import run
+        try:
+            return run(getattr(args, "project", None))
+        except Exception:
+            # the GUI keeps its own error window (the frozen bootloader shows the traceback); the log gets it too
+            log.exception("aurora gui failed", extra={FILE_ONLY: True})
+            raise
+    finally:
+        _drop_console(console)
+
+
+def _selftest(args) -> int:
+    from aurora.selftest import run as selftest
+    native = args.platform == "native"
+    if native:
+        os.environ.pop("QT_QPA_PLATFORM", None)
+    return selftest(out=args.out, qpa=None if native else "offscreen", keep=args.keep, gui=not args.no_gui,
+                    native=native)
 
 
 if __name__ == "__main__":

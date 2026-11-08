@@ -59,6 +59,7 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
     """native=True runs the GUI checks on the platform's own windowing system (Cocoa, Windows, xcb/wayland) and
     never falls back to offscreen; the JSON records the platform Qt actually used."""
     from aurora import __version__
+    cwd = os.getcwd()                                   # '/' when macOS LaunchServices (Finder, `open`) started us
     base = Path(tempfile.mkdtemp(prefix="aurora selftest é "))
     os.environ["AURORA_SETTINGS_DIR"] = str(base / "settings")
     os.environ["AURORA_LOG_DIR"] = str(base / "logs")
@@ -67,7 +68,8 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
     elif not native and "QT_QPA_PLATFORM" not in os.environ and gui:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     r = _Runner()
-    print(f"AURORA {__version__} self-test in {base}", flush=True)
+    build = _build_info().get("describe", "")
+    print(f"AURORA {__version__}{f' (build {build})' if build else ''} self-test in {base}", flush=True)
     ctx: dict = {}
 
     # ------------------------------------------------------------------ imports a frozen build must carry
@@ -219,12 +221,17 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
     r.check("deconvolution, stitching, zone proposals", deconv_stitch)
 
     def report():
+        # the frozen build once failed here: matplotlib's svg / pdf backends are loaded by name at savefig time
         from aurora.core.report import ReportBuilder
-        res = ReportBuilder(ctx["proj"], ctx["zones"], base / "report é", title="Self-test", png_dpi=120).build()
-        assert res.pdf.exists() and res.pdf.stat().st_size > 10_000 and res.pages >= 3
-        svgs = list((base / "report é" / "figures").glob("*.svg"))
-        assert svgs and res.csvs
-        return f"{res.pages} pages, {len(res.figures)} PNG + {len(svgs)} SVG figures, {len(res.csvs)} CSV"
+        from aurora.core.reportcheck import check, pdf_pages
+        out = base / "report é"
+        res = ReportBuilder(ctx["proj"], ctx["zones"], out, title="Self-test", png_dpi=120).build()
+        assert res.pdf.exists() and res.pdf.stat().st_size > 10_000, res.pdf
+        assert res.pages >= 5 and pdf_pages(res.pdf) >= 5, (res.pages, pdf_pages(res.pdf))
+        chk = check(out, min_pages=5)
+        assert not chk["problems"], chk["problems"]
+        assert res.csvs
+        return (f"{res.pages} pages, {len(chk['pngs'])} PNG each with its SVG, {len(res.csvs)} CSV")
     r.check("report (PDF, PNG, SVG, CSV)", report)
 
     # ------------------------------------------------------------------ GUI
@@ -235,7 +242,7 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
         "app": "AURORA", "version": __version__, "ok": r.ok, "frozen": bool(getattr(sys, "frozen", False)),
         "python": sys.version.split()[0], "platform": platform.platform(), "machine": platform.machine(),
         "qt_platform": ctx.get("qt_platform") or os.environ.get("QT_QPA_PLATFORM", ""), "native": native,
-        "folder": str(base), "checks": r.results,
+        "folder": str(base), "cwd": cwd, "build": _build_info(), "checks": r.results,
     }
     try:
         import PySide6
@@ -256,6 +263,15 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
                 h.close()
         shutil.rmtree(base, ignore_errors=True)
     return 0 if r.ok else 1
+
+
+def _build_info() -> dict:
+    """aurora/_build.json of a frozen build (version, git describe, commit, date, library versions); {} from source."""
+    import aurora
+    try:
+        return json.loads((Path(aurora.__file__).resolve().parent / "_build.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def _painted(widget) -> int:
@@ -292,11 +308,14 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
 
     def open_demo():
         win.home.open_project(ctx["proj"].root)
-        for _ in range(200):
+        deadline = time.monotonic() + 60               # the discovery runs in a job: wait for it, not for N loops
+        while win.session.project is None and time.monotonic() < deadline:
             pump(2)
-            if win.session.project is not None:
-                break
-        assert win.session.project is not None
+            time.sleep(0.01)
+        jobs = getattr(win, "jobs", None)
+        if jobs is not None:
+            jobs.wait_idle(60000)
+        assert win.session.project is not None, "the demo did not open within 60 s"
         return win.crumb.text()
     r.check("open the demo in the window", open_demo)
 

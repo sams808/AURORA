@@ -1,0 +1,87 @@
+name: release
+
+# A v* tag gives a DRAFT GitHub release; publishing it stays a decision of the author.
+#   check-tag  the tag is 'v' + aurora.__version__ and CHANGELOG.md has that version's section
+#   ci         the whole of ci.yml (tests, frozen builds, installer and disk-image tests) through workflow_call, so a
+#              release is made only from builds that passed every check
+#   publish    the four installers, SHA256SUMS.txt and notes.md (packaging/release_notes.py: the CHANGELOG section,
+#              the downloads, the minimum macOS, the Gatekeeper and SmartScreen notes) into a draft release:
+#              gh release create --draft --verify-tag, or gh release upload --clobber when the draft exists already
+# Assets: AURORA-<ver>-windows-x64-setup.exe, AURORA-<ver>-windows-x64.zip, AURORA-<ver>-macos-arm64.dmg,
+#         AURORA-<ver>-macos-x86_64.dmg
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  check-tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag names the version of aurora/__init__.py, and CHANGELOG.md describes it
+        id: v
+        run: |
+          VER="$(python3 packaging/specutil.py version)"
+          if [ "$GITHUB_REF_NAME" != "v$VER" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match aurora.__version__ $VER (expected v$VER)"
+            exit 1
+          fi
+          python3 packaging/release_notes.py "$VER" > /dev/null
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: check-tag
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: [check-tag, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: AURORA-*
+          path: assets
+          merge-multiple: true
+      - name: Assets, checksums, notes
+        env:
+          VER: ${{ needs.check-tag.outputs.version }}
+        run: |
+          ls -la assets
+          for a in "AURORA-$VER-windows-x64-setup.exe" "AURORA-$VER-windows-x64.zip" \
+                   "AURORA-$VER-macos-arm64.dmg" "AURORA-$VER-macos-x86_64.dmg"; do
+            test -f "assets/$a" || { echo "::error::missing asset $a"; exit 1; }
+          done
+          (cd assets && sha256sum AURORA-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          python3 packaging/release_notes.py "$VER" notes.md
+          cat notes.md
+      - name: Draft release (never published here)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VER: ${{ needs.check-tag.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::release $TAG is already published; its assets are left alone"
+              exit 1
+            fi
+            gh release upload "$TAG" assets/* --clobber
+            gh release edit "$TAG" --draft --title "AURORA $VER" --notes-file notes.md
+          else
+            gh release create "$TAG" assets/* --draft --verify-tag --title "AURORA $VER" --notes-file notes.md
+          fi
+          gh release view "$TAG" --json isDraft,name,assets --jq '{draft: .isDraft, name: .name, assets: [.assets[].name]}'
