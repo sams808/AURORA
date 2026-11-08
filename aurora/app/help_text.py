@@ -448,10 +448,11 @@ HELP: dict[str, tuple[str, str, str]] = {
                         "Figure size", "71-lcf-linear-combination-fit"),
     # ------------------------------------------------------------------ maps
     "maps.stack": ("The stack whose hypercube is loaded.", "stack", "8-maps"),
-    "maps.load": ("Read the raw .bin files of the stack once and cache them (a few hundred MB per stack).",
+    "maps.load": ("Read the raw .bin files of the stack once, one energy at a time, into a cache on disk (a few "
+                  "hundred MB per stack; the free space is checked first). Cancel keeps nothing.",
                   "Load hypercube", "8-maps"),
-    "maps.det": ("The sum of the four detectors, or one detector.", "detector", "8-maps"),
-    "maps.line": ("A fixed line, or custom with the eV bounds.", "window", "8-maps"),
+    "maps.line": ("A fixed line (each SDD's own channels from config/roi_bins.json), or custom with the eV bounds "
+                  "(each SDD's own calibration).", "window", "8-maps"),
     "maps.w_lo": ("Lower end of the emission window (eV).", "window from", "8-maps"),
     "maps.w_hi": ("Upper end of the emission window (eV).", "window to", "8-maps"),
     "maps.per_i0": ("Divide by I0.", "divide by I0", "8-maps"),
@@ -467,14 +468,28 @@ HELP: dict[str, tuple[str, str, str]] = {
     "maps.energy": ("The incident energy of the map.", "energy", "8-maps"),
     "maps.avg": ("Average the map over every valid energy.", "average over energies", "8-maps"),
     "maps.draw_elements": ("One map per fixed line (config/roi_bins.json).", "Draw the elemental maps", "8-maps"),
-    "maps.export_4d": ("Write the PyMca 4D stack _Elemental_PyMca.h5.", "Export PyMca 4D", "8-maps"),
+    "maps.export_4d": ("Write the PyMca 4D stack _Elemental_PyMca.h5 (every SDD; the sums over the ticked SDDs), in "
+                       "the background.", "Export PyMca 4D", "8-maps"),
     "maps.rgb": ("The window shown in this colour.", "colour window", "8-maps"),
     "maps.draw_rgb": ("Three windows as a colour composite.", "Draw the RGB composite", "8-maps"),
     "maps.n_pc": ("Number of PCA components kept before k-means.", "PCA components", "8-maps"),
     "maps.n_k": ("Number of k-means clusters.", "clusters", "8-maps"),
     "maps.run_clusters": ("PCA on the per-pixel XANES, then k-means: the cluster map and the mean spectra.",
                           "Run the clustering", "8-maps"),
-    "maps.export_xanes": ("Write the PyMca XANES stack _PCA-CA.h5 (y, x, E).", "Export PyMca XANES stack", "8-maps"),
+    "maps.export_xanes": ("Write the PyMca XANES stack _PCA-CA.h5 (y, x, E): one dataset per ticked SDD, each with "
+                          "its own channel window, in the background.", "Export PyMca XANES stack", "8-maps"),
+    "maps.sdd": ("Include this SDD in every sum (map, spectrum, XANES sum, elemental maps, RGB, clusters, exports). "
+                 "Each SDD uses its own channels for the window. An SDD flagged saturated starts unticked.",
+                 "include the SDD in the sum", "8-maps"),
+    "maps.seed": ("The k-means seed: the same seed gives the same clusters again.", "k-means seed", "8-maps"),
+    "maps.clusters": ("One row per cluster with its pixel count and map colour. Tick the clusters to merge: their mean "
+                      "and sum spectra follow; unticked clusters are dimmed on the map.", "clusters", "8-maps"),
+    "maps.make_zone": ("A new zone of the holder made of the ticked clusters' pixels (one painted square per pixel), "
+                       "ready for Reduce and Check.", "Make zone from ticked clusters", "8-maps"),
+    "maps.send": ("Add the merged mean spectrum of the ticked clusters to Compare, with its provenance (stack, windows, "
+                  "SDDs, PCA components, k, seed, clusters).", "Send to Compare", "8-maps"),
+    "maps.export_clusters": ("Write a CSV (energy, the mean of each cluster, the merged mean of the ticked ones) and "
+                             "the cluster map as PNG next to it.", "Export the clusters", "8-maps"),
     # ------------------------------------------------------------------ report
     "report.title": ("The report title (default 'AURORA report · <project>').", "report title", "9-report"),
     "report.out": ("The output folder (default <project>/reports/aurora).", "output folder", "9-report"),

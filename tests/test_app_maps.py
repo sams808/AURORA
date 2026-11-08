@@ -48,11 +48,13 @@ def test_maps_perspective(qapp, fake_project):
     z = ses.new_zone("z"); z.rects.append([x0, x1, y0, y1]); ses.touch(); ses.select_zone(z.id)
     mp.roi_mode.setCurrentIndex(1)
     assert len(mp._roi) == 12
-    mp.draw_elements()
+    mp.draw_elements()                                           # a job: drawn when it ends
+    assert win.jobs.wait_idle(20000)
     assert len(mp.el_layout.ci.items) == 2
     mp.draw_rgb()
     assert mp.rgb_view.image.image is not None and mp.rgb_view.image.image.shape == (3, 4, 3)
     mp.n_k.setValue(2); mp.run_clusters()
+    assert win.jobs.wait_idle(20000)
     assert mp._cluster is not None and set(mp._cluster.labels) <= {0, 1}
     win.show_perspective("maps")
     win.close()
