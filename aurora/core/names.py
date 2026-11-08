@@ -122,6 +122,65 @@ def pretty_edge(edge: tuple[str, str] | None) -> str:
 
 
 _DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+# ctime form of the bluesky files' `file_creation_timestamp_iso` root attribute: 'Thu Nov  5 09:27:59 2026'. Parsed
+# with a fixed English month table, never strptime: %b depends on the locale Qt sets at start.
+_CTIME = re.compile(r"(?i)^\s*(?:[a-z]{3,9}\.?,?\s+)?(" + "|".join(_MONTHS) + r")[a-z]*\.?\s+(\d{1,2}),?\s+"
+                    r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s+(\d{4})\s*$")
+
+
+def parse_timestamp(text) -> dt.datetime | None:
+    """A timestamp in ISO 8601 form ('2026-11-05T09:27:59', '2026-11-05 09:27:59.12+00:00', '2026-11-05') or in
+    ctime form ('Thu Nov  5 09:27:59 2026', the CLS h5 files); None when it is neither."""
+    if isinstance(text, bytes):
+        text = text.decode(errors="replace")
+    s = str(text or "").strip()
+    if not s:
+        return None
+    try:
+        return dt.datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
+    except ValueError:
+        pass
+    m = _CTIME.match(s)
+    if m:
+        try:
+            return dt.datetime(int(m.group(6)), _MONTHS.index(m.group(1).lower()[:3]) + 1, int(m.group(2)),
+                               int(m.group(3)), int(m.group(4)), int(m.group(5) or 0))
+        except ValueError:
+            return None
+    return None
+
+
+def date_in_text(text: str) -> str:
+    """The first valid YYYY-MM-DD in a text (a file name), '' when there is none."""
+    for m in _DATE.finditer(str(text)):
+        try:
+            return dt.date.fromisoformat(m.group(1)).isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def energy_regions(E, decimals: int = 4) -> list[tuple[float, float, float]]:
+    """Regions of constant step of an energy list, as (start eV, stop eV, step eV), in order: 680..685 by 0.5,
+    685..700 by 0.1 and 700..730 by 0.2 eV give [(680.0, 685.0, 0.5), (685.0, 700.0, 0.1), (700.0, 730.0, 0.2)].
+    Steps and boundaries are rounded to `decimals` (float noise of the planned list); a boundary energy ends one
+    region and starts the next. One energy gives one region with step 0; an empty list gives []."""
+    import numpy as np
+    e = np.asarray([float(v) for v in E], float)
+    e = e[np.isfinite(e)]
+    if e.size == 0:
+        return []
+    if e.size == 1:
+        return [(round(float(e[0]), decimals), round(float(e[0]), decimals), 0.0)]
+    steps = np.round(np.diff(e), decimals)
+    out, start = [], 0
+    for i in range(1, steps.size + 1):
+        if i == steps.size or steps[i] != steps[start]:
+            out.append((round(float(e[start]), decimals), round(float(e[i]), decimals),
+                        float(round(float(steps[start]), decimals))))
+            start = i
+    return out
 
 
 def day_from_path(path: Path | str) -> dt.date | None:

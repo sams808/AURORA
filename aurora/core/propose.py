@@ -78,6 +78,188 @@ def zones_from_pads(pads: list[Pad], start_id: int = 1, labels: dict[int, str] |
     return out
 
 
+# ----------------------------------------------------------------------------- a grid of zones (plate_layout.json)
+def norm_text(s) -> str:
+    """Lower-case ASCII letters and digits only (sgm_report `norm_text`): 'hematite' -> 'hematite',
+    'holderB_Fe2O3' -> 'n2lawklr'."""
+    import re
+    import unicodedata
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower())
+
+
+def layout_groups(layout: dict, holder: str) -> list[dict]:
+    """The groups of plate_layout.json for a holder (rows, cols, cells of plate numbers, match words, names), each
+    with its sample names resolved: g['labels'] = the names in the sketch's reading order (None = an empty position),
+    nested like g['cells'], or the flat g['names'] list of a group without a known arrangement."""
+    lay = layout.get(holder) if holder else None
+    if not isinstance(lay, dict):
+        return []
+    samples = {str(k): v for k, v in (lay.get("samples") or {}).items()}
+    out = []
+    for g in lay.get("groups") or []:
+        if not isinstance(g, dict):
+            continue
+        g = dict(g)
+        if g.get("cells"):
+            g["labels"] = [[(samples.get(str(n)) or str(n)) if n is not None else None for n in row]
+                           for row in g["cells"]]
+        else:
+            g["labels"] = [n for n in g.get("names") or [] if n]
+        out.append(g)
+    return out
+
+
+def layout_group(layout: dict, holder: str, label: str) -> dict | None:
+    """The layout group of a scan (sgm_report `Config.group_for`): the group one of whose 'match' words (or, unless
+    'match_names' is false, a sample name, first 9 letters) is in the scan label; the longest match wins. Words of
+    fewer than 3 letters never match."""
+    lay = layout.get(holder) if holder else None
+    if not isinstance(lay, dict) or not lay.get("groups"):
+        return None
+    t = norm_text(label)
+    samples = {str(k): v for k, v in (lay.get("samples") or {}).items()}
+    best, best_len = None, 0
+    for g in layout_groups(layout, holder):
+        words = [norm_text(w) for w in g.get("match") or []]
+        if g.get("match_names", True):
+            words += [norm_text(samples.get(str(n), ""))[:9] for row in g.get("cells") or [] for n in row
+                      if n is not None and samples.get(str(n))]
+            words += [norm_text(n)[:9] for n in g.get("names") or [] if n]
+        hits = [w for w in words if len(w) >= 3 and w in t]
+        if hits and max(map(len, hits)) > best_len:
+            best, best_len = g, max(map(len, hits))
+    return best
+
+
+@dataclass
+class GridCell:
+    """One cell of a grid of zones, in the map's reading order (row 0 = top, col 0 = left)."""
+    row: int
+    col: int
+    cell: tuple[float, float, float, float]     # the whole cell, x0, x1, y0, y1 (mm)
+    rect: tuple[float, float, float, float]     # the zone rectangle (the cell shrunk to `fill`, or snapped to a pad)
+    label: str | None = None                    # None: no label given (or an empty position of the layout)
+    group: str = ""
+    empty: bool = False                         # the layout marks this position empty (null)
+
+    @property
+    def name(self) -> str:
+        return f"row {self.row + 1}, col {self.col + 1}"
+
+
+def _matrix(values, sr: int, sc: int, fill=None) -> np.ndarray:
+    """An (sr, sc) object array from a flat list in reading order or from nested rows; missing entries = fill."""
+    m = np.full((sr, sc), fill, dtype=object)
+    if values is None:
+        return m
+    if isinstance(values, str):
+        m[:, :] = values
+        return m
+    vals = list(values)
+    if vals and all(isinstance(v, (list, tuple)) for v in vals):             # nested rows (layout cells)
+        for r, row in enumerate(vals[:sr]):
+            for c, v in enumerate(list(row)[:sc]):
+                m[r, c] = v
+        return m
+    for i, v in enumerate(vals[:sr * sc]):
+        m[i // sc, i % sc] = v
+    return m
+
+
+def grid_cells(bbox, rows: int, cols: int, fill: float = 0.7, rotation: int = 0, labels=None,
+               groups=None) -> list[GridCell]:
+    """The cells of a rows x cols grid over bbox = (x0, x1, y0, y1) mm, in reading order (top row first, then left to
+    right; y grows upwards as on the survey map). Each zone rectangle is its cell shrunk about the cell centre to
+    `fill` of the cell's width and height.
+
+    labels / groups are given in the layout's own reading order, flat or as nested rows (plate_layout.json cells):
+    rows x cols for rotation 0 and 180, cols x rows for 90 and 270. `rotation` (degrees, counter-clockwise like
+    np.rot90 and sgm_report) is how the plate sat on the beamline with respect to the layout: 180 reverses the
+    assignment (a holder mounted upside down, such as N3). groups may also be one string for every cell."""
+    x0, x1 = sorted((float(bbox[0]), float(bbox[1])))
+    y0, y1 = sorted((float(bbox[2]), float(bbox[3])))
+    rows, cols = int(rows), int(cols)
+    if rows < 1 or cols < 1:
+        raise ValueError("rows and cols must be at least 1")
+    if not 0 < float(fill) <= 1:
+        raise ValueError("fill must be in (0, 1]")
+    if int(rotation) % 360 not in (0, 90, 180, 270):
+        raise ValueError("rotation must be 0, 90, 180 or 270 degrees")
+    k = (int(rotation) % 360) // 90
+    sr, sc = (rows, cols) if k % 2 == 0 else (cols, rows)
+    lab = np.rot90(_matrix(labels, sr, sc), k)
+    # an entry that is in the list but None is an empty position of the layout; a list too short just gives no label
+    marks = None if labels is None or isinstance(labels, str) else \
+        [[True] * len(row) for row in labels] if labels and all(isinstance(v, (list, tuple)) for v in labels) else \
+        [True] * len(list(labels))
+    given = np.rot90(_matrix(marks, sr, sc, fill=False), k)
+    grp = np.rot90(_matrix(groups, sr, sc, fill=""), k)
+    w, h = (x1 - x0) / cols, (y1 - y0) / rows
+    out = []
+    for r in range(rows):
+        for c in range(cols):
+            cx, cy = x0 + (c + 0.5) * w, y1 - (r + 0.5) * h
+            cell = (x0 + c * w, x0 + (c + 1) * w, y1 - (r + 1) * h, y1 - r * h)
+            rect = (cx - fill * w / 2, cx + fill * w / 2, cy - fill * h / 2, cy + fill * h / 2)
+            label = lab[r, c]
+            out.append(GridCell(row=r, col=c, cell=cell, rect=rect, label=None if label is None else str(label),
+                                group=str(grp[r, c] or ""), empty=bool(given[r, c]) and label is None))
+    return out
+
+
+def snap_to_pads(cells: list[GridCell], pads: list[Pad], pitch: tuple[float, float] = (0.0, 0.0),
+                 min_share: float = 0.3) -> tuple[list[GridCell], list[GridCell]]:
+    """Each cell shrinks to the bright survey pad(s) inside it (pads_from_survey): the pads whose centre lies in the
+    cell, or that cover at least `min_share` of the cell's area (sgm_report's rule for a cell owning a pad: >= 30 %).
+    The new rectangle is their footprint (half a survey pitch beyond the outermost pixel centres) clipped to the
+    cell. Returns (kept, skipped): cells without a pad are skipped (blank positions of the plate)."""
+    hx, hy = float(pitch[0]) / 2, float(pitch[1]) / 2
+    kept, skipped = [], []
+    for cell in cells:
+        cx0, cx1, cy0, cy1 = cell.cell
+        area = max((cx1 - cx0) * (cy1 - cy0), 1e-12)
+        mine = []
+        for p in pads:
+            px0, px1, py0, py1 = p.x0 - hx, p.x1 + hx, p.y0 - hy, p.y1 + hy
+            mx, my = (px0 + px1) / 2, (py0 + py1) / 2
+            ox = max(0.0, min(cx1, px1) - max(cx0, px0))
+            oy = max(0.0, min(cy1, py1) - max(cy0, py0))
+            if (cx0 <= mx <= cx1 and cy0 <= my <= cy1) or ox * oy >= min_share * area:
+                mine.append((px0, px1, py0, py1))
+        if not mine:
+            skipped.append(cell)
+            continue
+        x0 = max(cx0, min(m[0] for m in mine)); x1 = min(cx1, max(m[1] for m in mine))
+        y0 = max(cy0, min(m[2] for m in mine)); y1 = min(cy1, max(m[3] for m in mine))
+        if x1 <= x0 or y1 <= y0:
+            skipped.append(cell)
+            continue
+        kept.append(GridCell(row=cell.row, col=cell.col, cell=cell.cell, rect=(x0, x1, y0, y1), label=cell.label,
+                             group=cell.group, empty=cell.empty))
+    return kept, skipped
+
+
+def zones_from_cells(cells: list[GridCell], start_id: int = 1, rows: int | None = None,
+                     cols: int | None = None) -> list[Zone]:
+    """Zones (one rectangle each) from grid cells, numbered from start_id in the cells' order. A cell without a label
+    is named 'zone N' (N = its id), like a new zone of Reduce."""
+    shape = f"grid {rows} x {cols}, " if rows and cols else "grid, "
+    out = []
+    for cell in cells:
+        zid = start_id + len(out)
+        out.append(Zone(id=zid, label=cell.label or f"zone {zid}", group=cell.group,
+                        comment=f"{shape}{cell.name}", rects=[[round(v, 6) for v in cell.rect]]))
+    return out
+
+
+def zones_from_grid(bbox, rows: int, cols: int, fill: float = 0.7, rotation: int = 0, labels=None, groups=None,
+                    start_id: int = 1) -> list[Zone]:
+    """A rows x cols grid of rectangular zones over bbox = (x0, x1, y0, y1) mm, in reading order (top row first): see
+    grid_cells for fill, rotation, labels and groups. Every cell gives a zone."""
+    cells = grid_cells(bbox, rows, cols, fill=fill, rotation=rotation, labels=labels, groups=groups)
+    return zones_from_cells(cells, start_id=start_id, rows=rows, cols=cols)
+
+
 def zones_from_summary(summary_scans: list[dict], pitches: dict[str, tuple[float, float]], start_id: int = 1) -> list[Zone]:
     """sgm_report's zones (name, centre x/y, px count) as square rectangles of the right area, one per distinct name."""
     out, seen = [], set()

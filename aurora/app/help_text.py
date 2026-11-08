@@ -53,6 +53,17 @@ HELP: dict[str, tuple[str, str, str]] = {
     "home.col.energies": ("First and last energy (eV) and the number of energy folders.", "Energies", "2-home"),
     "home.col.points": ("Pixels per energy.", "Points", "2-home"),
     "home.col.flags": ("From the sgm_report summary when present: saturated SDDs, I0 invalid.", "Flags", "2-home"),
+    "home.demo": ("Open the synthetic demo beamtime (made once in the user data folder): every perspective has data, "
+                  "no real beamtime needed.", "Open the demo beamtime", "2-home"),
+    "home.tutorials": ("Open the tutorials: step-by-step walks through the demo beamtime.", "Read the tutorials",
+                       "2-home"),
+    "home.recent": ("Projects opened before (also in File > Open recent). Double-click opens one; a greyed 'not "
+                    "found' entry is missing or on a share that is not reachable now; right-click to forget it.",
+                    "recent projects", "2-home"),
+    "home.retry": ("Try to open the same folder again (for example once the share is reachable).", "Retry", "2-home"),
+    "home.choose_another": ("Choose another beamtime folder, loose folder of scans or scan folder.",
+                            "Choose another", "2-home"),
+    "home.keep": ("Close this note and keep the project that is open.", "Keep the open project", "2-home"),
     # ------------------------------------------------------------------ survey
     "survey.holder": ("The holder whose plate map is shown (also chosen in the top bar).", "holder", "3-survey"),
     "survey.channel": ("A fixed emission line, total XRF, TEY or I0.", "channel", "3-survey"),
@@ -69,6 +80,23 @@ HELP: dict[str, tuple[str, str, str]] = {
                       "3-survey"),
     "survey.export": ("Write the zones of every holder as zones_all.json (the browser zone tool's format).",
                       "Export zones", "3-survey"),
+    "survey.grid": ("Drag a rectangle over a block of pads, then cut it into a grid of zones (rows and columns from "
+                    "config/plate_layout.json when one of its groups matches the holder's scans). Click again to "
+                    "cancel.", "Grid of zones", "3-survey"),
+    "survey.grid.layout": ("The plate_layout.json group whose rows, columns and sample names fill the grid.",
+                           "layout group", "3-survey"),
+    "survey.grid.rows": ("Rows of pads in the rectangle, as seen on the map.", "rows", "3-survey"),
+    "survey.grid.cols": ("Columns of pads in the rectangle, as seen on the map.", "columns", "3-survey"),
+    "survey.grid.fill": ("Each zone covers this share of its cell's width and height, centred in the cell.",
+                         "cell fill", "3-survey"),
+    "survey.grid.rotation": ("How the plate sat in the holder compared with the layout, counter-clockwise: 180° for "
+                             "a plate mounted upside down reverses the order of the labels.", "rotation", "3-survey"),
+    "survey.grid.labels": ("Where the zone labels come from: the layout's cells, the holder's rows of the sample sheet "
+                           "in reading order (top row first), or numbers.", "labels from", "3-survey"),
+    "survey.grid.first_row": ("The holder's sample-sheet row that labels the top-left cell.", "first sheet row",
+                              "3-survey"),
+    "survey.grid.snap": ("Shrink each cell to the bright survey pad inside it (Otsu threshold of the survey map); "
+                         "cells without a pad are skipped and listed.", "snap to pads", "3-survey"),
     # ------------------------------------------------------------------ reduce
     "reduce.load_all": ("Read every complete stack of the holder, so the zones attach to all of them.", "Load all",
                         "41-scans-of-the-holder"),

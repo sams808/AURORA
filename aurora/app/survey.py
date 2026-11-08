@@ -1,4 +1,7 @@
-"""Survey perspective: the plate map of a holder with scan footprints and the zones, the sketch, the sample sheet."""
+"""Survey perspective: the plate map of a holder with scan footprints and the zones, the sketch, the sample sheet.
+
+Advanced: 'Grid of zones…' arms the rect+ tool; the rectangle dragged over a block of pads opens the GridDialog, whose
+zones show dashed on the map until Accept adds them in one session edit."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,11 +12,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import nav
-from aurora.app.help_text import explain_all, labelled
+from aurora.app.help_text import explain, explain_all, labelled
 from aurora.app.mapview import MapView
 from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
-from aurora.app.theme import FOOTPRINTS, curve, on_theme_changed, swatch_icon
+from aurora.app.theme import FOOTPRINTS, MAP_OVERLAY, curve, on_theme_changed, swatch_icon
 from aurora.app.vocab import det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_path, guarded_write, notify_saved,
                                 overlay_host, pair, remember_dir, set_enabled)
@@ -54,6 +57,9 @@ class SurveyPerspective(QWidget):
         super().__init__(parent)
         self.session = session
         self._survey = None
+        self.grid_dialog = None                         # the open 'Grid of zones' dialog
+        self._grid_preview = None                       # (zones, skipped cells) drawn dashed until Accept
+        self._grid_note = ""                            # what the last Accept added, kept in the hint line
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -73,6 +79,10 @@ class SurveyPerspective(QWidget):
         self.export_btn = QPushButton("Export zones…")
         self.export_btn.clicked.connect(self._export)
         head.addWidget(self.import_btn); head.addWidget(self.export_btn)
+        self.grid_btn = QPushButton("Grid of zones…")       # Advanced: rect+ over a block of pads, then the dialog
+        self.grid_btn.setCheckable(True)
+        self.grid_btn.toggled.connect(self._grid_armed)
+        head.addWidget(self.grid_btn)
         root.addLayout(head)
 
         self.split = split = QSplitter(Qt.Horizontal)
@@ -98,6 +108,7 @@ class SurveyPerspective(QWidget):
         self.map.setAccessibleName("plate map of the holder")
         self.map.hovered.connect(self._hover)
         self.map.clicked.connect(self._clicked)
+        self.map.rect_drawn.connect(self._rect_drawn)
         left.body.addWidget(self.map, 1)
         self.hint = ElidedLabel("", Qt.ElideRight); self.hint.setObjectName("muted")
         left.body.addWidget(self.hint)
@@ -150,19 +161,24 @@ class SurveyPerspective(QWidget):
         explain_all([(self.per_i0, "survey.per_i0"), (self.log, "survey.log"), (self.invert, "survey.invert"),
                      (self.show_footprints, "survey.footprints"), (self.show_zones, "survey.zones"),
                      (self.import_btn, "survey.import"), (self.export_btn, "survey.export")])
+        explain(self.grid_btn, "survey.grid")
         session.project_changed.connect(self._project_changed)
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(lambda z: self._highlight_zone())
         on_theme_changed(self, lambda _s: self.redraw_map())
         # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
-        mark_advanced(self.options_row, self.import_btn, self.export_btn)
+        mark_advanced(self.options_row, self.import_btn, self.export_btn, self.grid_btn)
         self.update_actions()
 
     def update_actions(self) -> None:
         has = self.session.project is not None
         for b in (self.import_btn, self.export_btn):
             set_enabled(b, has, "open a project first")
+        set_enabled(self.grid_btn, has and self._survey is not None,
+                    "open a project first" if not has else "this holder has no survey map")
+        if not self.grid_btn.isEnabled() and self.grid_btn.isChecked():
+            self.grid_btn.setChecked(False)
         self.empty_state.set_shown(not has)
         h = self.session.holder()
         self.zones_card.set_title(f"Zones of holder {h.name}" if h else "Zones of the holder")
@@ -183,6 +199,7 @@ class SurveyPerspective(QWidget):
             self.session.set_holder(key)
 
     def _holder_changed(self, key: str) -> None:
+        self._close_grid()
         i = self.holder_combo.findData(key)
         if i >= 0 and self.holder_combo.currentIndex() != i:
             self.holder_combo.blockSignals(True); self.holder_combo.setCurrentIndex(i); self.holder_combo.blockSignals(False)
@@ -238,9 +255,19 @@ class SurveyPerspective(QWidget):
             hz = self.session.holder_zones(create=False)
             for i, z in enumerate(hz.zones if hz else []):
                 self.map.draw_zone(z, curve(i), selected=(z.id == self.session.current_zone))
+        if self._grid_preview is not None:              # the grid of zones before Accept: dashed, skipped cells dotted
+            zones, skipped = self._grid_preview
+            add, off = MAP_OVERLAY["rect_add"], MAP_OVERLAY["erase"]
+            for z in zones:
+                for r in z.rects:
+                    self.map.add_rect(r[0], r[1], r[2], r[3], add, 1.4, dashed=True, z=12)
+                    self.map.add_label(r[0], r[3], z.label, add)
+            for cell, _why in skipped:
+                x0, x1, y0, y1 = cell.cell
+                self.map.add_rect(x0, x1, y0, y1, off, 1.0, z=12, style=Qt.DotLine)
         note = "; ".join(sv.notes)
         self.hint.setText(f"{plural(sv.n, 'point')} at {sv.energy:.1f} eV, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm"
-                          + (f" · {note}" if note else ""))
+                          + (f" · {note}" if note else "") + (f" · {self._grid_note}" if self._grid_note else ""))
 
     def _footprints(self) -> list[ScanInfo]:
         h = self.session.holder()
@@ -324,6 +351,73 @@ class SurveyPerspective(QWidget):
                 self.open_requested.emit(s)
                 self.redraw_map()
                 return
+
+    # ------------------------------------------------------------------ grid of zones (Advanced)
+    def _grid_armed(self, on: bool) -> None:
+        self.map.set_tool("rect+" if on else "navigate")
+        if on:
+            self._grid_note = ""
+            self.hint.setText("Grid of zones: drag a rectangle over a block of pads (click the button again to cancel)")
+
+    def _rect_drawn(self, x0: float, x1: float, y0: float, y1: float) -> None:
+        if not self.grid_btn.isChecked():
+            return
+        px, py = self._survey.pitch if self._survey is not None else (0.0, 0.0)
+        if abs(x1 - x0) < px or abs(y1 - y0) < py or x1 == x0 or y1 == y0:
+            self.hint.setText("Grid of zones: drag a rectangle over the pads (a click selects nothing)")
+            return
+        self.grid_btn.setChecked(False)
+        self.open_grid_dialog((x0, x1, y0, y1))
+
+    def open_grid_dialog(self, bbox):
+        """The Grid of zones dialog over bbox = (x0, x1, y0, y1) mm, its preview on the map (window-modal, not
+        blocking: tests drive it and call accept())."""
+        from aurora.app.grid_dialog import GridDialog
+        self._close_grid()
+        scans = [(s, self._bbox(s)) for s in self._footprints()]
+        dlg = GridDialog(self.session, bbox, survey=self._survey, channel=self.channel.currentText() or None,
+                         scans=scans, parent=self)
+        self.grid_dialog = dlg
+        dlg.preview_changed.connect(self._grid_preview_changed)
+        dlg.finished.connect(lambda result, d=dlg: self._grid_finished(d, result))     # Qt: finished, then accepted
+        dlg._update()
+        dlg.open()
+        return dlg
+
+    def _grid_preview_changed(self, preview) -> None:
+        self._grid_preview = preview
+        self.redraw_map()
+
+    def _accept_grid(self, dlg) -> str:
+        """Add the dialog's zones to the holder in one edit; returns what was done ('' when nothing)."""
+        zones = dlg.zones()
+        skipped = dlg.skipped_text()
+        if not zones:
+            return ""
+        with self.session.edit(f"grid of {len(zones)} zones"):
+            hz = self.session.holder_zones()
+            hz.zones.extend(zones)                  # numbered after the zones of the holder (GridDialog.start_id)
+        note = f"added {plural(len(zones), 'zone')} to holder {hz.holder}" + (f"; skipped {skipped}" if skipped else "")
+        self.session.status.emit(note)
+        return note
+
+    def _grid_finished(self, dlg, result: int) -> None:
+        from PySide6.QtWidgets import QDialog
+        if result == QDialog.Accepted:
+            self._grid_note = self._accept_grid(dlg)        # kept in the hint line (redraw_map writes it)
+        if self.grid_dialog is dlg:
+            self.grid_dialog = None
+        self._grid_preview = None
+        self.redraw_map()
+
+    def _close_grid(self) -> None:
+        self._grid_note = ""
+        if self.grid_btn.isChecked():
+            self.grid_btn.setChecked(False)
+        if self.grid_dialog is not None:
+            d, self.grid_dialog = self.grid_dialog, None
+            d.reject()
+        self._grid_preview = None
 
     def _import(self) -> None:
         p, _ = QFileDialog.getOpenFileName(self, "Import zones (zones_all.json)", default_path("zones", "zones_all.json", self.session),
