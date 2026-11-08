@@ -88,12 +88,15 @@ def _figure(opts: FigureOptions):
         if opts.axis:
             ax.spines[side].set_color(opts.axis)
         ax.spines[side].set_linewidth(0.6)
-    ax.tick_params(labelsize=fs, width=0.6, length=3, colors=opts.axis or None, labelcolor=opts.fg or None)
-    ax.set_xlabel(opts.xlabel, fontsize=fs, color=opts.ink or None)
+    # colours only when given: matplotlib >= 3.11 refuses colors=None (FigureOptions() keeps matplotlib's defaults)
+    ticks = {k: v for k, v in (("colors", opts.axis), ("labelcolor", opts.fg)) if v}
+    ax.tick_params(labelsize=fs, width=0.6, length=3, **ticks)
+    ink = {"color": opts.ink} if opts.ink else {}
+    ax.set_xlabel(opts.xlabel, fontsize=fs, **ink)
     if opts.ylabel:
-        ax.set_ylabel(opts.ylabel, fontsize=fs, color=opts.ink or None)
+        ax.set_ylabel(opts.ylabel, fontsize=fs, **ink)
     if opts.title:
-        ax.set_title(opts.title, fontsize=fs, color=opts.ink or None)
+        ax.set_title(opts.title, fontsize=fs, **ink)
     return fig, ax
 
 

@@ -252,7 +252,7 @@ def selftest_command(out: Path) -> list[str]:
     return [sys.executable, "-m", "aurora", "--selftest", "--out", str(out)]
 
 
-EXPECTED_CHECKS = 30                      # DEFAULT: the progress bar's scale; the real count comes from the report
+EXPECTED_CHECKS = 57          # checks of a full run, the progress scale (tests/test_selftest.py keeps it equal)
 
 
 def run_selftest(progress, out_dir: Path | None = None) -> dict:

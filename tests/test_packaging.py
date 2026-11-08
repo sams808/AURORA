@@ -169,7 +169,7 @@ def test_report_check(tmp_path):
 
 def test_selftest_report_check_requires_svg_and_five_pages():
     text = (ROOT / "aurora" / "selftest.py").read_text(encoding="utf-8")
-    body = text[text.index("    def report():"):text.index('r.check("report (PDF, PNG, SVG, CSV)", report)')]
+    body = text[text.index("    def report():"):text.index('r.check("report (PDF, PNG, SVG, CSV), provenance and verify", report)')]
     assert "check(out, min_pages=5)" in body and "res.pages >= 5" in body and "pdf_pages(res.pdf) >= 5" in body
 
 

@@ -152,3 +152,16 @@ def test_figure_size_button_in_easy(qapp, demo):
     demo.show_perspective("fit")
     pump(qapp)
     assert demo.fit.figure_btn.isVisible()
+
+
+def test_core_figures_draw_without_export_colours(tmp_path):
+    """FigureOptions() without colours keeps matplotlib's own (matplotlib >= 3.11 refuses color=None): the core
+    figure functions draw and save without the app's export tokens, as the self-test and headless callers use them."""
+    from aurora.core.figures import FigureOptions, FigureSeries, FigureTrace, compare_figure, fit_figure, save_figure
+    E = np.linspace(680.0, 730.0, 51)
+    o = FigureOptions(dpi=100, formats=("png", "pdf"), ylabel="normalised", title="t")
+    c = save_figure(compare_figure([FigureTrace("a", E, np.tanh(E - 700), "C0")], o), tmp_path / "c", o)
+    f = save_figure(fit_figure([FigureSeries("a", E, np.tanh(E - 700)), FigureSeries("p", np.array([700.0]), kind="vline"),
+                                FigureSeries("note", E, kind="text")], o), tmp_path / "f", o)
+    assert [p.suffix for p in c] == [".png", ".pdf"] and [p.suffix for p in f] == [".png", ".pdf"]
+    assert png_size(c[0]) == (350, 450) and png_size(f[0]) == (350, 450)
