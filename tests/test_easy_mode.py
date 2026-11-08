@@ -14,7 +14,9 @@ from aurora.app import mode  # noqa: E402
 # Easy limits of visible interactive widgets (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider; a table
 # or list view counts as one). Survey: besides the map and the tables; Check: besides the table. The cards' '?' help
 # buttons (property aurora_help_button) open the manual and are not counted.
-LIMITS = {"home": 8, "survey": 2, "reduce": 18, "check": 10, "compare": 12, "fit": 10, "report": 8}
+# Report: title, output, Browse…, Build, the 'Check before building' / Contents view (one tab shown), ◀, ▶, Open PDF,
+# Open folder (I40 adds the findings view to the eight of WP0).
+LIMITS = {"home": 8, "survey": 2, "reduce": 18, "check": 10, "compare": 12, "fit": 10, "report": 9}
 VIEWS_NOT_COUNTED = {"survey", "check"}
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider)
 
