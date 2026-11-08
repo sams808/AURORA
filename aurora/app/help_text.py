@@ -112,6 +112,77 @@ HELP: dict[str, tuple[str, str, str]] = {
     "preview.i0": ("Show the I0 panel's curve.", "show I0", "47-preview"),
     "preview.spikes": ("Mark the interpolated spikes.", "show spikes", "47-preview"),
     "preview.all_scans": ("Overlay every included scan of the sample.", "all scans of the sample", "47-preview"),
+    # Reduce, WP3: map tools, XRF windows (step 2), Easy steps, batch settings
+    "reduce.tool.lasso+": ("Drag freehand around the sample: the outline closes when you let go (Esc cancels). Pixels "
+                           "whose centre lies inside belong to the zone.", "lasso", "42-stack-map"),
+    "reduce.tool.polygon+": ("Click the corners of a polygon, double-click to close it (Esc cancels). Pixels whose centre "
+                             "lies inside belong to the zone.", "polygon", "42-stack-map"),
+    "reduce.clear": ("Remove the drawing of the selected sample (rectangles, polygons, painted pixels), to draw it again.",
+                     "Clear the region", "42-stack-map"),
+    "reduce.zones": ("The samples (zones) of the holder: pick one to edit it. A click inside a zone on the map also "
+                     "selects it.", "samples of the holder", "43-zones"),
+    "reduce.load_polygon": ("Read a polygon ROI saved by John Bussey's GUI (<sample>_polygon_roi.json, at least three "
+                            "[x, y] vertices in mm) into a new sample.", "Load polygon", "43-zones"),
+    "reduce.save_polygon": ("Write the selected sample as John Bussey's <sample>_polygon_roi.json (a zone made of exactly "
+                            "one polygon).", "Save polygon", "43-zones"),
+    "reduce.window.preset": ("The emission window: a fixed line of config/roi_bins.json, the line of the edge (needs an "
+                             "SDD calibration), or custom windows set with the regions or the lo / hi boxes.",
+                             "XRF window preset", "4-reduce"),
+    "reduce.window.lo": ("First channel of the window (included).", "window first channel", "4-reduce"),
+    "reduce.window.hi": ("End of the window (excluded): 60 to 83 sums channels 60 to 82, as in John Bussey's GUI.",
+                         "window end channel", "4-reduce"),
+    "reduce.window.source": ("The emission spectrum shown: the whole stack summed over its energies, the survey of the "
+                             "holder, or the pixels of the selected sample.", "emission spectrum source", "4-reduce"),
+    "reduce.window.same": ("One window for all four detectors: dragging one region moves the four. Untick to set each "
+                           "detector's window apart.", "same range for all detectors", "4-reduce"),
+    "reduce.window.det": ("The detector whose window the lo / hi boxes edit when the windows are set apart.",
+                          "detector edited", "4-reduce"),
+    "reduce.window.remember": ("Save these windows as a default rule for the edge of this stack: scans of that edge "
+                               "attached later use them (Rules…).", "Remember these windows", "4-reduce"),
+    "reduce.add_to_check": ("Queue the selected sample on this scan for Check, with the Easy settings listed above "
+                            "(Ctrl+Return).", "Add to Check", "4-reduce"),
+    "reduce.reset_easy": ("Rewrite the settings that differ from the Easy defaults (named in the chip) in one step; Undo "
+                          "brings them back.", "Reset to Easy defaults", "45-one-card-per-attached-scan"),
+    "reduce.copy": ("Copy this card's settings to all scans of the zone, to this scan in every zone of the holder, or "
+                    "to every scan with the same edge. The ticked fields travel; include and the pixel count never do. "
+                    "Ctrl+Shift+C / Ctrl+Shift+V copy and paste between cards.", "Copy to", "45-one-card-per-attached-scan"),
+    "reduce.rules": ("Rules that write the same settings into many cards (scope, scan filter, fields), with a table of "
+                     "what would change; saved rules also apply to scans attached later.", "Rules",
+                     "45-one-card-per-attached-scan"),
+    "reduce.rules.list": ("The rules, in the order they run (a later rule wins). Ticked rules are used.", "rules",
+                          "45-one-card-per-attached-scan"),
+    "reduce.rules.add": ("Add an empty rule at the end of the list.", "Add a rule", "45-one-card-per-attached-scan"),
+    "reduce.rules.remove": ("Remove the selected rule.", "Remove the rule", "45-one-card-per-attached-scan"),
+    "reduce.rules.up": ("Run the selected rule earlier.", "Move the rule up", "45-one-card-per-attached-scan"),
+    "reduce.rules.down": ("Run the selected rule later.", "Move the rule down", "45-one-card-per-attached-scan"),
+    "reduce.rules.name": ("A name for the rule (shown in the list).", "rule name", "45-one-card-per-attached-scan"),
+    "reduce.rules.scope": ("The zones the rule reaches: the whole project, some holders, some sample-sheet groups, or "
+                           "the selected zone.", "rule scope", "45-one-card-per-attached-scan"),
+    "reduce.rules.scope_text": ("Holders or groups, separated by commas.", "holders or groups",
+                                "45-one-card-per-attached-scan"),
+    "reduce.rules.edge": ("Only scans of this edge ('F K', 'Se L3,2'); blank: every edge.", "edge filter",
+                          "45-one-card-per-attached-scan"),
+    "reduce.rules.plan": ("Only scans whose folder name matches this regular expression ('_TEY'); blank: every scan.",
+                          "scan name filter", "45-one-card-per-attached-scan"),
+    "reduce.rules.span": ("Only scans whose energies lie inside this range; 'any' leaves that end open.",
+                          "energy range filter", "45-one-card-per-attached-scan"),
+    "reduce.rules.flags": ("Only scans with this flag (sgm_report summary or AURORA's check).", "flag filter",
+                           "45-one-card-per-attached-scan"),
+    "reduce.rules.field": ("Tick the fields the rule writes, then set their value. Pre / post windows may be written "
+                           "from the edge energy: 'E0-15..E0-5'.", "field written by the rule",
+                           "45-one-card-per-attached-scan"),
+    "reduce.rules.override": ("Also replace fields set by hand on a card (pinned); otherwise they are kept.",
+                              "override pinned fields", "45-one-card-per-attached-scan"),
+    "reduce.rules.apply": ("Write the ticked rules into the existing cards now (one undo step).", "Apply now",
+                           "45-one-card-per-attached-scan"),
+    "reduce.rules.save": ("Keep the rules with the session: zone x scan settings created later inherit them.",
+                          "Save as default", "45-one-card-per-attached-scan"),
+    "reduce.rules.col.0": ("The holder of the card.", "Holder", "45-one-card-per-attached-scan"),
+    "reduce.rules.col.1": ("The zone (number and label).", "Zone", "45-one-card-per-attached-scan"),
+    "reduce.rules.col.2": ("The scan (time and folder name).", "Scan", "45-one-card-per-attached-scan"),
+    "reduce.rules.col.3": ("The field that would change.", "Field", "45-one-card-per-attached-scan"),
+    "reduce.rules.col.4": ("Its value now.", "Now", "45-one-card-per-attached-scan"),
+    "reduce.rules.col.5": ("Its value once the rules are applied.", "After", "45-one-card-per-attached-scan"),
     # ------------------------------------------------------------------ check
     "check.run": ("Probe seven energies of every stack of the holder (the brightest pixels only) and fill the table: "
                   "count rate, saturation, I0 validity.", "Run the checks", "5-check"),
