@@ -182,7 +182,10 @@ def write(out: Path, only=None, version: str | None = None) -> Path:
 
 
 def main() -> int:
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "THIRD_PARTY_LICENSES.txt"
+    if len(sys.argv) < 2:                     # never a default inside packaging/ (no generated file belongs there)
+        print(__doc__)
+        return 2
+    out = Path(sys.argv[1])
     if SELF not in distributions():
         raise SystemExit("aurora-sgm is not installed in this environment: install it before writing the licences")
     write(out)
