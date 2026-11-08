@@ -122,6 +122,11 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="aurora", description=f"{APP_NAME} {__version__}")
     p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     p.add_argument("--distcheck", action="store_true", help="smoke-test this installation offscreen and exit")
+    p.add_argument("--selftest", action="store_true", help="deep self-test of this installation (every core path and perspective)")
+    p.add_argument("--out", type=Path, help="with --selftest: write the JSON report here")
+    p.add_argument("--platform", choices=["offscreen", "native"], help="with --selftest: Qt platform (default offscreen)")
+    p.add_argument("--keep", action="store_true", help="with --selftest: keep the temporary folder")
+    p.add_argument("--no-gui", action="store_true", help="with --selftest: core checks only")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd")
     g = sub.add_parser("gui", help="open the application (default)")
@@ -145,6 +150,12 @@ def main(argv: list[str] | None = None) -> int:
     _logging(args.verbose)
     if args.distcheck:
         return cmd_distcheck()
+    if args.selftest:
+        from aurora.selftest import run as selftest
+        qpa = None if args.platform == "native" else "offscreen"
+        if args.platform == "native":
+            os.environ.pop("QT_QPA_PLATFORM", None)
+        return selftest(out=args.out, qpa=qpa, keep=args.keep, gui=not args.no_gui)
     if args.cmd == "project":
         return cmd_project(args.path)
     if args.cmd == "scan":

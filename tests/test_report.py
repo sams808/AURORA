@@ -12,19 +12,7 @@ from aurora.core.stack import StackData
 
 
 def _fake_zones(proj: Project) -> ZonesFile:
-    scan = proj.find(testdata.STACK)
-    sd = StackData.load(proj, scan)
-    sid = f"{scan.day}_{scan.name}"
-    x0, x1, y0, y1 = sd.bbox
-    z1 = Zone(id=1, label="1 alpha", group="Minerals", rects=[[x0, (x0 + x1) / 2, y0, y1]])
-    z2 = Zone(id=2, label="2 beta", group="", rects=[[(x0 + x1) / 2, x1, y0, y1]])
-    z3 = Zone(id=3, label="3 gamma", group="Minerals", rects=[[x0, x1, y0, y1]])
-    z1.settings[sid] = ScanSettings(stack=scan.name, line="total XRF", n=6)
-    z2.settings[sid] = ScanSettings(stack=scan.name, line="total XRF", n=6, sdd=[True, False, True, False], fluo_norm="max", despike=False)
-    z3.settings[sid] = ScanSettings(stack=scan.name, line="total XRF", n=12, include=False)
-    zf = ZonesFile(project="TEST", exported="2026-11-06T00:00:00")
-    zf.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=[z1, z2, z3])
-    return zf
+    return testdata.make_fake_zones(proj)
 
 
 def test_report_on_fake_project(fake_project, tmp_path):

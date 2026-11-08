@@ -105,3 +105,23 @@ def make_fake_project(root: Path, old_minutes: float = 120.0) -> Path:
     (root / "processed").mkdir(exist_ok=True)
     (root / "config").mkdir(exist_ok=True)
     return root
+
+
+def make_fake_zones(project) -> "ZonesFile":
+    """Three zones on the synthetic stack (two included, one not): the report and the self-test use them."""
+    from aurora.core.io.config import HolderZones, ScanSettings, Zone, ZonesFile
+    from aurora.core.stack import StackData
+    scan = project.find(STACK)
+    sd = StackData.load(project, scan)
+    sid = f"{scan.day}_{scan.name}"
+    x0, x1, y0, y1 = sd.bbox
+    z1 = Zone(id=1, label="1 alpha", group="Minerals", rects=[[x0, (x0 + x1) / 2, y0, y1]])
+    z2 = Zone(id=2, label="2 beta", group="", rects=[[(x0 + x1) / 2, x1, y0, y1]])
+    z3 = Zone(id=3, label="3 gamma", group="Minerals", rects=[[x0, x1, y0, y1]])
+    z1.settings[sid] = ScanSettings(stack=scan.name, line="total XRF", n=6)
+    z2.settings[sid] = ScanSettings(stack=scan.name, line="total XRF", n=6, sdd=[True, False, True, False], fluo_norm="max",
+                                    despike=False)
+    z3.settings[sid] = ScanSettings(stack=scan.name, line="total XRF", n=12, include=False)
+    zf = ZonesFile(project="TEST", exported="2026-11-06T00:00:00")
+    zf.holders["N5"] = HolderZones(holder="N5", day=DAY, survey=SURVEY, zones=[z1, z2, z3])
+    return zf
