@@ -294,7 +294,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         assert energy_regions([680, 683, 686, 689, 692]) == [(680.0, 692.0, 3.0)]
         rows = dict(overview.scan_rows(st, proj, incomplete=[]))
         assert rows["time per map"] == "6 s per map", rows.get("time per map")
-        assert rows["energy regions"] == "680–692 eV in 3 eV steps", rows.get("energy regions")
+        assert rows["energy regions"] == "660–740 eV in 2 eV steps", rows.get("energy regions")   # the demo's stack
         assert overview.incomplete_energies(st) == []
         prow = dict(overview.project_rows(proj))
         assert any("holder" in k.lower() for k in prow), list(prow)

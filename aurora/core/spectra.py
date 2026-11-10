@@ -11,6 +11,8 @@ Beyond the zone tool (ScanSettings fields added by AURORA):
   that the SDDs show as well (despike_coherent, coherent_despike);
 - energies whose I0 is below I0_LOW_FRAC of its median are left out of every / I0 trace (docs/HANDOFF.md 5.2);
 - signal 'ipfy' divides I0 by the counts of the (non-resonant) line, aurora.core.yields.ipfy;
+- the automatic pre-edge window ends AUTO_PRE_GAP_EV below E0 when the zone tool's first 15 % of the scan reaches the
+  edge (auto_pre_window);
 - ZoneTraces.notes says what was done in words and in eV (spike energies, masked energies, the signal).
 """
 from __future__ import annotations
@@ -21,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from aurora.core.compare import DEFAULT_PRE, E0_SEARCH_EV, E0_SMOOTH_EV, derivative_e0, negative_step_note
 from aurora.core.constants import COHERENT_MIN_SDDS, DESPIKE_K, DETS, EDGE_SPIKE_STEPS, I0_LOW_FRAC
 from aurora.core.io.config import ScanSettings
 from aurora.core.yields import describe as describe_ipfy
@@ -30,6 +33,11 @@ if TYPE_CHECKING:                                   # zones imports this module;
     from aurora.core.zones import ZoneSums
 
 NORM_MODES = ("raw", "i0", "i0pre", "i0jump", "area", "max")
+# The automatic pre-edge window ends at least this far below E0, as Compare's larch pre-edge window does
+# (compare.DEFAULT_PRE, -20..-5 eV from E0). F K scans start at 680 eV and many fluorides have E0 at 686.5-686.8 eV,
+# inside the zone tool's first 15 % (680-687.5 eV): a line fitted there runs up the edge and turns the white line of
+# UF4 / UF5 into the minimum of the normalised trace (review 2026-11, checked against larch's pre_edge).
+AUTO_PRE_GAP_EV = -DEFAULT_PRE[1]
 
 
 # ----------------------------------------------------------------------------- de-spiking
@@ -237,12 +245,39 @@ class Normalised:
     pre: tuple[float, float]
     post: tuple[float, float]
     scale: float = 1.0
+    pre_note: str = ""                      # how the automatic pre-edge window was placed, when it was shortened
+    step_note: str = ""                     # a negative edge jump or area: kept as measured, divided by its size
+
+
+def auto_pre_window(E: np.ndarray, y: np.ndarray, edge_ev: float | None = None) -> tuple[tuple[float, float], str]:
+    """(window, note): the zone tool's automatic pre-edge window, the first 15 % of the scan, ending at least
+    AUTO_PRE_GAP_EV below E0 so the line is never fitted on the rising edge. E0 is Compare's: the largest local maximum
+    of the smoothed derivative of y, within E0_SEARCH_EV of the tabulated edge `edge_ev` when it is known. When no
+    finite point lies that far below E0, the window is the first finite energy alone (a constant level). The note is
+    empty when the zone tool's window was kept."""
+    r0, r1 = float(E[0]), float(E[-1])
+    hi = r0 + 0.15 * (r1 - r0)
+    win = None if edge_ev is None or not np.isfinite(edge_ev) else (edge_ev - E0_SEARCH_EV, edge_ev + E0_SEARCH_EV)
+    e0 = derivative_e0(E, y, E0_SMOOTH_EV, win)
+    if not np.isfinite(e0) or e0 - AUTO_PRE_GAP_EV >= hi:
+        return (r0, hi), ""
+    fin = np.asarray(E, float)[np.isfinite(y)]
+    end = e0 - AUTO_PRE_GAP_EV
+    if (fin <= end).any():
+        return (r0, end), (f"pre-edge window {r0:.1f}–{end:.1f} eV: ends {AUTO_PRE_GAP_EV:g} eV below E0 {e0:.1f} eV "
+                           "(the first 15 % of the scan reaches the edge)")
+    first = float(fin.min()) if fin.size else r0
+    return (first, first), (f"pre-edge window: the scan starts {e0 - first:.1f} eV below E0 {e0:.1f} eV, so the "
+                            f"pre-edge level is the first energy ({first:.1f} eV); set pre in Advanced for another window")
 
 
 def normalise(E: np.ndarray, y: np.ndarray, mode: str, i0: np.ndarray | None, pre=None, post=None,
-              pre_divided: bool = False) -> Normalised:
+              pre_divided: bool = False, edge_ev: float | None = None) -> Normalised:
     """raw | i0 (y / I0) | i0pre (minus a line fitted on `pre`) | i0jump (i0pre / mean over `post`, edge jump = 1) |
-    area (y/I0 / integral) | max (y/I0 / maximum). Default pre = first 15 % of the range, post = last 20 %.
+    area (y/I0 / integral) | max (y/I0 / maximum). Default pre = first 15 % of the range, ending AUTO_PRE_GAP_EV
+    below E0 (auto_pre_window, E0 searched around the tabulated edge `edge_ev`), post = last 20 %. A negative edge
+    jump or area divides by its size, so a signal that falls across the edge keeps its orientation (as larch's
+    pre_edge does), and step_note says so; scale is the divisor used (positive).
     pre_divided=True: y is already a ratio to I0 (IPFY), so it is never divided again; the modes apply to y itself."""
     E = np.asarray(E, float); y = np.asarray(y, float); n = len(E)
     out = y.copy(); scale = 1.0
@@ -254,7 +289,13 @@ def normalise(E: np.ndarray, y: np.ndarray, mode: str, i0: np.ndarray | None, pr
             with np.errstate(all="ignore"):
                 out = np.where(i0 > 0, y / i0, np.nan)
     r0, r1 = E[0], E[-1]
-    PRE = tuple(pre) if pre else (r0, r0 + 0.15 * (r1 - r0))
+    pre_note = step_note = ""
+    if pre:
+        PRE = tuple(pre)
+    elif mode in ("i0pre", "i0jump"):
+        PRE, pre_note = auto_pre_window(E, out, edge_ev)
+    else:
+        PRE = (r0, r0 + 0.15 * (r1 - r0))
     POST = tuple(post) if post else (r1 - 0.2 * (r1 - r0), r1)
     if mode in ("i0pre", "i0jump"):
         sel = (E >= PRE[0]) & (E <= PRE[1]) & np.isfinite(out)
@@ -271,7 +312,9 @@ def normalise(E: np.ndarray, y: np.ndarray, mode: str, i0: np.ndarray | None, pr
         if mode == "i0jump":
             sel = (E >= POST[0]) & (E <= POST[1]) & np.isfinite(out)
             if sel.any() and out[sel].sum() != 0:
-                scale = float(out[sel].mean())
+                jump = float(out[sel].mean())
+                step_note = negative_step_note(jump)
+                scale = abs(jump)
                 out = out / scale
     elif mode == "area":
         fin = np.isfinite(out)
@@ -280,12 +323,14 @@ def normalise(E: np.ndarray, y: np.ndarray, mode: str, i0: np.ndarray | None, pr
             if fin[i] and fin[i - 1]:
                 A += 0.5 * (out[i] + out[i - 1]) * (E[i] - E[i - 1])
         if A:
-            scale = float(A); out = out / A
+            step_note = negative_step_note(A).replace("edge step", "area")
+            scale = abs(float(A)); out = out / scale
     elif mode == "max":
         fin = np.isfinite(out)
         if fin.any() and np.nanmax(out) > 0:
             scale = float(np.nanmax(out)); out = out / scale
-    return Normalised(y=out, pre=(float(PRE[0]), float(PRE[1])), post=(float(POST[0]), float(POST[1])), scale=scale)
+    return Normalised(y=out, pre=(float(PRE[0]), float(PRE[1])), post=(float(POST[0]), float(POST[1])), scale=scale,
+                      pre_note=pre_note, step_note=step_note)
 
 
 # ----------------------------------------------------------------------------- good I0
@@ -493,14 +538,22 @@ def build_traces(sums: "ZoneSums", settings: ScanSettings, good_curve: np.ndarra
                      tey=np.full(nE, np.nan), tey_raw=tey_raw, i0=i0, i0_used=i0n, i0_raw=i0_raw, spikes=sp, settings=settings,
                      signal="ipfy" if is_ipfy else "pfy")
     n_nonpos = 0
+    edge_ev = getattr(sums, "edge_ev", None)
+    pre_win, pre_note = settings.pre, ""
     if any_det:
+        r = ipfy(sum_raw, i0d, getattr(settings, "ipfy_mode", "ratio")) if is_ipfy else None
+        if not settings.pre:                        # one automatic window per zone, from the sum, for every trace
+            with np.errstate(all="ignore"):
+                ref = r.y if is_ipfy else np.where(i0d > 0, sum_raw / i0d, np.nan)
+            pre_win, pre_note = auto_pre_window(E, ref, edge_ev)
         if is_ipfy:
-            r = ipfy(sum_raw, i0d, getattr(settings, "ipfy_mode", "ratio"))
             n_nonpos = r.n_nonpos
-            nr = normalise(E, r.y, settings.fluo_norm, None, settings.pre, settings.post, pre_divided=True)
+            nr = normalise(E, r.y, settings.fluo_norm, None, pre_win, settings.post, pre_divided=True)
         else:
-            nr = normalise(E, sum_raw, settings.fluo_norm, i0d, settings.pre, settings.post)
+            nr = normalise(E, sum_raw, settings.fluo_norm, i0d, pre_win, settings.post)
         out.sum, out.sum_raw, out.pre, out.post, out.sum_scale = nr.y, sum_raw, nr.pre, nr.post, nr.scale
+        if nr.step_note:
+            out.notes.append(f"{'IPFY' if is_ipfy else 'fluorescence'} sum: {nr.step_note}")
     for i, y in enumerate(det_raw):
         if y is None:
             continue
@@ -508,10 +561,10 @@ def build_traces(sums: "ZoneSums", settings: ScanSettings, good_curve: np.ndarra
         if is_ipfy:
             # I0 / (n_ticked x S_k): equal detectors give the sum's trace, on the sum's scale
             r = ipfy(y * max(n_ticked, 1), i0d, getattr(settings, "ipfy_mode", "ratio"))
-            nr = normalise(E, r.y, mode_i, None, settings.pre, settings.post, pre_divided=True)
+            nr = normalise(E, r.y, mode_i, None, pre_win, settings.post, pre_divided=True)
             sc = out.sum_scale if out.sum_scale else 1.0
         else:
-            nr = normalise(E, y, mode_i, i0d, settings.pre, settings.post)
+            nr = normalise(E, y, mode_i, i0d, pre_win, settings.post)
             sc = (out.sum_scale / n_ticked) if (out.sum_scale and n_ticked) else 1.0
         det_norm[i] = nr.y / sc
     ty = tey_raw
@@ -520,7 +573,14 @@ def build_traces(sums: "ZoneSums", settings: ScanSettings, good_curve: np.ndarra
             ty, sp["tey"] = coherent_despike(tey_raw, settings.k, det_raw if det_arr is not None else None)
         else:
             ty, sp["tey"] = despike(tey_raw, settings.k)
-    out.tey = normalise(E, ty, settings.tey_norm, i0d, settings.pre, settings.post).y
+    nt = normalise(E, ty, settings.tey_norm, i0d, pre_win, settings.post, edge_ev=edge_ev)
+    out.tey = nt.y
+    if nt.step_note:
+        out.notes.append(f"TEY: {nt.step_note}")
+    if not any_det:
+        pre_note = nt.pre_note
+    elif settings.fluo_norm in ("raw", "i0") and settings.tey_norm not in ("i0pre", "i0jump"):
+        pre_note = ""                               # no trace of the zone uses the pre-edge window
     # notes, in words and in eV
     _spike_notes(out, settings, mode if settings.despike else "off", getattr(sums, "edge_ev", None))
     if low.any():
@@ -528,6 +588,8 @@ def build_traces(sums: "ZoneSums", settings: ScanSettings, good_curve: np.ndarra
         idx = np.where(low)[0]
         out.notes.append(f"I0 below {I0_LOW_FRAC:.0%} of its median at {_plural(len(idx), 'energy', 'energies')} "
                          f"({_ev_list(E, idx)} eV): left out of the / I0 traces")
+    if pre_note:
+        out.notes.append(pre_note)
     if is_ipfy:
         out.notes.append(describe_ipfy(line, getattr(settings, "ipfy_mode", "ratio")))
         if n_nonpos:

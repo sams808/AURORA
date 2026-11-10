@@ -157,7 +157,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                  "45-one-card-per-attached-scan"),
     "reduce.i0": ("I0: the scan's own, or the mean of the good scans ticked in Check.", "I0 source",
                   "45-one-card-per-attached-scan"),
-    "reduce.pre": ("Pre-edge window in eV, '680-684' style; blank = the first 15 % of the energies.", "pre-edge window",
+    "reduce.pre": ("Pre-edge window in eV, '680-684' style; blank = the first 15 % of the energies, ending at least 5 eV "
+                   "below E0.", "pre-edge window",
                    "45-one-card-per-attached-scan"),
     "reduce.post": ("Post-edge window in eV, '700-720' style; blank = the last 20 % of the energies.",
                     "post-edge window", "45-one-card-per-attached-scan"),
@@ -351,7 +352,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.col.flatten": ("Post-edge line flattened to 1.", "Flatten", "62-the-table"),
     "compare.col.spacing": ("Offset after this row in the stacked plot (blank = the common spacing).", "Spacing",
                             "62-the-table"),
-    "compare.col.scale": ("Multiplier of this row in the stacked plot.", "Scale", "62-the-table"),
+    "compare.col.scale": ("Multiplier of this row in the stacked plot and its figure only; Fit, Difference and the CSV "
+                          "use the trace unscaled.", "Scale", "62-the-table"),
     "compare.col.fit": ("The row is available in Fit.", "Fit", "62-the-table"),
     "compare.col.diag": ("The row's raw signal and fitted lines are shown in the diagnostics panel.", "Diag",
                          "62-the-table"),
@@ -414,7 +416,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "fit.n_comp": ("Number of MCR-ALS components.", "components", "72-pca--mcr-als"),
     "fit.max_iter": ("Maximum number of alternating least-squares iterations.", "maximum iterations",
                      "72-pca--mcr-als"),
-    "fit.tol": ("Stop when the relative change of the error falls below this value.", "tolerance on the error change",
+    "fit.tol": ("Stop when the change of the error between two iterations, divided by the error, falls below this "
+                "value (John Bussey's GUI compared the absolute change with 1e-8).", "tolerance on the error change",
                 "72-pca--mcr-als"),
     "fit.clip_neg": ("Set negative values to 0 before the fit.", "clip negative values", "72-pca--mcr-als"),
     "fit.pca": ("Explained variance of the ticked rows over the range.", "Update PCA scree", "72-pca--mcr-als"),

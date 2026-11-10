@@ -70,7 +70,8 @@ def test_e0_is_never_a_data_or_window_end():
         e0 = derivative_e0(E, y, 1.5, (696.7 - E0_SEARCH_EV, 696.7 + E0_SEARCH_EV))
         assert abs(e0 - 690.0) < 0.3, e0
         r = process(Spectrum("a", "x", E, y), TraceRequest("a", "x"), edge_ev=696.7)
-        assert abs(r.e0 - 690.0) < 0.3 and np.isfinite(r.y).all() and not r.note
+        assert abs(r.e0 - 690.0) < 0.3 and np.isfinite(r.y).all()
+        assert y is above or not r.note                            # (above: the post line climbs the second edge)
 
 
 def test_far_from_the_tabulated_edge_gives_a_calm_note():

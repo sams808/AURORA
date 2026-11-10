@@ -505,8 +505,10 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
     for note in traces.notes:
         if "near the edge" in note:
             msgs.append(("warn", note))
-        elif note.startswith("signal: IPFY") or note.startswith("IPFY:"):
+        elif note.startswith("signal: IPFY") or note.startswith("IPFY:") or note.startswith("pre-edge window"):
             msgs.append(("ok", note))
+        elif "step negative" in note or "area negative" in note:     # kept as measured: worth a look
+            msgs.append(("warn", note))
     in_sum = {DETS[k] for k in ticked}
     for f in flags or []:
         src = getattr(f, "source", "")

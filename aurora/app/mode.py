@@ -58,6 +58,12 @@ EASY_DEFAULTS: dict[str, dict] = {
     "report": {"groups": "all", "appendix_a": True, "appendix_b": True, "preset": "final", "dpi": 600},
 }
 EASY_DEFAULTS_K_FALLBACK = DESPIKE_K
+# John Bussey's own defaults where Easy differs from them, read from his SGM_XAS_GUI.exe (xas_core.DEFAULT_REQUEST and
+# the LCF tab) during the 0.4.0 review; Easy states them next to its own values (Compare's Easy line, the LCF line).
+JOHN_DEFAULTS: dict[str, dict] = {
+    "compare": {"pre": (-10.0, -5.0), "post": (10.0, 34.0), "flatten": False},
+    "lcf": {"sum_to_one": False, "allow_negative": True, "fit_range": (685.0, 705.0)},
+}
 
 # perspectives shown only in Advanced mode (MainWindow marks them; plain strings, no Qt objects at module level)
 _ADVANCED_PERSPECTIVES: set[str] = set()

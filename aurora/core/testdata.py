@@ -22,6 +22,10 @@ STACK = "092758_alpha_beta_f_k_stack"
 ABORTED = "101456_gamma_f_k_stack"
 TEST = "143504_photodiode_f_k_stack"
 ENERGIES = (680.0, 683.0, 686.0, 689.0, 692.0)      # 3 energies already span 6 eV (> MIN_SPAN_EV): an aborted stack is not a test
+# The demo's complete stack (aurora demo, Open the demo beamtime): 660-740 eV in 2 eV steps around the step at 682 eV, so
+# a zone saved by the tutorials' Easy path spans Compare's E0-relative windows (pre -20..-5, post +15..+35 eV) and
+# plots; on ENERGIES (12 eV) every window is empty. The tests' fake project keeps ENERGIES.
+DEMO_STACK_ENERGIES = tuple(660.0 + 2.0 * i for i in range(41))
 # holders 2.. (n_holders): a survey on the hour from 15:00, then one complete stack; holder names N6, N7, ...
 EXTRA_SAMPLES = ("CaF2", "NaF", "BaF2", "LiF", "MgF2", "SrF2", "AlF3", "KF")
 SURVEY2 = "150000_holderB_survey"
@@ -95,8 +99,11 @@ def _write_survey(sdir: Path, tag: str, hhmmss: str, rng: np.random.Generator) -
     _write_point_dir(sdir, len(sx), 695.0, rng)
 
 
-def make_fake_project(root: Path, old_minutes: float = 120.0, n_holders: int = 1, loose: bool = False) -> Path:
+def make_fake_project(root: Path, old_minutes: float = 120.0, n_holders: int = 1, loose: bool = False,
+                      stack_energies=ENERGIES) -> Path:
     """Create root/raw/<DAY>/... with empty processed/ and config/; returns the project root.
+
+    stack_energies: the energies of the complete stack (the demo uses DEMO_STACK_ENERGIES).
 
     n_holders > 1 adds holders N6, N7, ... later the same day (a survey on the hour from 15:00 and one complete stack
     each, see SURVEY2 / STACK2); holder N5 is identical in every variant. loose=True writes the scan folders directly
@@ -109,7 +116,7 @@ def make_fake_project(root: Path, old_minutes: float = 120.0, n_holders: int = 1
     x, y = snake_grid()
     _write_survey(raw_day / SURVEY, "holderA", "010013", rng)
     # complete stack
-    _write_stack(raw_day / STACK, "alpha_beta_f_k", ENERGIES, len(ENERGIES), x, y, rng)
+    _write_stack(raw_day / STACK, "alpha_beta_f_k", stack_energies, len(stack_energies), x, y, rng)
     # aborted stack: 3 of 5 planned energies, untouched for a while
     _write_stack(raw_day / ABORTED, "gamma_f_k", ENERGIES, 3, x, y, rng)
     old = time.time() - 60 * old_minutes

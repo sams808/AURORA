@@ -110,6 +110,11 @@ def test_saved_zone_spectra_are_raw_over_i0_plus_larch(qapp, demo, tmp_path):
         assert r.norm == "larch" and r.pre == (-20.0, -5.0) and r.post == (15.0, 35.0) and r.flatten
         s = lib.spectrum_of(r)
         assert Path(s.source).is_file() and s.meta.get("layout") == "john"
+    # the demo stack spans the windows, so the tutorials' Easy path ends in a drawn, normalised trace (it was all NaN
+    # on the 680-692 eV demo stack); John Bussey's rule: the sdd-scaled row is shown, TEY starts hidden
+    sdd = next(r for r in added if r.signal == "sdd-scaled")
+    assert np.isfinite(lib.process_row(sdd).y).all() and sdd.show
+    assert not next(r for r in added if r.signal == "TEY").show
     # the values come from mode.EASY_DEFAULTS
     d = mode.EASY_DEFAULTS["compare"]
     assert added[0].norm == d["norm"] and tuple(d["pre"]) == added[0].pre and win.compare.spacing.value() == d["spacing"]
@@ -155,3 +160,31 @@ def test_advanced_shows_every_column_with_the_same_rows(qapp, demo):
     mode.set_advanced(False)
     pump(qapp)
     assert [r.to_json() for r in win.library.requests] == reqs
+
+
+def test_easy_states_johns_defaults_and_says_why_a_row_failed(qapp, demo, tmp_path):
+    """Easy Compare and LCF state where they differ from John Bussey's GUI, and a row that cannot be normalised is
+    named with its signal, range, reason and an action that exists in the mode in force."""
+    from demo_window import pump
+    from aurora.core.testdata import write_john_reduced
+    win = demo
+    lib, cmp_ = win.library, win.compare
+    lib.remove(list(range(len(lib.requests))))
+    E = np.linspace(660, 740, 161)
+    write_john_reduced(tmp_path / "A" / "A_full_reduced.csv", "A", E, 1 / (1 + np.exp(-(E - 690))))
+    Es = np.array([680.0, 683.0, 686.0, 689.0, 692.0])
+    write_john_reduced(tmp_path / "S" / "S_full_reduced.csv", "S", Es, 1 / (1 + np.exp(-(Es - 682))))
+    lib.add_folder(tmp_path, john_only=True)
+    pump(qapp)
+    assert [(r.key, r.show) for r in lib.requests] == [("A [sdd-scaled]", True), ("A [TEY]", False),
+                                                       ("S [sdd-scaled]", True), ("S [TEY]", False)]
+    st = cmp_.status.text()
+    assert "1 trace plotted" in st and "could not normalise S [sdd-scaled] (680–692 eV; pre (0 pts)" in st
+    assert "switch to Advanced mode" in st and "untick Show" in st
+    assert not cmp_.easy_note.isHidden() and "John Bussey's GUI used −10…−5 and +10…+34 eV" in cmp_.easy_note.text()
+    assert "John Bussey's GUI: sum free, negatives allowed, 685–705 eV" in win.fit.lcf_fixed.text()
+    mode.set_advanced(True)
+    pump(qapp)
+    assert "set Pre / Post (eV from E0) on these rows" in cmp_.status.text() and cmp_.easy_note.isHidden()
+    mode.set_advanced(False)
+    pump(qapp)

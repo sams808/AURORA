@@ -181,7 +181,7 @@ def cmd_demo(folder: Path) -> int:
     """A synthetic beamtime with fixed ROI bins, a sample sheet and a few zones, for the tutorials."""
     import json
     from aurora.core import testdata
-    root = testdata.make_fake_project(Path(folder))
+    root = testdata.make_fake_project(Path(folder), stack_energies=testdata.DEMO_STACK_ENERGIES)
     (root / "config" / "roi_bins.json").write_text(json.dumps({
         "_meta": {"gains": {"sdd1": 10.0, "sdd2": 10.0, "sdd3": 10.0, "sdd4": 10.0}, "n_sigma": 1.5,
                   "help": "line -> {sdd: [first channel, last channel + 1]}; the demo uses 10 eV per channel"},

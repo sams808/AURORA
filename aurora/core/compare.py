@@ -435,6 +435,13 @@ def resolve_e0(E: np.ndarray, y: np.ndarray, req: "TraceRequest", edge_ev: float
 
 
 # ----------------------------------------------------------------------------- normalisation
+def negative_step_note(step: float) -> str:
+    """The calm note of a negative edge step: the trace keeps the orientation of the data (larch's pre_edge divides
+    by |step| too), so a signal that falls across the edge is never shown as a rising absorption edge."""
+    return (f"edge step negative ({step:.3g}): the signal falls across the edge; kept as measured, divided by |step|"
+            if np.isfinite(step) and step < 0 else "")
+
+
 def _linefit(E, y, lo, hi):
     sel = (E >= lo) & (E <= hi) & np.isfinite(y)
     if sel.sum() >= 2:
@@ -448,7 +455,9 @@ def _linefit(E, y, lo, hi):
 def normalise_larch(E: np.ndarray, y: np.ndarray, pre=DEFAULT_PRE, post=DEFAULT_POST, flatten: bool = True,
                     e0: float | None = None) -> NormResult:
     """John's larch-style normalisation: E0 from the derivative maximum (unless given), a line through [E0+pre] and
-    one through [E0+post], edge step = post(E0) - pre(E0), (y - pre) / step, and flattening above E0."""
+    one through [E0+post], edge step = post(E0) - pre(E0), (y - pre) / |step|, and flattening above E0 (larch's
+    pre_edge: flat = norm - (post - pre) / |step| + its value at E0). A negative step is kept as measured, with a
+    note."""
     E = np.asarray(E, float); y = np.asarray(y, float)
     e0 = derivative_e0(E, y) if e0 is None else float(e0)
     if not np.isfinite(e0):
@@ -464,11 +473,11 @@ def normalise_larch(E: np.ndarray, y: np.ndarray, pre=DEFAULT_PRE, post=DEFAULT_
     if not step or not np.isfinite(step):
         return NormResult(np.full(len(E), np.nan), e0, pre_line, post_line, step, note="edge step is zero",
                           pre_window=pw, post_window=qw)
-    out = (y - pre_line) / step
+    out = (y - pre_line) / abs(step)
     if flatten:
-        flat = (post_line - pre_line) / step - 1.0
-        out = np.where(E >= e0, out - flat, out)
-    return NormResult(out, e0, pre_line, post_line, step, pre_window=pw, post_window=qw)
+        flat = (post_line - pre_line) / abs(step)
+        out = np.where(E >= e0, out - flat + flat[i0], out)
+    return NormResult(out, e0, pre_line, post_line, step, note=negative_step_note(step), pre_window=pw, post_window=qw)
 
 
 def legacy_auto_windows(E: np.ndarray) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -497,8 +506,8 @@ def normalise_legacy(E: np.ndarray, y: np.ndarray, pre_range: tuple[float, float
     step = top - base
     if not step:
         return NormResult(np.full(len(E), np.nan), e0, note="edge step is zero", pre_window=pre_range, post_window=post_range)
-    return NormResult((y - base) / step, e0, np.full(len(E), base), np.full(len(E), top), step,
-                      pre_window=pre_range, post_window=post_range)
+    return NormResult((y - base) / abs(step), e0, np.full(len(E), base), np.full(len(E), top), step,
+                      note=negative_step_note(step), pre_window=pre_range, post_window=post_range)
 
 
 def normalise_tey_line(E: np.ndarray, y: np.ndarray, pre=DEFAULT_PRE, post=DEFAULT_POST,
@@ -516,8 +525,8 @@ def normalise_tey_line(E: np.ndarray, y: np.ndarray, pre=DEFAULT_PRE, post=DEFAU
     sel = (E >= qw[0]) & (E <= qw[1]) & np.isfinite(out)
     step = float(out[sel].mean()) if sel.any() else float("nan")
     if step and np.isfinite(step):
-        out = out / step
-    return NormResult(out, e0, pre_line, None, step, pre_window=pw, post_window=qw)
+        out = out / abs(step)
+    return NormResult(out, e0, pre_line, None, step, note=negative_step_note(step), pre_window=pw, post_window=qw)
 
 
 def _normalise(E, y, req: "TraceRequest", e0: float, norm: str) -> NormResult:
@@ -531,7 +540,8 @@ def _normalise(E, y, req: "TraceRequest", e0: float, norm: str) -> NormResult:
 
 
 def process(spec: Spectrum, req: TraceRequest, edge_ev: float | None = None, e0_ref: float | None = None) -> NormResult:
-    """Shift, choose E0 (req.e0_mode), normalise per the request, scale (plot only).
+    """Shift, choose E0 (req.e0_mode), normalise per the request. req.scale is not applied: it multiplies the drawn
+    trace only (John Bussey's 'Scale (plot only)'), so Fit, Difference and the CSV export read the normalised values.
 
     edge_ev: the tabulated edge of the row (search window of 'deriv', value of 'table'); e0_ref: the E0 of the row a
     'row:<label>' mode points at. A calm e0_note says when E0 lies further from the tabulated edge than the width of
@@ -550,8 +560,7 @@ def process(spec: Spectrum, req: TraceRequest, edge_ev: float | None = None, e0_
     err = spec.meta.get("err") if isinstance(spec.meta, dict) else None
     if err is not None and np.shape(err) == np.shape(spec.y):
         div = abs(r.step) if req.norm != "none" and np.isfinite(r.step) and r.step else 1.0
-        r.err = np.asarray(err, float) / div * abs(req.scale)
-    r.y = r.y * req.scale
+        r.err = np.asarray(err, float) / div
     return r
 
 
