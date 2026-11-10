@@ -203,10 +203,11 @@ def _local_naive(text: str) -> dt.datetime | None:
 
 def _geometry(z: Zone) -> tuple:
     """What makes two zones the same area (import duplicates): rectangles, erase rectangles, painted and erased
-    squares and polygons, rounded to 1 nm."""
+    squares, polygons and erase polygons, rounded to 1 nm."""
     def r(rows):
         return tuple(tuple(round(float(v), 6) for v in row) for row in rows)
-    return (r(z.rects), r(z.erects), r(z.paint), r(z.erase), tuple(r(p) for p in z.polys))
+    return (r(z.rects), r(z.erects), r(z.paint), r(z.erase), tuple(r(p) for p in z.polys),
+            tuple(r(p) for p in z.epolys))
 
 
 class Session(QObject):

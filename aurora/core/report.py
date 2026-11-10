@@ -1430,7 +1430,7 @@ class ReportBuilder:
             "spikes_eV": spikes, "skipped_energies_eV": skipped, "masked_energies_eV": masked,
             "notes": list(t.notes) + [n for n in sd.notes if n not in t.notes],
             "zone_geometry": {"rects": e.zone.rects, "erects": e.zone.erects, "paint": e.zone.paint,
-                              "erase": e.zone.erase, "polys": e.zone.polys},
+                              "erase": e.zone.erase, "polys": e.zone.polys, "epolys": e.zone.epolys},
             "members": int(e.members.size),
             "flags": list(e.flags),
             "calibration": cal.describe(self.project.root) if cal else "none",

@@ -346,6 +346,7 @@ class MapView(pg.GraphicsLayoutWidget):
             return False
         out = any(r[0] - hx <= x <= r[1] + hx and r[2] - hy <= y <= r[3] + hy for r in z.erects)
         out = out or any(abs(x - s[0]) <= s[2] * PAINT_TOL and abs(y - s[1]) <= s[3] * PAINT_TOL for s in z.erase)
+        out = out or any(bool(polygon_inside(poly, np.array([x]), np.array([y]))[0]) for poly in z.epolys)
         return not out
 
     def zone_at(self, x: float, y: float) -> int | None:
@@ -475,8 +476,8 @@ class MapView(pg.GraphicsLayoutWidget):
         return it
 
     def add_polygon(self, pts, colour: str, width: float = 1.5, fill=None, z: int = 10,
-                    casing: bool = True) -> QGraphicsPolygonItem:
-        """An outlined polygon [[x, y], ...] in mm over its casing."""
+                    casing: bool = True, dashed: bool = False) -> QGraphicsPolygonItem:
+        """An outlined polygon [[x, y], ...] in mm over its casing (dashed: an erase outline)."""
         poly = QPolygonF([QPointF(float(p[0]), float(p[1])) for p in pts])
         if casing:
             path = QPainterPath()
@@ -486,6 +487,8 @@ class MapView(pg.GraphicsLayoutWidget):
         it = QGraphicsPolygonItem(poly)
         pen = QPen(QColor(colour), width)
         pen.setCosmetic(True)
+        if dashed:
+            pen.setStyle(Qt.DashLine)
         it.setPen(pen)
         it.setBrush(QBrush(fill if isinstance(fill, QColor) else QColor(fill)) if fill is not None else QBrush(Qt.NoBrush))
         it.setZValue(z)
@@ -511,7 +514,7 @@ class MapView(pg.GraphicsLayoutWidget):
         w = 2.5 if selected else 1.2
         erase = MAP_OVERLAY["erase"]
         self.add_casing(_union(zone.rects, zone.polys, zone.paint), colour, w)        # one casing round the zone
-        self.add_casing(_union(zone.erects, [], zone.erase), erase, 1.0)
+        self.add_casing(_union(zone.erects, zone.epolys, zone.erase), erase, 1.0)
         for r in zone.rects:
             self.add_rect(r[0], r[1], r[2], r[3], colour, w, fill=with_alpha(colour, 0.19) if selected else None,
                           casing=False)
@@ -520,6 +523,9 @@ class MapView(pg.GraphicsLayoutWidget):
                 self.add_polygon(poly, colour, w, fill=with_alpha(colour, 0.19) if selected else None, casing=False)
         for r in zone.erects:
             self.add_rect(r[0], r[1], r[2], r[3], erase, 1.0, dashed=True, casing=False)
+        for poly in zone.epolys:
+            if len(poly) >= 3:
+                self.add_polygon(poly, erase, 1.0, casing=False, dashed=True)
         for s in zone.paint:
             self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, colour, w,
                           fill=with_alpha(colour, 0.31 if selected else 0.15), casing=False)

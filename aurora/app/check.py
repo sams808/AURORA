@@ -41,7 +41,7 @@ from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
 from aurora.core.names import short_time, split_stack_id
 from aurora.core.qc import CountRate, QcResult, i0_candidates, sdd_consistency, spike_summary
-from aurora.core.zones import members, zone_traces
+from aurora.core.zones import GEOMETRY_KEYS, members, zone_traces
 
 log = logging.getLogger("aurora.check")
 
@@ -731,7 +731,7 @@ class CheckPerspective(QWidget):
             self._refresh_queue()
 
     def _row_key(self, it: CheckItem, zone, st, sd, flags) -> tuple:
-        geo = json.dumps({k: v for k, v in zone.to_json().items() if k in ("rects", "erects", "paint", "erase", "polys")},
+        geo = json.dumps({k: v for k, v in zone.to_json().items() if k in GEOMETRY_KEYS},
                          sort_keys=True)
         good = tuple(sorted(k for k, v in self.session.zones.good_i0.items() if v)) if st.i0_source == "good" else ()
         return (it, id(sd), geo, json.dumps(st.to_json(), sort_keys=True, default=str), good,

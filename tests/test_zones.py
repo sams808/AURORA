@@ -55,6 +55,139 @@ def test_run_median_and_despike():
     assert sp2 == [4] and np.isnan(out2[6]) and np.isfinite(out2[4])
 
 
+# ----------------------------------------------------------------------------- strokes (zone drawing, stage A)
+TRIANGLE = [[-0.6, 4.9], [0.35, 4.9], [-0.6, 5.6]]
+TRIANGLE_MEMBERS = [0, 1, 2, 6, 7, 8]           # the 4 x 3 snake grid, pitch 0.25 mm from (-0.5, 5.0)
+
+
+def _grid():
+    x, y = testdata.snake_grid()
+    return x, y, (0.25, 0.25)
+
+
+def _m(z, x, y, pitch):
+    return sorted(members(z, x, y, pitch).tolist())
+
+
+def test_stroke_geometry_core():
+    """apply_stroke on the 4 x 3 snake grid for rectangles, brushes, lassos and clicks, in Draw and Erase mode."""
+    from aurora.core.zones import Stroke, apply_stroke, brush_squares, interpolate_path, stroke_covers, stroke_zone
+    x, y, pitch = _grid()
+    z = Zone(id=1, label="z")
+    apply_stroke(z, Stroke(shape="rect", rect=(-0.5, -0.25, 5.0, 5.25)), x, y, pitch)
+    assert z.rects == [[-0.5, -0.25, 5.0, 5.25]] and _m(z, x, y, pitch) == [0, 1, 6, 7]
+    apply_stroke(z, Stroke(shape="rect", erase=True, rect=(-0.5, -0.5, 5.0, 5.0)), x, y, pitch)
+    assert z.erects == [[-0.5, -0.5, 5.0, 5.0]] and _m(z, x, y, pitch) == [1, 6, 7]
+    # brush: n x n squares round the nearest point (an even n reaches to the + side), the erase squares there go
+    assert brush_squares(x, y, pitch, 0.01, 4.98, 2) == [[0.0, 5.0, 0.25, 0.25], [0.0, 5.25, 0.25, 0.25],
+                                                         [0.25, 5.0, 0.25, 0.25], [0.25, 5.25, 0.25, 0.25]]
+    assert brush_squares(np.array([]), np.array([]), pitch, 0.0, 0.0) == []
+    assert brush_squares(x, y, pitch, -0.5, 4.0) == [] and len(brush_squares(x, y, pitch, -0.5, 4.0, 7)) == 49   # reach
+    apply_stroke(z, Stroke(shape="brush", path=[[0.01, 4.98]], brush_n=2), x, y, pitch)
+    assert _m(z, x, y, pitch) == [1, 2, 3, 4, 5, 6, 7]
+    apply_stroke(z, Stroke(shape="brush", erase=True, path=[[0.24, 5.26]]), x, y, pitch)
+    assert len(z.erase) == 1 and _m(z, x, y, pitch) == [1, 2, 3, 5, 6, 7]
+    apply_stroke(z, Stroke(shape="brush", path=[[0.25, 5.25]]), x, y, pitch)
+    assert z.erase == [] and _m(z, x, y, pitch) == [1, 2, 3, 4, 5, 6, 7]       # painting over an erased point
+    # a click: the point rectangle (or one brush square)
+    apply_stroke(z, Stroke(shape="pixel", rect=(0.25, 0.25, 5.5, 5.5)), x, y, pitch)
+    assert z.rects[-1] == [0.25, 0.25, 5.5, 5.5] and 11 in _m(z, x, y, pitch)
+    z2 = Zone(id=2, label="b")
+    apply_stroke(z2, Stroke(shape="pixel", via="brush", start=(0.24, 5.49), path=[[0.24, 5.49]]), x, y, pitch)
+    assert z2.paint == [[0.25, 5.5, 0.25, 0.25]] and _m(z2, x, y, pitch) == [11]
+    # lasso: the centres inside (John Bussey's rule), and as an erase outline (epolys)
+    z3 = Zone(id=3, label="t")
+    apply_stroke(z3, Stroke(shape="lasso", path=TRIANGLE), x, y, pitch)
+    assert z3.polys == [TRIANGLE] and _m(z3, x, y, pitch) == TRIANGLE_MEMBERS
+    z4 = Zone(id=4, label="all", rects=[[-0.5, 0.25, 5.0, 5.5]])
+    apply_stroke(z4, Stroke(shape="lasso", erase=True, path=TRIANGLE), x, y, pitch)
+    assert z4.epolys == [TRIANGLE] and _m(z4, x, y, pitch) == [3, 4, 5, 9, 10, 11]
+    assert stroke_covers(Stroke(shape="polygon", path=TRIANGLE), x, y, pitch).tolist() == TRIANGLE_MEMBERS
+    # the provisional zone is a copy: the zone itself never changes during a drag
+    before = z4.to_json()
+    d = stroke_zone(z4, Stroke(shape="rect", rect=(-0.5, 0.25, 5.0, 5.5)), x, y, pitch)
+    assert z4.to_json() == before and _m(d, x, y, pitch) == list(range(12))
+    assert _m(stroke_zone(None, Stroke(shape="rect", rect=(-0.5, -0.5, 5.0, 5.0)), x, y, pitch), x, y, pitch) == [0]
+    # a fast brush: two mouse events 5 pitches apart paint every point in between
+    path = interpolate_path((0.0, 0.0), (1.25, 0.0), pitch)
+    assert len(path) == 10 and path[-1] == [1.25, 0.0] and max(np.diff([0.0] + [p[0] for p in path])) <= 0.125 + 1e-12
+    assert interpolate_path((0.0, 0.0), (1.0, 1.0), None) == [[1.0, 1.0]]
+    xw, yw = testdata.snake_grid(nx=12, ny=2, pitch=0.25, x0=0.0, y0=0.0)
+    st = Stroke(shape="brush", path=[[0.0, 0.0]] + interpolate_path((0.0, 0.0), (1.25, 0.0), pitch))
+    z5 = Zone(id=5, label="fast")
+    apply_stroke(z5, st, xw, yw, pitch)
+    assert sorted(np.round(xw[members(z5, xw, yw, pitch)], 3).tolist()) == [0.0, 0.25, 0.5, 0.75, 1.0, 1.25]
+
+
+def test_add_after_erase_wins_on_the_map_it_was_drawn_on():
+    """Z12: a Draw stroke over erased points takes them back (the newest stroke wins), in the same geometry edit;
+    the erase items it touches become erase squares on the points it does not cover."""
+    from aurora.core.zones import Stroke, apply_stroke
+    x, y, pitch = _grid()
+    full = [-0.5, 0.25, 5.0, 5.5]
+    z = Zone(id=1, label="z", rects=[list(full)])
+    middle = (-0.25, 0.0, 5.0, 5.5)
+    apply_stroke(z, Stroke(shape="rect", erase=True, rect=middle), x, y, pitch)
+    assert len(_m(z, x, y, pitch)) == 6
+    apply_stroke(z, Stroke(shape="rect", rect=middle), x, y, pitch)       # rect- then rect+ over the same rectangle
+    assert _m(z, x, y, pitch) == list(range(12)) and z.erects == [] and z.erase == []
+    # a Draw stroke over part of an erased area: the rest stays erased (erase squares at this map's pitch)
+    apply_stroke(z, Stroke(shape="rect", erase=True, rect=tuple(full)), x, y, pitch)
+    assert _m(z, x, y, pitch) == []
+    apply_stroke(z, Stroke(shape="rect", rect=(-0.5, -0.5, 5.0, 5.5)), x, y, pitch)  # the first column back
+    assert _m(z, x, y, pitch) == [0, 7, 8] and z.erects == [] and len(z.erase) == 9
+    # an erase outline under a lasso, and the erase squares of a brush
+    z2 = Zone(id=2, label="p", rects=[list(full)], epolys=[TRIANGLE])
+    apply_stroke(z2, Stroke(shape="rect", rect=(-0.5, -0.5, 5.0, 5.0)), x, y, pitch)
+    assert 0 in _m(z2, x, y, pitch) and z2.epolys == [] and _m(z2, x, y, pitch) == [0, 3, 4, 5, 9, 10, 11]
+    assert len(z2.erase) == 5                                               # 1, 2, 6, 7, 8 stay erased
+    # without the map's points nothing is replaced (geometry only)
+    z3 = Zone(id=3, label="q", rects=[list(full)], erects=[list(middle)])
+    apply_stroke(z3, Stroke(shape="rect", rect=middle))
+    assert z3.erects == [list(middle)]
+
+
+def test_erase_polygons_round_trip_copy_and_export(tmp_path):
+    from aurora.core.io.config import HolderZones, ZonesFile
+    from aurora.core.zones import export_json, export_ready, geometry, set_geometry, shape_text
+    x, y, pitch = _grid()
+    z = Zone(id=1, label="z", rects=[[-0.5, 0.25, 5.0, 5.5]], epolys=[TRIANGLE])
+    assert shape_text(z) == "1 rectangle, minus 1 erased outline"
+    assert shape_text(Zone(id=2, label="p", polys=[TRIANGLE], epolys=[TRIANGLE, TRIANGLE])) == \
+        "polygon with 3 vertices, minus 2 erased outlines"
+    back = Zone.from_json(z.to_json())
+    assert back.epolys == [TRIANGLE] and "epolys" not in back.extra
+    assert "epolys" not in Zone(id=3, label="e").to_json()                 # written only when there is one
+    seen = Zone.from_json({"id": 4, "label": "s", "epolys": []})
+    assert seen.to_json()["epolys"] == []                                   # kept as it was read
+    with pytest.raises(ValueError, match="erase polygon"):
+        Zone.from_json({"id": 5, "label": "bad", "epolys": [[[0, 0], [1]]]})
+    # Copy / paste geometry carries the erase outlines
+    g = geometry(z)
+    assert g["epolys"] == [TRIANGLE]
+    moved = Zone(id=6, label="m")
+    set_geometry(moved, g, dx=1.0, dy=-1.0)
+    assert moved.epolys == [[[p[0] + 1.0, p[1] - 1.0] for p in TRIANGLE]]
+    # the session file (ZonesFile)
+    zf = ZonesFile(project="T")
+    zf.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=[z])
+    path = tmp_path / "session.json"
+    zf.save(path)
+    assert ZonesFile.load(path).holders["N5"].zones[0].epolys == [TRIANGLE]
+    # the HTML zone tool knows rectangles and squares only: the erase outline reaches it as erase squares, on every
+    # stack, whatever its pitch
+    want = members(z, x, y, pitch).tolist()
+    assert want == [3, 4, 5, 9, 10, 11]
+    xc, yc = testdata.snake_grid(nx=3, ny=2, pitch=0.5, x0=-0.55, y0=4.95)
+    exp = export_ready(z, {"fine": (x, y, pitch), "coarse": (xc, yc, (0.5, 0.5))})
+    assert exp["epolys"] == [TRIANGLE]
+    tool = Zone(id=1, label="t", rects=exp["rects"], erects=exp["erects"], paint=exp["paint"], erase=exp["erase"])
+    assert members(tool, x, y, pitch).tolist() == want
+    assert members(tool, xc, yc, (0.5, 0.5)).tolist() == members(z, xc, yc, (0.5, 0.5)).tolist()
+    out = export_json(zf, {"fine": (x, y, pitch)})
+    assert out["holders"]["N5"]["zones"][0]["erase"]
+
+
 # reference copies of the zone tool's loops (aurora.core.spectra before they were vectorised), kept for equality
 def _run_median_ref(y, w=5):
     y = np.asarray(y, float); n = len(y); h = w // 2

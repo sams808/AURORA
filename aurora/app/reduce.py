@@ -630,7 +630,8 @@ class ReducePerspective(QWidget):
         loaded = [s for s in ses.stacks_of() if ses.stack_loaded(ses.stack_id(s)) is not None] if has else []
         set_enabled(self.new_zone_btn, has and h is not None, NO_PROJECT if not has else "this project has no holder")
         set_enabled(self.del_zone_btn, z is not None, NO_PROJECT if not has else "select a zone first")
-        set_enabled(self.clear_btn, z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys),
+        set_enabled(self.clear_btn, z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys or
+                                                           z.epolys),
                     NO_PROJECT if not has else ("select a zone first" if z is None else "the zone is empty"))
         set_enabled(self.send_btn, z is not None and self.library is not None and bool(z.settings),
                     NO_PROJECT if not has else ("select a zone first" if z is None else "load a scan that covers the zone"))
@@ -639,7 +640,7 @@ class ReducePerspective(QWidget):
         set_enabled(self.stitch_btn, len(loaded) >= 2,
                     NO_PROJECT if not has else "load at least two stacks of the holder first (Load all)")
         set_enabled(self.load_poly_btn, has and h is not None, NO_PROJECT)
-        one_poly = z is not None and len(z.polys) == 1 and not (z.rects or z.paint or z.erects or z.erase)
+        one_poly = z is not None and len(z.polys) == 1 and not (z.rects or z.paint or z.erects or z.erase or z.epolys)
         set_enabled(self.save_poly_btn, one_poly,
                     NO_PROJECT if not has else ("select a zone first" if z is None else
                                                 "John Bussey's file holds one polygon: the zone must be exactly one polygon"))
@@ -1079,7 +1080,7 @@ class ReducePerspective(QWidget):
         if z is None:
             return
         with self.session.edit(f"clear zone {z.id}"):
-            z.rects, z.erects, z.paint, z.erase, z.polys = [], [], [], [], []
+            z.rects, z.erects, z.paint, z.erase, z.polys, z.epolys = [], [], [], [], [], []
         self.status_label.setText(f"zone {z.id} cleared: draw its region again")
 
     # ------------------------------------------------------------------ right-click menus
@@ -1387,7 +1388,8 @@ class ReducePerspective(QWidget):
         else:
             self.z_label.setEditText(z.label); self.z_group.setEditText(z.group); self.z_comment.setText(z.comment)
             self.z_info.setText(f"zone {z.id}: {plural(len(z.rects), 'rect')}, {plural(len(z.polys), 'polygon')}, "
-                                f"{plural(len(z.erects), 'erase rect')}, {len(z.paint)} painted px, {len(z.erase)} erased px "
+                                f"{plural(len(z.erects), 'erase rect')}, {plural(len(z.epolys), 'erase outline')}, "
+                                f"{len(z.paint)} painted px, {len(z.erase)} erased px "
                                 f"· covered by {plural(len(z.members), 'loaded scan')}")
         for w in (self.z_label, self.z_group, self.z_comment):
             w.blockSignals(False)
