@@ -348,7 +348,8 @@ def test_the_recent_check_and_discovery_never_wait_for_a_share(tmp_path, monkeyp
         return real_isdir(p)
     real_is_dir = pathlib.Path.is_dir
     monkeypatch.setattr(os.path, "isdir", isdir)
-    monkeypatch.setattr(pathlib.Path, "is_dir", lambda self: isdir(self) if "does not answer" in str(self) else real_is_dir(self))
+    monkeypatch.setattr(pathlib.Path, "is_dir",
+                        lambda self, *a, **k: isdir(self) if "does not answer" in str(self) else real_is_dir(self, *a, **k))
     ok = tmp_path / "here"
     ok.mkdir()
     gone = str(tmp_path / "share that does not answer")
