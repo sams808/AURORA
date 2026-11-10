@@ -787,6 +787,8 @@ Every sum in Maps uses each detector's own channels for the emission window. The
 offset (`sdd_calibration.json`), so one eV window is a different channel range on each of them: on the 2026 beamtime
 640–710 eV is channels 63–70 on SDD1, 68–75 on SDD2, 65–72 on SDD3 and 62–69 on SDD4. A fixed line uses each SDD's own
 bins from `config/roi_bins.json`.
+With **/ I0**, an energy whose I0 is below 20 % of its median (beam loss) is left out of the XANES, the clusters and
+both exports, as in Reduce; the line under the map names it.
 
 Top controls: **sum of** **SDD1** **SDD2** **SDD3** **SDD4** (the detectors in every sum: the map, the spectra, the
 XANES sum, the elemental maps, the RGB composite, the clusters and the exports), **window** (a fixed line or *custom

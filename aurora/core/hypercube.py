@@ -47,6 +47,7 @@ from aurora.core.io.config import Calibration
 from aurora.core.io.h5 import find_h5, xy
 from aurora.core.io.raw import read_point_dir, stack_energy_dirs, stack_last_mtime
 from aurora.core.model import Project, ScanInfo
+from aurora.core.spectra import i0_low_mask
 from aurora.core.zones import grid_pitch
 
 log = logging.getLogger("aurora.hypercube")
@@ -243,6 +244,22 @@ class Hypercube:
         dets = range(len(DETS)) if windows is None else [_det_index(windows)]
         return {d: (int(lo), int(hi)) for d in dets}
 
+    def i0_low(self, pix=None) -> np.ndarray:
+        """(nE,) True at the valid energies whose I0, summed over `pix` (all pixels when None), is below I0_LOW_FRAC x
+        its median: beam loss, left out of every / I0 XANES, pixel matrix and export, as in the Reduce traces
+        (spectra.i0_low_mask, docs/HANDOFF.md 5.2, sgm_report's 'I0 dropped below 20% of its median')."""
+        s = np.full(self.n_energies, np.nan)
+        v = np.where(self.valid)[0]
+        if v.size:
+            i0 = np.asarray(self.i0, float)[v]
+            s[v] = np.nansum(i0 if pix is None else i0[:, np.asarray(pix, int)], axis=1)
+        return i0_low_mask(s)
+
+    def matrix_energies(self, per_i0: bool = True) -> np.ndarray:
+        """Indices of the energies in pixel_matrix and the PyMca exports: the valid ones, less the low-I0 ones when the
+        counts are divided by I0."""
+        return np.where(self.valid & ~self.i0_low())[0] if per_i0 else np.where(self.valid)[0]
+
     # ------------------------------------------------------------------ derived sums
     def _set_bins(self, labels, windows, sums) -> None:
         self.bin_labels = list(labels or [])
@@ -359,14 +376,16 @@ class Hypercube:
     def xanes(self, windows, lo: int | None = None, hi: int | None = None, pix=None, per_i0: bool = True,
               progress=None) -> np.ndarray:
         """XANES trace: window counts summed over the pixels and the detectors at every energy (NaN at skipped
-        energies). `progress(i, n, msg)` is called once per energy (it may raise Cancelled)."""
+        energies, and / I0 at the energies whose I0 over the pixels is low: i0_low). `progress(i, n, msg)` is called once
+        per energy (it may raise Cancelled)."""
         w = self.resolve_windows(windows, lo, hi)
         p_idx = None if pix is None else np.asarray(pix, int)
         out = np.full(self.n_energies, np.nan)
+        low = self.i0_low(p_idx) if per_i0 else np.zeros(self.n_energies, bool)
         for e in range(self.n_energies):
             if progress:
                 progress(e, self.n_energies, "")
-            if not self.valid[e]:
+            if not self.valid[e] or low[e]:
                 continue
             s = sum(self._window_sum(d, e, a, b, p_idx) for d, (a, b) in w.items())
             if per_i0:
@@ -394,9 +413,10 @@ class Hypercube:
     # ------------------------------------------------------------------ statistics on pixels
     def pixel_matrix(self, windows, lo: int | None = None, hi: int | None = None, per_i0: bool = True,
                      progress=None) -> np.ndarray:
-        """(n_pix, nE_valid) XANES per pixel for the windows: the matrix PCA and k-means work on."""
+        """(n_pix, n) XANES per pixel for the windows at the energies matrix_energies(per_i0) (the valid ones, less the
+        low-I0 ones / I0): the matrix PCA and k-means work on."""
         w = self.resolve_windows(windows, lo, hi)
-        v = np.where(self.valid)[0]
+        v = self.matrix_energies(per_i0)
         M = np.zeros((self.n_pix, v.size))
         for j, e in enumerate(v):
             if progress:
@@ -868,6 +888,11 @@ class _AtomicH5:
         return False
 
 
+def _i0_low_ev(hc: Hypercube, per_i0: bool) -> np.ndarray:
+    """The energies (eV) a / I0 export leaves out for their low I0 (an attribute of the file; empty without / I0)."""
+    return np.asarray(hc.E[hc.valid & hc.i0_low()] if per_i0 else [], float)
+
+
 def export_pymca_xanes(hc: Hypercube, path: Path, windows, lo: int | None = None, hi: int | None = None,
                        per_i0: bool = True, title: str = "", progress=None) -> Path:
     """NeXus-style 3D stack (y, x, energy) that PyMca opens for PCA / cluster analysis (the CLS `_PCA-CA.h5` layout,
@@ -877,7 +902,7 @@ def export_pymca_xanes(hc: Hypercube, path: Path, windows, lo: int | None = None
     if not w:
         raise ValueError("no detector selected")
     ix, iy, nx, ny = _snap_grid(hc.x, hc.y, hc.pitch)
-    v = np.where(hc.valid)[0]
+    v = hc.matrix_energies(per_i0)                   # / I0: the low-I0 energies are left out, as in the XANES
     if v.size == 0:
         raise ValueError(f"{hc.name}: no valid energy to export")
     dets = sorted(w)
@@ -915,6 +940,7 @@ def export_pymca_xanes(hc: Hypercube, path: Path, windows, lo: int | None = None
         meas.attrs["sdds"] = [DETS[d] for d in dets]
         meas.attrs["channel_roi"] = np.array([w[d] for d in dets], dtype=np.int64)      # one [lo, hi] row per SDD
         meas.attrs["normalized"] = bool(per_i0)
+        meas.attrs["i0_low_ev"] = _i0_low_ev(hc, per_i0)
         md = h.create_group("stack_metadata")
         md.attrs["scan_name"] = hc.name; md.attrs["nx"] = nx; md.attrs["ny"] = ny; md.attrs["aurora"] = "export_pymca_xanes"
     log.info("%s: PyMca XANES stack written (%d x %d x %d, %s)", path, ny, nx, v.size, describe_windows(w))
@@ -927,7 +953,7 @@ def export_pymca_4d(hc: Hypercube, path: Path, per_i0: bool = True, title: str =
     full (y, x, energy, 256) cube per detector and summed. Every detector is written; the sums cover `dets` (all four
     when None). Written one detector and energy slab at a time into chunked datasets, never as one array in memory."""
     ix, iy, nx, ny = _snap_grid(hc.x, hc.y, hc.pitch)
-    v = np.where(hc.valid)[0]
+    v = hc.matrix_energies(per_i0)                   # / I0: the low-I0 energies are left out, as in the XANES
     if v.size == 0:
         raise ValueError(f"{hc.name}: no valid energy to export")
     summed = list(range(len(DETS))) if dets is None else sorted(_det_index(d) for d in dets)
@@ -973,6 +999,7 @@ def export_pymca_4d(hc: Hypercube, path: Path, per_i0: bool = True, title: str =
         xrf.create_dataset("sdd_xrf_stack_3d", data=xrf_sum, chunks=_chunks(ny, nx, N_CH), **kw)
         full.attrs["nx"] = nx; full.attrs["ny"] = ny; full.attrs["rows"] = ny; full.attrs["cols"] = nx
         full.attrs["summed_sdds"] = [DETS[d] for d in summed]
+        full.attrs["i0_low_ev"] = _i0_low_ev(hc, per_i0)
         md = h.create_group("stack_metadata"); md.attrs["scan_name"] = hc.name; md.attrs["aurora"] = "export_pymca_4d"
     log.info("%s: PyMca 4D file written", path)
     return Path(path)

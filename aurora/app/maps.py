@@ -38,7 +38,7 @@ from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskB
                                 notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
 from aurora.core import hypercube as hcmod
 from aurora.core.compare import Spectrum
-from aurora.core.constants import DETS
+from aurora.core.constants import DETS, I0_LOW_FRAC
 from aurora.core.deconv import deconvolve_cost, deconvolve_grid
 from aurora.core.flags import saturated_dets
 from aurora.core.grid import Grid, to_grid
@@ -123,6 +123,7 @@ class MapsPerspective(QWidget):
         self._dirty = False                          # a zone changed while Maps was hidden
         self._flagged: dict[int, str] = {}           # SDD index -> 'flagged saturated (source)'
         self._load_note = ""
+        self._i0_low_text = ""                       # the low-I0 energies of the cube, for the line under the map
         self.stats = {"redraws": 0, "maps": 0, "spectra": 0, "xanes": 0}
         self._map_cache = _LRU(CACHE_ENTRIES)
         self._spec_cache = _LRU(CACHE_ENTRIES)
@@ -543,6 +544,11 @@ class MapsPerspective(QWidget):
         for c in self.rgb_lines:
             c.clear(); c.addItems([self.line.itemText(i) for i in range(1, self.line.count())])
         self._apply_flags(hc)
+        low = np.where(hc.valid & hc.i0_low())[0]
+        self._i0_low_text = ("" if not low.size else
+                             f"/ I0 leaves out {plural(low.size, 'energy', 'energies')} with I0 below "
+                             f"{I0_LOW_FRAC:.0%} of its median ({', '.join(f'{hc.E[e]:.2f}' for e in low[:4])}"
+                             f"{' …' if low.size > 4 else ''} eV)")
         sat = ", ".join(DET_LABELS[k] for k in sorted(self._flagged))
         self.status.setText(f"{hc.name}: {hc.n_energies} energies x {hc.n_pix} px x 256 ch x 4"
                             + (f" ({hc.dtype})" if hc.dtype else "") + (f" · saturated {sat}" if sat else "")
@@ -798,6 +804,8 @@ class MapsPerspective(QWidget):
         parts = [f"{what}: {describe_windows({d: w[d] for d in dets})}" if dets else NO_SDD,
                  "averaged over the valid energies" if ei is None else "at the energy of the slider",
                  f"ROI {len(self._roi) if self._roi is not None else hc.n_pix} px"]
+        if self.per_i0.isChecked() and self._i0_low_text:
+            parts.append(self._i0_low_text)
         if note:
             parts.append(note)
         self.map_hint.setText(" · ".join(parts))
@@ -985,9 +993,10 @@ class MapsPerspective(QWidget):
                 "window": self.line.currentData() or f"{self.w_lo.value():.1f}-{self.w_hi.value():.1f} eV"}
 
         def work(cb):
-            nv = int(np.count_nonzero(hc.valid))
+            ev = hc.matrix_energies(per_i0)                 # the valid energies, less the low-I0 ones / I0
+            nv = int(ev.size)
             M = hc.pixel_matrix(w, per_i0=per_i0, progress=lambda i, _n, msg="": cb(i, nv + 1, msg))
-            cr = hcmod.pca_kmeans(M, hc.E[hc.valid], n_pc, n_k, seed)
+            cr = hcmod.pca_kmeans(M, hc.E[ev], n_pc, n_k, seed)
             cb(nv + 1, nv + 1, "clusters ready")           # a cancel during k-means ends here: nothing is replaced
             return gen, M, cr, meta
         jobs.of(self).submit("maps:clusters", work, on_done=self._clusters_done, on_end=lambda _s: self.update_actions(),
