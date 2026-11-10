@@ -65,13 +65,13 @@ mode** shows every option and the Maps perspective. Three entry points switch th
 
 Switching never changes a value and never writes the session: a value chosen in Advanced mode stays in force in Easy
 mode, and Easy mode says so where it matters (the chip *advanced settings in use* in Reduce, *chosen in Advanced mode*
-in Report).
+in Report, and the same chip over the Compare library).
 
 | Perspective | Easy mode | Advanced mode adds |
 |---|---|---|
 | Home | the scan tree, the project summary and the scan analysis summary | the Kind column, the folder, kind and label rows, the sgm_report notes, the full table of h5 attributes, the SDD geometry, the full error of a failed open |
 | Survey | the holder, the plate map with footprints and zones, the footprint legend, the sketch, the sample-sheet rows | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…** |
-| Reduce | the four numbered steps: **Scans of holder N5**, **XRF window** (preset, lo, hi), **Region** (**navigate**, **rect+**, **lasso+**, **Clear**, **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**); the **Preview** with **all scans of the sample** | **Load all**; **polygon+**, **rect-**, **brush+**, **brush-**, the brush size, **rect+ starts a new zone**, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Load polygon…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview toggles |
+| Reduce | the four numbered steps: **Scans of holder N5**, **XRF window** (preset, lo, hi), **Region** (**navigate**, **rect+**, **lasso+**, **Clear**, **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **polygon+**, **rect-**, **brush+**, **brush-**, the brush size, **rect+ starts a new zone**, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview toggles |
 | Check | **Spectra to check** (**Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder N5** (**Run the checks on holder N5**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
 | Fit | the **LCF** tab with its fixed options stated; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
@@ -137,7 +137,7 @@ key also deletes a sample, and the Help window, tooltips and messages show the M
 | General | **Esc** cancel the running task, **Ctrl+Return** the main action of the page |
 | Reduce | **V** navigate, **R** rect+, **L** lasso+, **E** rect- (Advanced), **B** brush+ (Advanced), **Shift+B** brush- (Advanced), **P** polygon+ (Advanced), **+** / **-** brush size (Advanced), **N** new sample, **Del** delete the sample, **Alt+Up** / **Alt+Down** previous / next sample, **[** / **]** previous / next scan, **F** fit the view, **Ctrl+Shift+C** / **Ctrl+Shift+V** copy / paste the scan settings (Advanced) |
 
-The shortcuts of Advanced tools do nothing in Easy mode.
+The shortcuts of Advanced tools do nothing in Easy mode; there the dialog lists them with *(Advanced mode)*.
 
 ### 1.4 The session: saving, undo and backups
 
@@ -148,7 +148,7 @@ and looking at it writes nothing. Every change to zones, settings or good-I0 can
 stroke, or a run of edits of the same kind less than 1.5 s apart, is one step, and so are **New sample** with the
 first rectangle drawn into it, one **Propose zones**, one import and one restore. The undo history lives in memory
 and ends when AURORA closes. **Reload** (**F5**) keeps the holder, the zone and the stack on screen, the stacks already
-read (unless their folder changed) and the undo history; new holders are added at the end.
+read (unless their folder changed), the Check queue and the undo history; new holders are added at the end.
 
 The session is never lost: session.json is replaced in one step (a crash mid-way leaves the previous file), the
 previous good file is kept as `session.json.bak`, and a copy goes to `.aurora/backups/` at most every 10 minutes while
@@ -372,7 +372,9 @@ appear at the end of the list.
 - Membership: a pixel belongs to a rectangle when its square touches it (tolerance 0.45 of the pitch), to a painted
   square within 0.51 of the pitch, and to a polygon when its centre lies inside the polygon (John Bussey's rule,
   matplotlib `Path.contains_points`); erase rectangles and squares remove it again. The rectangle rule is the browser
-  zone tool's, so the two agree pixel for pixel.
+  zone tool's, so the two agree pixel for pixel. It differs from John Bussey's GUI, which turned a rectangle into a
+  polygon and took only the pixels whose centre lies inside: a rectangle here also takes the edge pixels whose square
+  it touches (draw the shape with lasso+ for his strict rule).
 - Right-click on a zone: **Rename…**, **Set group** (Advanced), **Duplicate**, **Delete**, **Send to Compare**
   (Advanced), **Copy geometry**, **Zoom to zone**. Right-click on the empty map: **New zone here**, **Paste zone** (the
   copied geometry, centred where the menu opened), **Fit view**.
@@ -389,9 +391,12 @@ appear at the end of the list.
 **New sample**, **Delete** and the **sample** label sit above the map, with the list of the holder's samples
 (number, label, group, number of attached scans) beside it. Selecting a zone shows its outline on the map and its
 card on the right. **Propose zones**, **Stitch…**, **Load polygon…** and **Save polygon…** are in the zone card
-(Advanced). **Load polygon…** reads a polygon ROI saved by John Bussey's GUI (`<sample>_polygon_roi.json`, at least
+(Advanced; **Load polygon…** in Easy mode too, as John Bussey's step 3 had it).
+**Load polygon…** reads a polygon ROI saved by John Bussey's GUI (`<sample>_polygon_roi.json`, at least
 three [x, y] vertices in mm) into a new sample named after the file; **Save polygon…** writes the selected sample in
 that format when it is exactly one polygon.
+A label picked from the **sample** list renames the sample at once; **Ctrl+Z** in that box undoes the last edit when
+the box has no typing of its own to undo.
 
 A zone is attached to every complete stack of the holder that it covers, loaded or not: the stage coordinates are
 read from each stack's .h5 when the project opens (no detector data is read), and every covered stack gets its
@@ -412,7 +417,10 @@ undo step, and the session is backed up just before.
 - Easy mode (**4 · Reduce**): a read-only line of the settings used, for example *I0 mcc ch1 (Au mesh) · TEY mcc ch4 ·
   zone sum · fluorescence / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3 saturated, left out)*, and **Add to
   Check** (**Ctrl+Return**), which queues the selected sample on the current scan for Check (disabled while the region
-  holds no point). Settings that do not exist yet are made from the Easy defaults.
+  holds no point), and **Load polygon…** (4.3). A sample still called *zone 1* is saved under that name: the status
+  line says so (John Bussey's GUI asked for a label). Settings that do not exist yet are made from the Easy defaults.
+  A flagged SDD that is still in the sum is named (*SDD1 flagged saturated, still in the sum*), and so is an I0
+  flagged invalid that is still used.
 - When a sample's settings differ from the Easy defaults (set in Advanced, or by a rule), Easy mode shows the chip
   *advanced settings in use*; its tooltip lists the fields (*fluorescence normalisation: / I0, maximum = 1; SDD3
   off*). **Reset to Easy defaults** rewrites them in one step (**Edit > Undo** brings them back). Switching modes
@@ -534,7 +542,9 @@ The card **Spectra to check** holds one row per sample region (zone) and scan:
 | Looks OK | the spectrum is saved by **Save ticked → Compare** and goes into the report (it is the scan's *include* tick) |
 
 The messages are the checks of John Bussey's GUI, ported: the region contains 0 measurement points (bad); only N
-points, noisy (fewer than 3); a ticked SDD with no finite values or a signal zero everywhere (bad: check its window);
+points, noisy (fewer than 3); a ticked SDD with no finite values or a signal zero everywhere (bad: check its window,
+or leave a dead detector out of the sum on the scan card in Advanced mode; John Bussey's GUI only warned of a zero
+signal);
 N missing energy points; I0 zero or missing at N energies; I0 varying by more than a factor 3 over the scan; TEY
 without finite values; more than 10 % of the points flagged bad. AURORA adds the scan's flags with their source (SDD
 saturated, high count rate, I0 invalid; from sgm_report or from AURORA's own check) and a note when spikes were found
@@ -545,6 +555,7 @@ A row with a bad message starts unticked. A row whose scan cannot be read shows 
 is reported once). **Tick all** and **Untick all** change every row. Right-click a row for *Show the region in Reduce*
 and *Remove from the queue*. A queued scan whose holder was never checked (no sgm_report summary, no earlier check)
 gets the count-rate probe of its holder in the background, so the messages can name saturated SDDs and an invalid I0.
+The queue is saved with the session: **Reload** and a restart keep it.
 
 **view** (in **Preview of the selected spectrum**) chooses what the preview of the selected row shows (John Bussey's
 five views): *detector signals, cleaned*; *fluorescence sum and its bad points* (crosses at the bad energies, as
@@ -584,7 +595,8 @@ The results are kept in `.aurora/qc.json`: the table is filled again when the pr
 whose files changed since its check (newer or more energy folders) is checked again in the background. The line under
 the table says when the checks ran and that the references are within ±150 eV. AURORA's verdicts act like the
 sgm_report summary: new zones leave saturated SDDs out of the sum and use the good-I0 mean when I0 is invalid, also on
-a beamtime without sgm_report.
+a beamtime without sgm_report. Settings made before a verdict (or before an sgm_report summary that a **Reload** finds)
+follow it too, unless that field was changed on a card: one undo step, named in the status line.
 
 **I0 of the holder's scans (per-pixel mean)** scores every scan's I0 curve: level, biggest step, roughness, number of
 non-positive points. Tick the good ones, or **Auto-select good I0**; their mean is what scans set to *good-I0 mean*
@@ -633,6 +645,9 @@ The library belongs to the project: it is saved in `<project>/.aurora/library.js
 every change, and it comes back when the project is opened again. Easy mode is John Bussey's Compare tab: the columns
 Show, Fit, Label, Signal, Shift eV and Colour, and rows that all come from saved John-format files, so every row is the
 raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened). These windows are AURORA's defaults, not John Bussey's (a line under the stacked plot says so in Easy mode): his GUI used pre −10..−5 and post +10..+34 eV, without the flattening step (his division by the post − pre line flattens the same way). On his BO3 file the two differ by up to 0.43 near the white line, and agree within 0.008 when given the same windows. Larch's own pre_edge also starts the post window 15 eV above E0 on these scans. As in his GUI, the TEY row of a John-format file starts with **Show** unticked.
+When a row's hidden columns differ from the Easy values (set in Advanced mode or by **Load config…**), Easy mode shows
+the chip *advanced settings in use* over the library; its tooltip names the rows and fields, and **Reset to Easy
+defaults** rewrites them (a trace normalised already, such as a zone trace from Reduce, keeps Norm none).
 
 ### 6.1 Loading
 
@@ -659,7 +674,7 @@ raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV a
 | Show | plotted |
 | Fit | the row is available in Fit |
 | Label | editable; **Rename** and **Duplicate** act on the selected rows; ink text with a swatch of the trace's colour and dash |
-| Signal | sdd-scaled, TEY, sdd1…, as read from the file (a list of the file's signals) |
+| Signal | a list of the file's signals. John Bussey's files give *sdd-scaled* (the four SDD signals each scaled to 0–1 by their own minimum and maximum, summed, then divided by I0: his fluorescence signal), *sdd_total* (the summed counts / I0) and *TEY* (total electron yield / I0); other files give their columns as named (sdd1…, PFY_…_over_I0) |
 | Norm | larch (two lines around E0), legacy (constant pre / post means over absolute windows), tey_line (pre-edge line only), none (a list) |
 | Shift eV | added to the energy axis (calibration offsets) |
 | Pre lo / hi, Post lo / hi | the fitting windows: eV from E0 for larch and tey_line; absolute eV for legacy, where a blank window reads *auto 15 %* / *auto 20 %* (the first 15 % and the last 20 % of the scan, John Bussey's defaults) |

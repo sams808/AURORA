@@ -176,7 +176,9 @@ HELP: dict[str, tuple[str, str, str]] = {
                            "whose centre lies inside belong to the zone.", "lasso", "42-stack-map"),
     "reduce.tool.polygon+": ("Click the corners of a polygon, double-click to close it (Esc cancels). Pixels whose centre "
                              "lies inside belong to the zone.", "polygon", "42-stack-map"),
-    "reduce.clear": ("Remove the drawing of the selected sample (rectangles, polygons, painted pixels), to draw it again.",
+    "reduce.clear": ("Remove the drawing of the selected sample (rectangles, polygons, painted pixels), to draw it again. "
+                     "John Bussey's 'Clear (full map)' went back to every point instead: drag rect+ over the whole "
+                     "map for that.",
                      "Clear the region", "42-stack-map"),
     "reduce.zones": ("The samples (zones) of the holder: pick one to edit it. A click inside a zone on the map also "
                      "selects it.", "samples of the holder", "43-zones"),
@@ -294,8 +296,13 @@ HELP: dict[str, tuple[str, str, str]] = {
                       "tick of the scan). A row with a bad message starts unticked.", "Looks OK",
                       "51-spectra-to-check"),
     # ------------------------------------------------------------------ compare
-    "compare.add_folder": ("Add the spectra saved in a folder: John Bussey's _full_reduced.csv / _absorption.csv, "
-                           "sgm_report _xanes.csv, AURORA zone CSVs.", "Add saved spectra", "61-loading"),
+    "compare.add_folder": ("Add the spectra saved in a folder: John Bussey's _full_reduced.csv / _absorption.csv "
+                           "(the files Check saves); Advanced mode also reads sgm_report _xanes.csv and AURORA zone "
+                           "CSVs.", "Add saved spectra", "61-loading"),
+    "compare.reset_easy": ("Rewrite the columns Easy mode hides, on every row that differs, with the Easy defaults: Norm "
+                           "larch, pre -20..-5 eV and post +15..+35 eV from E0, flattened, E0 from the derivative, "
+                           "scale 1 (a trace normalised already keeps Norm none).", "Reset to Easy defaults",
+                           "6-compare"),
     "compare.add_csv": ("Add any column file; the energy column is found by name or taken as the first column.",
                         "Add CSV", "61-loading"),
     "compare.references": ("Pick spectra from the reference folder (Settings), filtered by element.", "References",
@@ -340,7 +347,10 @@ HELP: dict[str, tuple[str, str, str]] = {
                          "63-stacked-plot"),
     "compare.col.show": ("Plotted.", "Show", "62-the-table"),
     "compare.col.label": ("Editable; Rename and Duplicate act on the selected rows.", "Label", "62-the-table"),
-    "compare.col.signal": ("sdd-scaled, TEY, sdd1…, as read from the file.", "Signal", "62-the-table"),
+    "compare.col.signal": ("sdd-scaled: the four SDD signals each scaled to 0–1 (min-max), summed and divided by I0 "
+                           "(John Bussey's fluorescence signal); sdd_total: the summed counts / I0; TEY: total electron "
+                           "yield / I0; other files: their columns as named (sdd1…, PFY_…_over_I0).", "Signal",
+                           "62-the-table"),
     "compare.col.shift": ("Added to the energy axis (calibration offsets), eV.", "Shift eV", "62-the-table"),
     "compare.col.norm": ("larch (two lines around E0), legacy (constant pre / post means over absolute windows), "
                          "tey_line (pre-edge line only), none.", "Norm", "62-the-table"),

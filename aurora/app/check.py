@@ -9,7 +9,8 @@ five views, and 'Save ticked → Compare', which writes his file formats (aurora
 Advanced mode adds the checks of sgm_report v2.5 per scan of the holder (count rate, saturation, I0 validity against
 the energy-local reference), the good-I0 picker, the agreement of the four detectors on the selected zone and the I0
 explorer. The results of the checks persist in <project>/.aurora/qc.json (aurora.core.qc.save_qc), are read back when
-the project opens, are re-checked when a scan changes, and reach new zones' defaults through session.add_flag_source.
+the project opens, are re-checked when a scan changes, and reach new zones' defaults through session.add_flag_source
+(and the settings made before them through session.follow_new_flags).
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeade
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain_all, header_tips, labelled
 from aurora.app.mode import mark_advanced, on_mode_changed
-from aurora.app.session import ALL_HOLDERS, CheckItem, Session
+from aurora.app.session import ALL_HOLDERS, DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
@@ -58,6 +59,7 @@ Q_MSG = QCOLS.index("Messages")
 VIEWS = (("signals", "detector signals, cleaned"), ("sum", "fluorescence sum and its bad points"),
          ("i0tey", "I0 / max and TEY / max"), ("ratio", "sum / I0 and TEY / I0"), ("minmax", "/ I0, min-max scaled"))
 EASY_DESPIKE_MODE = "coherent"          # new zone x scan settings (I25); files without 'dsm' stay 'classic'
+SEEN_KEY = "check_seen"                 # ui block: queue items whose first verdict was applied (saved with the queue)
 
 
 def science_defaults(scan, st) -> None:
@@ -372,13 +374,17 @@ class CheckPerspective(QWidget):
         """Read the stored checks (qc.json) and show them without re-running; a background job re-checks the scans
         whose files changed since."""
         self._rates.clear()
-        self._rows, self._row_cache, self._seen, self._probed_holders = [], {}, set(), set()
+        self._rows, self._row_cache, self._probed_holders = [], {}, set()
+        self._seen = set(self.session.ui_items(SEEN_KEY))     # the queue is saved with the session and kept by Reload
         self._load_errors = {}
         try:
             self._results = qc.load_qc(project) if project is not None else {}
         except (OSError, ValueError) as err:
             log.warning("checks of %s not read (%s)", getattr(project, "root", "?"), err)
             self._results = {}
+        self._queue_dirty = True                # rebuilt when the page is shown
+        if self.isVisible():
+            self._refresh_queue()
         if self._results:
             log.info("%d stored checks read from %s", len(self._results), qc.qc_path(project))
             stored, scans = dict(self._results), self._all_scans()
@@ -528,11 +534,14 @@ class CheckPerspective(QWidget):
     def _probed(self, results: dict, loaded: bool, project=None) -> None:
         if project is not None and not self._is_open(project):
             return
+        ses = self.session
+        before = {sid: ses.flags_of(scan) for sid in results if (scan := ses.scan_of(sid)) is not None}
         self._results.update(results)
         self._save_results(results, project)
         self._fill_table(); self._fill_i0(); self._update_sdd()
         self.day_label.setText(self._day_text())
         self._row_cache.clear()
+        ses.follow_new_flags(before)        # settings made before these verdicts follow them (unless pinned)
         self._refresh_queue()
         if loaded:
             self.session.touch()        # memberships for the stacks loaded here
@@ -818,6 +827,9 @@ class CheckPerspective(QWidget):
             for r in rows:
                 if r.state == "ready":
                     self._seen.add(r.item)
+            seen = [[it.holder, it.zone_id, it.sid] for it in ses.check_queue if it in self._seen]
+            if seen != (ses.ui_value(SEEN_KEY) or []):          # an empty queue on a fresh project writes nothing
+                ses.set_ui_value(SEEN_KEY, seen)
         finally:
             self._filling = False
         if first_bad:                           # the rows may span holders: one undo step restores every one
@@ -1134,6 +1146,10 @@ class CheckPerspective(QWidget):
             if ans == "no":
                 plan = [x for x in plan if not any(p.exists() for p in x[3])]
         notes = [f"'{r.zone.label}' ({self._scan_text(r.item.sid)}) has a problem and was not saved" for r in bad]
+        unnamed = [lab for lab in dict.fromkeys(x[0].zone.label for x in plan) if DEFAULT_LABEL.match(lab)]
+        if unnamed:
+            notes.append(", ".join(f"'{lab}'" for lab in unnamed) + " saved under the default name: name the sample in "
+                         "Reduce's sample box")
         if not plan:
             self.queue_note.setText("; ".join(notes) or "nothing to save")
             return

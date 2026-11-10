@@ -188,3 +188,94 @@ def test_easy_states_johns_defaults_and_says_why_a_row_failed(qapp, demo, tmp_pa
     assert "set Pre / Post (eV from E0) on these rows" in cmp_.status.text() and cmp_.easy_note.isHidden()
     mode.set_advanced(False)
     pump(qapp)
+
+
+def test_easy_texts_name_only_what_easy_can_do(qapp, monkeypatch):
+    """The empty library, the folder dialog's title and the tooltip of 'Add saved spectra' name in Easy mode only what
+    Easy mode reads and shows (no References, no zone sent from Reduce, no _xanes.csv)."""
+    from aurora.app.help_text import HELP
+    from aurora.app.main import MainWindow
+    titles = []
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda parent, title, *a, **k:
+                                                                           titles.append(title) or ""))
+    win = MainWindow()
+    try:
+        cmp_ = win.compare
+        assert not mode.is_advanced()
+        text = cmp_.empty_state.text()
+        assert "John Bussey" in text and "reference" not in text and "Reduce" not in text, text
+        cmp_._add_folder()
+        assert "_full_reduced.csv" in titles[-1] and "xanes" not in titles[-1] and "AURORA zone" not in titles[-1]
+        assert "Advanced mode also reads sgm_report _xanes.csv" in HELP["compare.add_folder"][0]
+        mode.set_advanced(True)
+        assert "pick references" in cmp_.empty_state.text() and "send a zone from Reduce" in cmp_.empty_state.text()
+        cmp_._add_folder()
+        assert "_xanes.csv" in titles[-1] and "AURORA zone CSVs" in titles[-1]
+    finally:
+        mode.set_advanced(False)
+        win.session._save_timer.stop()
+        win.close()
+
+
+def test_rows_set_in_advanced_say_so_in_easy(qapp, tmp_path):
+    """A row whose hidden columns (Norm, windows, Flatten, E0, Scale) were set in Advanced mode shows the chip
+    'advanced settings in use' over the library in Easy mode, naming the row and the fields; Reset to Easy defaults
+    rewrites them. A zone trace from Reduce (Norm none, normalised already) is not called advanced."""
+    from aurora.app.main import MainWindow
+    from aurora.core.testdata import write_john_reduced
+    E = np.linspace(680, 720, 41)
+    write_john_reduced(tmp_path / "A" / "A_full_reduced.csv", "A", E, 1 / (1 + np.exp(-(E - 696))))
+    win = MainWindow()
+    win.show()
+    try:
+        cmp_, lib = win.compare, win.library
+        win.show_perspective("compare")
+        lib.add_folder(tmp_path)
+        lib.add_traces("zone 1", E, 1 / (1 + np.exp(-(E - 696))), None, source="zone 1 of 2026-11-05_092758_x_stack")
+        qapp.processEvents()
+        assert not mode.is_advanced() and not cmp_.easy_chip_box.isVisible()
+        i = next(k for k, r in enumerate(lib.requests) if r.signal == "sdd-scaled")
+        lib.set_all("norm", "legacy", rows=[i])
+        lib.set_all("pre", (680.0, 682.0), rows=[i])
+        lib.set_all("flatten", False, rows=[i])
+        qapp.processEvents()
+        assert cmp_.easy_chip_box.isVisible() and cmp_.easy_chip.text() == "advanced settings in use"
+        tip = cmp_.easy_chip.toolTip()
+        assert tip == "A [sdd-scaled]: Norm legacy; pre 680..682 eV; Flatten off", tip
+        mode.set_advanced(True)
+        assert not cmp_.easy_chip_box.isVisible()                 # Advanced shows the columns themselves
+        mode.set_advanced(False)
+        assert cmp_.easy_chip_box.isVisible()
+        cmp_.easy_reset_btn.click()
+        r = lib.requests[i]
+        assert (r.norm, tuple(r.pre), r.flatten) == ("larch", (-20.0, -5.0), True)
+        assert not cmp_.easy_chip_box.isVisible() and lib.easy_differences() == {}
+    finally:
+        mode.set_advanced(False)
+        win.session._save_timer.stop()
+        win.close()
+
+
+def test_sdd_scaled_is_defined_where_it_is_shown(tmp_path):
+    """'sdd-scaled', the main signal of Easy Compare and Fit, is defined in the Signal column's tooltip and in MANUAL
+    6.2 the way John Bussey's xas_core computes it (raw_signal_array: the four detectors min-max scaled and summed;
+    build_signal_frame: then / I0), and load_spectra computes exactly that."""
+    from aurora.app.help_text import HELP
+    from aurora.core.compare import load_spectra
+    tip = HELP["compare.col.signal"][0]
+    assert "as read from the file" not in tip and "scaled to 0–1 (min-max), summed and divided by I0" in tip
+    manual = (Path(__file__).resolve().parent.parent / "aurora" / "resources" / "docs" / "MANUAL.md").read_text(
+        encoding="utf-8")
+    row = next(line for line in manual.splitlines() if line.startswith("| Signal |"))
+    assert "scaled to 0–1 by their own minimum and maximum, summed, then divided by I0" in row
+    E = np.linspace(680.0, 720.0, 21)
+    step = 1.0 / (1.0 + np.exp(-(E - 696.0)))
+    det = [100 + 900 * step, 50 + 300 * step ** 2, 10 + 40 * step, 200 + 100 * np.sqrt(step)]
+    i0 = np.linspace(2.0, 3.0, len(E))
+    rows = "\n".join(",".join(f"{v:.6f}" for v in (e, *(d[k] for d in det), i0[k], 0.5 * step[k], sum(d[k] for d in det)))
+                     for k, e in enumerate(E))
+    p = tmp_path / "S_full_reduced.csv"
+    p.write_text("# sample_label: S\nenergy,sdd1,sdd2,sdd3,sdd4,I0,TEY,sdd_total\n" + rows + "\n", encoding="utf-8")
+    got = next(s for s in load_spectra(p) if s.signal == "sdd-scaled")
+    want = sum((d - d.min()) / (d.max() - d.min()) for d in det) / i0
+    assert np.allclose(got.y, want, rtol=1e-5)

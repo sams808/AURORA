@@ -42,6 +42,23 @@ def test_members_rect_paint_erase():
     assert members(Zone(id=3, label="empty"), x, y, pitch).size == 0
 
 
+def test_a_rectangle_takes_edge_pixels_unlike_johns_strict_polygon():
+    """rect+ (the browser zone tool's rule) takes a pixel whose square touches the rectangle; John Bussey's GUI turned
+    a rectangle into a polygon and kept only the centres inside (AURORA's lasso+ / polygon rule). The manuals say so."""
+    from pathlib import Path
+    x, y = testdata.snake_grid(nx=6, ny=4, pitch=0.25, x0=0.0, y0=0.0)
+    x0, x1, y0, y1 = 0.1, 0.65, 0.1, 0.4
+    n_rect = len(members(Zone(id=1, label="r", rects=[[x0, x1, y0, y1]]), x, y, (0.25, 0.25)))
+    n_poly = len(members(Zone(id=2, label="p", polys=[[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]]), x, y, (0.25, 0.25)))
+    assert (n_rect, n_poly) == (12, 2)                       # 4 x 3 pixels against 2 x 1
+    docs = Path(__file__).resolve().parent.parent / "aurora" / "resources" / "docs"
+    manual = " ".join((docs / "MANUAL.md").read_text(encoding="utf-8").split())
+    guide = " ".join((docs / "USER_GUIDE.md").read_text(encoding="utf-8").split())
+    assert ("It differs from John Bussey's GUI, which turned a rectangle into a polygon and took only the pixels whose "
+            "centre lies inside") in manual
+    assert "Unlike John Bussey's GUI, a rectangle also takes the edge pixels whose square it touches" in guide
+
+
 def test_run_median_and_despike():
     y = np.array([1.0, 1.0, 1.0, 1.0, 8.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     assert run_median(y, 5)[4] == 1.0

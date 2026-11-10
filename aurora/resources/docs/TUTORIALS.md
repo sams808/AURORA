@@ -50,8 +50,8 @@ headless listing and the tree agree.
 3. Step **3 · Region**: select **rect+** (or **lasso+** and draw around the area) and drag over the left half of the
    map. The caption reads *Region: 1 rectangle · 6 of 12 points of 092758_alpha_beta_f_k_stack*. Pick the sample
    label `1 alpha` (offered from the sample sheet) in the **sample** box above the map.
-4. Press **Ctrl+Z**: the zone disappears; **Ctrl+Y** brings it back. The top bar shows *unsaved*, then *saved* with
-   the time.
+4. Press **Ctrl+Z**: the label goes back to *zone 1* (**Edit > Undo** names each step); press it again and the zone
+   disappears; **Ctrl+Y** twice brings both back. The top bar shows *unsaved*, then *saved* with the time.
 5. **New sample**, **rect+**, drag over the right half; label `2 beta`. A click inside the first zone selects it
    again.
 6. Step **4 · Reduce** states the settings in force (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · fluorescence /
@@ -66,7 +66,7 @@ headless listing and the tree agree.
    zone of the holder*: zone 2 takes the same detectors. Then **Rules…**: **Add** a rule with **edge** `F K` that
    writes the TEY normalisation */ I0, pre-edge = 0*, look at the table of what would change, **Apply now**, and
    **Edit > Undo**.
-9. Close and reopen AURORA: the zones are back, from `aurora_demo\.aurora\session.json`.
+9. Close and reopen AURORA: the zones are back, from `aurora_demo\.aurora\session.json`, and so is the Check queue.
 
 What you learned: zones are in mm and belong to the holder, settings belong to the zone and scan, every edit can be
 undone, and everything is saved automatically.
@@ -110,8 +110,10 @@ This tutorial uses the demo's `processed/reduced/` folder: NaF, CaF2 and BaY2F8,
 `mixture 1` (0.5 NaF + 0.3 CaF2 + 0.2 BaY2F8) and mixture 2 (0.2 + 0.5 + 0.3), plus the two spectra saved in
 Tutorial 4. Any folder of reduced CSVs works the same way.
 
-1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a sdd-scaled and a TEY row; the TEY rows
-   start with **Show** unticked, as in John Bussey's GUI, so the plot holds the seven sdd-scaled traces, the two zones of Tutorial 4 included. In Easy mode only John-format files are read;
+1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a sdd-scaled row (the four SDDs each
+   scaled to 0–1, summed, / I0: John Bussey's fluorescence signal) and a TEY row; the TEY rows start with **Show**
+   unticked, as in John Bussey's GUI, so the plot holds the seven sdd-scaled traces, the two zones of Tutorial 4
+   included. In Easy mode only John-format files are read;
    Advanced mode also reads AURORA zone CSVs and sgm_report `_xanes.csv`.
 2. *Advanced*: select every sdd-scaled row, set **pre** and **post** to −20, −5 and 15, 35 in the windows row under the
    table and **Apply**. Norm stays `larch`. In the **E0** column choose `row:NaF [sdd-scaled]` on the other rows: they
