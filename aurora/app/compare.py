@@ -23,8 +23,8 @@ from aurora.app.library import Library
 from aurora.app.mode import mark_advanced, mark_advanced_column, on_mode_changed
 from aurora.app.theme import CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, on_theme_changed, role_pen, set_tone, swatch_icon
 from aurora.app.vocab import plural, unit_suffix
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path, guarded_write,
-                                notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path,
+                                guarded_write, notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
 from aurora.core.compare import (E0_MODE_TEXT, E0_MODES, NORMS, derivative, difference, export_wide_csv,
                                  legacy_auto_windows, local_peaks, sidecar_path, stack_offsets)
 
@@ -45,6 +45,11 @@ AUTO_PRE, AUTO_POST = "auto 15 %", "auto 20 %"
 EMPTY_TEXT = {False: "The library is empty: save spectra in Check (Save ticked → Compare), or add a folder of John "
                      "Bussey's saved spectra.",
               True: "The library is empty: add the spectra saved by Check, pick references, or send a zone from Reduce."}
+# the words of a row's field that differs from the Easy defaults ('advanced settings in use' in Easy mode)
+ROW_WORDS = {"norm": lambda r: f"Norm {r.norm}", "pre": lambda r: f"pre {r.pre[0]:g}..{r.pre[1]:g} eV",
+             "post": lambda r: f"post {r.post[0]:g}..{r.post[1]:g} eV",
+             "flatten": lambda r: "Flatten " + ("on" if r.flatten else "off"), "e0_mode": lambda r: f"E0 {r.e0_mode}",
+             "scale": lambda r: f"Scale {r.scale:g}", "e0_smooth": lambda r: f"E0 derivative smoothing {r.e0_smooth:g} eV"}
 FOLDER_TITLE = {False: "Folder of John Bussey's saved spectra (*_full_reduced.csv, *_absorption.csv)",
                 True: "Folder of saved spectra (*_full_reduced.csv, *_absorption.csv, *_xanes.csv, AURORA zone CSVs)"}
 
@@ -169,6 +174,17 @@ class ComparePerspective(QWidget):
                                        self.default_shift)
         ops.addWidget(self.default_shift_pair)
         left.body.addWidget(ops_box)
+        # Easy: the rows whose hidden columns were set in Advanced mode (or by a loaded configuration) say so
+        self.easy_chip_box = QWidget()
+        cl = QHBoxLayout(self.easy_chip_box); cl.setContentsMargins(0, 0, 0, 0); cl.setSpacing(6)
+        self.easy_chip = Chip("advanced settings in use", "warn")
+        self.easy_chip.setAccessibleName("advanced settings in use")
+        self.easy_reset_btn = QPushButton("Reset to Easy defaults")
+        self.easy_reset_btn.clicked.connect(self.reset_to_easy)
+        explain(self.easy_reset_btn, "compare.reset_easy")
+        cl.addWidget(self.easy_chip); cl.addWidget(self.easy_reset_btn)
+        self.easy_chip_box.hide()
+        left.header.addWidget(self.easy_chip_box)
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.setAccessibleName("library of spectra")
@@ -306,6 +322,7 @@ class ComparePerspective(QWidget):
         library.changed.connect(self.update_actions)
         library.changed.connect(self._check_missing)
         library.changed.connect(self._draw_diagnostics)
+        library.changed.connect(self._refresh_easy)
         library.restored.connect(self._apply_view)
         on_theme_changed(self, lambda _s: (self._fill_table(), self.replot(), self._draw_diagnostics(), self._retone()))
         # Easy mode: John Bussey's Compare (saved spectra, show / fit / label / signal / shift / colour, x range, export)
@@ -314,7 +331,7 @@ class ComparePerspective(QWidget):
                       o["Rename"], o["Duplicate"], self.default_shift_pair, self.range_row, *self.plot_opts,
                       *self.peaks_row)
         mark_advanced_column(self.table, *ADVANCED_COLS)
-        on_mode_changed(self, lambda _adv: self._apply_widths(), call_now=False)
+        on_mode_changed(self, lambda _adv: (self._apply_widths(), self._refresh_easy()), call_now=False)
         self._fill_table()
         self.replot()
         self._draw_diagnostics()
@@ -337,6 +354,26 @@ class ComparePerspective(QWidget):
     def col(self, header: str) -> int:
         """The column index of a header ('Label', 'Fit', ...)."""
         return COLS.index(header)
+
+    # ------------------------------------------------------------------ Easy mode: the chip
+    def _refresh_easy(self) -> None:
+        """Easy mode: the chip 'advanced settings in use' over the library when a row's hidden columns differ from the
+        Easy defaults (Library.easy_differences); its tooltip names the rows and the fields."""
+        diffs = self.lib.easy_differences() if not mode.is_advanced() else {}
+        if diffs:
+            lines = [f"{self.lib.requests[i].key}: " + "; ".join(ROW_WORDS[f](self.lib.requests[i]) for f in fields)
+                     for i, fields in diffs.items()]
+            tip = "\n".join(lines[:12]) + (f"\n... and {plural(len(lines) - 12, 'more row')}" if len(lines) > 12 else "")
+            self.easy_chip.setToolTip(tip)
+            self.easy_reset_btn.setToolTip("Rewrite these fields with the Easy defaults:\n" + tip)
+        self.easy_chip_box.setVisible(bool(diffs))
+
+    def reset_to_easy(self) -> int:
+        """'Reset to Easy defaults': every row's differing hidden columns rewritten (Library.reset_to_easy)."""
+        n = self.lib.reset_to_easy()
+        if n:
+            self.status.setText(f"{plural(n, 'field')} back to the Easy defaults")
+        return n
 
     # ------------------------------------------------------------------ message line
     def say(self, text: str, tone: str = "warn", locate: bool = False) -> None:

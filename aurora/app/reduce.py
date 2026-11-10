@@ -23,7 +23,7 @@ from aurora.app.mapview import TOOLS, MapView
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
-from aurora.app.session import CheckItem, Session
+from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair,
@@ -530,14 +530,14 @@ class ReducePerspective(QWidget):
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(self._zone_selected)
         session.stack_selected.connect(self._stack_selected)
-        session.flags_changed.connect(lambda _sids: self._refresh_easy())     # step 4 and the chip name new flags
+        session.flags_changed.connect(self._flags_changed)
         session.add_settings_default(self._settings_default)
         on_theme_changed(self, lambda _s: (self.redraw_map(), refill_tones(self.scan_list)))
         self._shortcuts()
         # Easy mode: John Bussey's four steps (scan, XRF window, region, reduce); everything else is Advanced
         mark_advanced(self.load_all_btn, self.tool_buttons["rect-"], self.tool_buttons["polygon+"],
                       self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.show_row,
-                      self.propose_btn, self.stitch_btn, self.load_poly_btn, self.save_poly_btn, self.group_box,
+                      self.propose_btn, self.stitch_btn, self.save_poly_btn, self.group_box,
                       self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
         mark_easy(self.step4_line, self.add_check_btn, *self._badges)
         on_mode_changed(self, self._mode_changed)
@@ -1395,6 +1395,14 @@ class ReducePerspective(QWidget):
         self.update_preview()
         self.update_actions()
 
+    def _flags_changed(self, _sids) -> None:
+        """New scan flags (Check's probe, a summary found by Reload): the cards show the settings that followed them,
+        step 4 and the chip name the flags."""
+        if any([b.isChecked() for b in c.sdd] != [bool(v) for v in c.s.sdd] or c.i0src.currentData() != c.s.i0_source
+               for c in self._cards):
+            self._rebuild_cards()
+        self._refresh_easy()
+
     def _zone_selected(self, z: Zone | None) -> None:
         self._fill_zone_list()
         self._fill_zone_card(z)
@@ -1564,7 +1572,10 @@ class ReducePerspective(QWidget):
                 st.n = k
                 z.settings[sd.id] = st
         n = self.session.queue_for_check([CheckItem(self.session.current_holder, z.id, sd.id)])
-        self.status_label.setText(f"{z.label} on {short_time(sd.id) or sd.name} added to Check" if n else
+        # John Bussey's GUI asked for a label first: a default name is saved as it is, so say so
+        unnamed = (" · it is saved under this name: name the sample in the sample box"
+                   if DEFAULT_LABEL.match(z.label) else "")
+        self.status_label.setText(f"{z.label} on {short_time(sd.id) or sd.name} added to Check{unnamed}" if n else
                                   f"{z.label} on {short_time(sd.id) or sd.name} is already in Check")
         return n
 

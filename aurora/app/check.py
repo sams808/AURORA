@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeade
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain_all, header_tips, labelled
 from aurora.app.mode import mark_advanced, on_mode_changed
-from aurora.app.session import CheckItem, Session
+from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
@@ -811,7 +811,9 @@ class CheckPerspective(QWidget):
             for r in rows:
                 if r.state == "ready":
                     self._seen.add(r.item)
-            ses.set_ui_value(SEEN_KEY, [[it.holder, it.zone_id, it.sid] for it in ses.check_queue if it in self._seen])
+            seen = [[it.holder, it.zone_id, it.sid] for it in ses.check_queue if it in self._seen]
+            if seen != (ses.ui_value(SEEN_KEY) or []):          # an empty queue on a fresh project writes nothing
+                ses.set_ui_value(SEEN_KEY, seen)
         finally:
             self._filling = False
         if first_bad:
@@ -1103,6 +1105,10 @@ class CheckPerspective(QWidget):
             if ans == "no":
                 plan = [x for x in plan if not any(p.exists() for p in x[3])]
         notes = [f"'{r.zone.label}' ({self._scan_text(r.item.sid)}) has a problem and was not saved" for r in bad]
+        unnamed = [lab for lab in dict.fromkeys(x[0].zone.label for x in plan) if DEFAULT_LABEL.match(lab)]
+        if unnamed:
+            notes.append(", ".join(f"'{lab}'" for lab in unnamed) + " saved under the default name: name the sample in "
+                         "Reduce's sample box")
         if not plan:
             self.queue_note.setText("; ".join(notes) or "nothing to save")
             return

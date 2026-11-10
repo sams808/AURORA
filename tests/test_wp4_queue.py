@@ -57,6 +57,20 @@ def test_check_zone_ports_johns_messages():
     assert "TEY has no finite values" in levels(check_zone(build_traces(sums(tey=np.full(len(E), np.nan)), st)), "warn")
 
 
+def test_a_dead_detector_names_itself_and_the_way_out():
+    """A ticked SDD with zero counts everywhere makes the row bad (the item spec; John Bussey's GUI only warned): the
+    message names the detector, the window and how to leave it out, and says John's GUI warned; unticked, the row is
+    clean."""
+    st = ScanSettings(line="F Kα", despike_mode="coherent")
+    det = sums().det["F Kα"].copy(); det[:, 2] = 0.0
+    msgs = check_zone(build_traces(sums(det=det), st), n_total=12)
+    assert worst(msgs) == "bad"
+    assert levels(msgs, "bad") == ["SDD3: signal is zero everywhere - check its window (F Kα), or leave a dead SDD3 "
+                                   "out of the sum on the scan card (Advanced mode); John Bussey's GUI only warned"]
+    off = ScanSettings(line="F Kα", despike_mode="coherent", sdd=[True, True, False, True])
+    assert worst(check_zone(build_traces(sums(det=det), off), n_total=12)) == "ok"
+
+
 def test_bad_point_fraction_and_flags():
     st = ScanSettings(line="F Kα", despike_mode="coherent")
     i0 = np.full(len(E), 10.0)
@@ -316,3 +330,23 @@ def test_the_queue_survives_reload_and_a_restart(qapp, fake_project, monkeypatch
         assert ses2.zone(z.id).settings[sid].include is True                     # not unticked a second time
     finally:
         close(win2)
+
+
+def test_looking_at_an_empty_queue_writes_nothing(qapp, fake_project):
+    """The saved queue must not make a look at Check an edit: open, show Check, close: no session.json (I15)."""
+    from aurora.app.main import MainWindow
+    from aurora.core.model import Project
+    from wp3_helpers import pump
+    win = MainWindow()
+    win.show()
+    try:
+        win.home.set_project(Project.discover(fake_project))
+        pump(qapp)
+        win.show_perspective("check")
+        assert win.jobs.wait_idle(30000)
+        pump(qapp)
+        assert win.check.queue_state.isVisible() and not win.session.dirty
+    finally:
+        win.jobs.wait_idle(30000)
+        win.close()
+    assert not (fake_project / ".aurora" / "session.json").exists()

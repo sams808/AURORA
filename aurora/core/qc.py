@@ -470,8 +470,11 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
             y = np.asarray(y, float)
             if not np.isfinite(y).any():
                 msgs.append(("bad", f"{DETS[k].upper()}: no finite values (missing files?)"))
-            elif np.nanmax(y) <= 0:
-                msgs.append(("bad", f"{DETS[k].upper()}: signal is zero everywhere - check its window ({window(k)})"))
+            elif np.nanmax(y) <= 0:             # bad by the item spec (I23); John Bussey's GUI only warned
+                d = DETS[k].upper()
+                msgs.append(("bad", f"{d}: signal is zero everywhere - check its window ({window(k)}), or leave a dead "
+                                    f"{d} out of the sum on the scan card (Advanced mode); John Bussey's GUI only "
+                                    "warned"))
         if not ticked:
             msgs.append(("warn", "no detector is ticked: no fluorescence trace"))
     sum_ok = np.ones(nE, bool)

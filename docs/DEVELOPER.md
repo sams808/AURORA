@@ -156,7 +156,7 @@ Keys:
 
 | Level | Keys |
 |---|---|
-| file | `format` ('aurora-session'), `schema` (2), `app` ('AURORA x.y.z') — session.json only; `version` (1, the zone tool's), `exported` (ISO time of the write), `project`, `built`, `notes`, `goodI0` ({stack id: bool}), `holders` ({holder key: holder}), `ui` (view memory, Session.ui_value), `rules` (batch-settings rules) |
+| file | `format` ('aurora-session'), `schema` (2), `app` ('AURORA x.y.z') — session.json only; `version` (1, the zone tool's), `exported` (ISO time of the write), `project`, `built`, `notes`, `goodI0` ({stack id: bool}), `holders` ({holder key: holder}), `ui` (view memory, Session.ui_value; the Easy check queue as `check_queue` and `check_seen`, [[holder key, zone id, stack id], ...]), `rules` (batch-settings rules) |
 | holder | `holder`, `day`, `survey`, `zones` |
 | zone | `id`, `label`, `group`, `comment`, `rects` and `erects` ([x0, x1, y0, y1] mm), `paint` and `erase` ([cx, cy, pitch x, pitch y] mm), `polys` ([[x, y], …] mm, written when used), `st` ({stack id: settings}), `members` ({stack id: pixel indices}) |
 | settings (`st`) | `inc`, `n`, `sdd` (4 bools), `line`, `fn` and `tn` (raw, i0, i0pre, i0jump, area, max), `tey`, `ds`, `k`, `i0src` (own, good), `pre`, `post` (null = automatic), `stack`; written only when set: `roi` ({sdd: [lo, hi)} channels), `sig` (pfy, ipfy), `ipm`, `dsm` (classic, coherent), `pin` |

@@ -71,6 +71,7 @@ SNAPSHOT_BEFORE = re.compile(r"^(propose|apply|restore)\b|\brules?\b", re.IGNORE
 _SNAP_NAME = re.compile(r"^session-(\d{8}-\d{6})(?:_(\d+))?\.json$")     # '_2' sorts after '.json'
 _STAMP_FMT = "%Y%m%d-%H%M%S"
 IMPORT_POLICIES = ("merge", "replace", "skip")
+DEFAULT_LABEL = re.compile(r"^zone \d+$")      # the label new_zone gives a zone without one ('zone 3')
 QUEUE_KEY = "check_queue"               # ui block: the Easy check queue, [[holder key, zone id, sid], ...]
 
 
