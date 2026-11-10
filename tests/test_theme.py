@@ -87,12 +87,81 @@ def test_map_overlays_read_on_navy():
         assert theme.contrast(colour, navy) >= 4.5, (name, round(theme.contrast(colour, navy), 2))
 
 
+def _map_colours(name: str) -> list[str]:
+    import pyqtgraph as pg
+    lut = pg.colormap.get(name).getLookupTable(nPts=256)
+    return [QColor(int(r), int(g), int(b)).name() for r, g, b in lut[:, :3]]
+
+
+def _outline_contrast(colour: str, m: str) -> float:
+    """How well an outline in `colour` over its casing (theme.map_casing) reads on the map colour `m`: each stroke shows a
+    fringe; one of them must reach the ratio against the map, and each must stand out from the one it sits on."""
+    parts = [c for c, _px in theme.map_casing(colour)] + [colour]                       # outermost first
+    seen = max(theme.contrast(p, m) for p in parts)
+    apart = min(theme.contrast(a, b) for a, b in zip(parts, parts[1:]))
+    return min(seen, apart)
+
+
+def test_map_outlines_read_on_every_colour_of_every_colour_map():
+    """Footprints, zones (the series colours) and the overlay marks drawn over a colour map: 3:1 on every one of its
+    256 colours, for every map colour map of the Settings (without a casing they fall to 1.0:1 on the bright end)."""
+    from aurora.app.settings_dialog import COLORMAPS
+    overlays = [c for c, _s in theme.FOOTPRINTS.values()] + list(theme.MAP_OVERLAY.values()) + list(theme.CURVES)
+    worst = min((_outline_contrast(c, m), name, c, m) for name in COLORMAPS for m in _map_colours(name) for c in overlays)
+    assert worst[0] >= 3.0, worst
+
+
+@pytest.mark.parametrize("level, colour", [(255, "#F2A65A"), (255, "#2A6CCA"), (64, "#2A6CCA"), (128, "#0FA175")])
+def test_a_drawn_outline_stands_out_from_a_flat_map(qapp, level, colour):
+    """Rendered: a footprint rectangle and a painted zone on a map of one viridis colour (bright yellow, mid teal, dark
+    blue): some pixel across each edge reaches 3:1 against the map (the reviewers' 1.0-1.9:1 cases)."""
+    from PySide6.QtCore import QPointF
+    import numpy as np
+    from aurora.app.mapview import MapView
+    from aurora.core.grid import to_grid
+    from aurora.core.io.config import Zone
+    from aurora.core.testdata import snake_grid
+    bg = _map_colours("viridis")[level]
+    mv = MapView()
+    mv.resize(640, 480)
+    mv.show()
+    mv.set_lookup(np.array([QColor(bg).getRgb()[:3]] * 256, dtype=np.ubyte))
+    x, y = snake_grid(nx=8, ny=6, pitch=0.25)
+    mv.set_grid(to_grid(x, y, np.zeros(x.size)))
+    mv.autorange()
+    mv.add_rect(-0.2, 0.4, 5.2, 5.9, colour, 1.2)
+    z = Zone(id=1, label="z", paint=[[1.0, 5.5, 0.25, 0.25], [1.25, 5.5, 0.25, 0.25]])
+    mv.draw_zone(z, colour, label=False)
+    for _ in range(3):
+        qapp.processEvents()
+    img = mv.grab().toImage()
+    for ex, ey in ((-0.2, 5.55), (0.875, 5.5)):                     # the rectangle's left edge, the zone's left edge
+        sp = mv.mapFromScene(mv.vb.mapViewToScene(QPointF(ex, ey)))
+        row = [img.pixelColor(sp.x() + dx, sp.y()).name() for dx in range(-8, 9)]
+        assert theme.contrast(row[0], bg) < 1.05                        # the map itself, away from the edge
+        best = max(theme.contrast(p, bg) for p in row)
+        assert best >= 3.0, (ex, colour, bg, round(best, 2), row)
+    mv.close()
+
+
 def test_categorical_colours():
     c20 = theme.categorical(20)
     assert len(c20) == 20 and len(set(c20)) == 20 and c20[:6] == theme.CURVES
     assert theme.categorical(3) == theme.CURVES[:3]
     assert all(QColor(c).isValid() for c in c20)
     assert theme.categorical(25)[20] == c20[0]
+    # twenty clusters (the k-means maximum): each reads on the map and on both plot backgrounds (its mean spectrum),
+    # and no two are near-twins (0.3's hues at other lightnesses gave cluster 19 ~ cluster 1 at 0.074 in OKLab)
+    import math
+    for c in c20:
+        for bg in (theme.LIGHT["map_bg"], theme.LIGHT["plot_bg"], theme.DARK["plot_bg"]):
+            assert theme.contrast(c, bg) >= 3.0, (c, bg, round(theme.contrast(c, bg), 2))
+
+    def lab(c):
+        L, C, h = theme._to_oklch(c)
+        return L, C * math.cos(h), C * math.sin(h)
+    near = min((math.dist(lab(a), lab(b)), a, b) for i, a in enumerate(c20) for b in c20[i + 1:])
+    assert near[0] >= 0.10, near
 
 
 def test_export_tokens_are_light_on_white(qapp):

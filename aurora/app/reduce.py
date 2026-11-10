@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
 
 from aurora.app import jobs, nav, shortcuts
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import TOOLS, MapView
+from aurora.app.mapview import TOOLS, MapView, scale_label
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
@@ -956,6 +956,8 @@ class ReducePerspective(QWidget):
                 vals = np.log10(np.maximum(vals, 0) + 1.0)
         from aurora.core.grid import to_grid
         self.map.set_grid(to_grid(sd.x, sd.y, vals))
+        self.map.set_scale_label(scale_label("edge jump, counts" if self.map_mode.currentData() == "jump" else "counts",
+                                             per_i0=self.map_i0.isChecked(), log=self.map_log.isChecked()))
         hz = self.session.holder_zones(create=False)
         for i, z in enumerate(hz.zones if hz else []):
             sel = z.id == self.session.current_zone

@@ -87,6 +87,9 @@ size** is **Normal**, **Large** or **Larger** (13, 15 or 17 px); both apply at o
 in Settings. The map area, the rail and the top bar stay navy in both schemes, so colour maps look the same in both. A
 curve keeps its colour when the scheme changes, and every curve also has its own dash, so colour is never the only
 cue. Status cells show an icon with a word (*✓ ok*, *! check*, *✗ bad*). A focused control shows a 2 px outline.
+Every intensity map (Survey, Reduce, Maps) has its colour scale beside it, named by its quantity (*counts / I0*,
+*log10(counts / I0 + 1)*). Footprint and zone outlines sit on a dark edge and a light rim of their own hue, so
+they read on every tone of the colour map.
 
 *Long tasks* (reading a project, loading stacks, reading XRF windows, running the checks, fits, loading a
 hypercube, clustering, exports, building the report) run in the background behind a progress strip: the bar, the
@@ -803,12 +806,15 @@ and residual** plots the result. **Export…** writes the parameters with units,
 Maps is part of Advanced mode. The full hypercube of one stack: every channel of every detector at every energy.
 Choose the **stack**; **Load hypercube** reads the raw `.bin` files once, one energy at a time, into a cache on disk
 (8.5); a cancel keeps nothing. Before loading, the empty panel gives the size first (*up to 460 MB, cached under
-.aurora/cache*, or *cached, opens at once*).
+.aurora/cache*, or *cached, opens at once*). A cube that finishes after another holder, stack or project was picked is
+not shown (it stays cached, so **Load hypercube** opens it at once).
 
 Every sum in Maps uses each detector's own channels for the emission window. The four SDDs have their own gain and
 offset (`sdd_calibration.json`), so one eV window is a different channel range on each of them: on the 2026 beamtime
 640–710 eV is channels 63–70 on SDD1, 68–75 on SDD2, 65–72 on SDD3 and 62–69 on SDD4. A fixed line uses each SDD's own
 bins from `config/roi_bins.json`.
+With **/ I0**, an energy whose I0 is below 20 % of its median (beam loss) is left out of the XANES, the clusters and
+both exports, as in Reduce; the line under the map names it.
 
 Top controls: **sum of** **SDD1** **SDD2** **SDD3** **SDD4** (the detectors in every sum: the map, the spectra, the
 XANES sum, the elemental maps, the RGB composite, the clusters and the exports), **window** (a fixed line or *custom
@@ -864,7 +870,8 @@ in the background with progress and **Cancel**; a cancel keeps the previous clus
 and `average`.
 
 **Clusters: tick to merge** lists every cluster with its colour and pixel count (*cluster 2 · 340 px*); the list is the
-legend of the map and of the spectra. Each cluster has its own categorical colour (up to 20). Tick the clusters to
+legend of the map and of the spectra. Each cluster has its own categorical colour (up to 20), and the line under the
+map names the cluster under the mouse (*cluster 3 · 340 px · ticked*). Tick the clusters to
 merge: the plot *cluster mean* shows the mean spectrum of every cluster and the merged mean of the ticked ones, the plot
 *ticked sum* their summed spectrum; unticked clusters are dimmed on the map.
 
