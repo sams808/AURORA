@@ -150,6 +150,10 @@ class ComparePerspective(QWidget):
 
         split = QSplitter(Qt.Horizontal)
         self.library_card = left = Card("Library", help_anchor="62-the-table")
+        from aurora.app.help_text import term_button
+        self.signal_help = term_button("signal")            # Easy: 'What is the signal?' (the Signal column)
+        self.signal_help.setToolTip(self.signal_help.toolTip() + "\nThe Signal column says which one each row plots.")
+        left.header.addWidget(self.signal_help)
         ops_box = QWidget()
         ops = FlowLayout(ops_box, spacing=6)
         self.op_buttons: dict[str, QPushButton] = {}
@@ -315,6 +319,8 @@ class ComparePerspective(QWidget):
                       o["Rename"], o["Duplicate"], self.default_shift_pair, self.range_row, *self.plot_opts,
                       *self.peaks_row)
         mark_advanced_column(self.table, *ADVANCED_COLS)
+        from aurora.app.mode import mark_easy
+        mark_easy(self.signal_help)
         on_mode_changed(self, lambda _adv: self._mode_texts(), call_now=False)
         self._fill_table()
         self.replot()

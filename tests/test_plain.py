@@ -632,3 +632,28 @@ def test_findings_grouped_by_kind(qapp):
         assert child.data(0, Qt.UserRole) == "u0" and lst.itemWidget(child, 2) is not None
     finally:
         dispose(rp)
+
+
+def test_term_buttons_are_placed(qapp, easy_demo, monkeypatch):
+    """The '?' next to the step-2 preset, the Check view, the Compare signals and the Fit target (Easy mode only)
+    open the glossary at their word."""
+    from aurora.app import help as help_mod
+    win = easy_demo
+    buttons = {"xrf-window": (win.reduce.window_card.preset_help, "reduce"), "views": (win.check.view_help, "check"),
+               "signal": (win.compare.signal_help, "compare"), "lcf": (win.fit.lcf_help, "fit")}
+    seen = []
+    monkeypatch.setattr(help_mod, "open_help", lambda w, doc="USER_GUIDE.md", anchor=None: seen.append((doc, anchor)))
+    for key, (b, page) in buttons.items():
+        win.show_perspective(page)
+        wait(qapp, 0.1)
+        assert b.isVisible() and b.property("aurora_term") == key, key
+        b.click()
+        assert seen[-1] == ("GLOSSARY.md", glossary.term(key).anchor)
+    mode.set_advanced(True)
+    try:
+        for key, (b, page) in buttons.items():
+            win.show_perspective(page)
+            wait(qapp, 0.1)
+            assert not b.isVisible(), key
+    finally:
+        mode.set_advanced(False)

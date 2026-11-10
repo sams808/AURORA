@@ -203,7 +203,10 @@ class CheckPerspective(QWidget):
         for key, text in VIEWS:
             self.view_combo.addItem(text, key)
         self.view_combo.currentIndexChanged.connect(lambda _i: self._draw_preview())
-        vrow.addWidget(labelled("view", self.view_combo, "check.view")); vrow.addWidget(self.view_combo, 1)
+        from aurora.app.help_text import term_button
+        self.view_help = term_button("views")             # Easy: 'What are the Check views?'
+        vrow.addWidget(labelled("view", self.view_combo, "check.view")); vrow.addWidget(self.view_help)
+        vrow.addWidget(self.view_combo, 1)
         pcard.body.addLayout(vrow)
         self.qplot = make_plot(x="energy (eV)", y="mean counts")
         self.qplot.addLegend(offset=(-10, -10))         # bottom right: rising XAS curves leave that corner free
@@ -331,7 +334,7 @@ class CheckPerspective(QWidget):
         # the I0 explorer (the four cards of the earlier versions, unchanged)
         self.i0_card, self.sdd_card, self.explorer_card = i0c, sddc, i0x
         mark_advanced(self.table_card, self.i0_card, self.sdd_card, self.explorer_card, self.bottom)
-        mark_easy(self.guide_label, self.look_for)
+        mark_easy(self.guide_label, self.look_for, self.view_help)
         for plot in (self.i0_plot, self.sdd_plot, self.x_plot):     # readable in Advanced (the page scrolls if needed)
             plot.setMinimumHeight(140)
         on_mode_changed(self, self._mode_changed)

@@ -148,7 +148,7 @@ class FitPerspective(QWidget):
         for page in (self.mcr_page, self.itfa_page, self.peaks_page):
             mark_advanced_tab(self.tabs, page)
         mark_advanced(self.lcf_options, self.lcf_detail)
-        mark_easy(self.lcf_fixed, self.lcf_caption, self.lcf_meaning)
+        mark_easy(self.lcf_fixed, self.lcf_caption, self.lcf_meaning, self.lcf_help)
         on_mode_changed(self, lambda _a: self._mode_texts())
         for w in (self.sum_one, self.allow_neg):
             w.toggled.connect(self._fixed_text)
@@ -380,7 +380,11 @@ class FitPerspective(QWidget):
         self.target = QComboBox()
         self.target.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.target.setMinimumContentsLength(14)
-        left.body.addWidget(labelled("target", self.target, "fit.target")); left.body.addWidget(self.target)
+        from aurora.app.help_text import term_button
+        self.lcf_help = term_button("lcf")                  # Easy: 'What is LCF (linear combination fit)?'
+        trow = QHBoxLayout(); trow.setSpacing(6)
+        trow.addWidget(labelled("target", self.target, "fit.target")); trow.addWidget(self.lcf_help); trow.addStretch(1)
+        left.body.addLayout(trow); left.body.addWidget(self.target)
         self.components = QListWidget()
         self.components_label = labelled(say("fit.components_label"), self.components, "fit.components")
         left.body.addWidget(self.components_label)

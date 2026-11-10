@@ -536,7 +536,7 @@ A plate measured as several overlapping stacks (tiles) becomes one stack with **
 Three linked panels for the current zone and selected scan, each with its title: *Fluorescence of the sample (each
 detector and their sum)* (*Inverse yield (IPFY) of the sample* for an inverse yield), *Electron yield (TEY): the
 surface* and *Beam intensity (I0) during the scan*, in arbitrary units. The legend sits at the bottom right (*SDD1* …
-*SDD4*, *sum of the detectors in use*, *● repaired points (spikes)*), and a line under the panels says what the grey
+*SDD4*, *sum of the detectors in use*, a red dot for *repaired points (spikes)*), and a line under the panels says what the grey
 bands are (the energy ranges before and after the edge used to scale the spectrum). **all scans of the sample** overlays every included scan; Easy mode keeps only this
 toggle, Advanced adds **SDDs**, **sum**, **TEY**, **I0** and **spikes**. The per-detector scale is the sum's scale
 divided by the number of ticked detectors, so a missing detector is visible as a gap rather than hidden by rescaling.

@@ -63,7 +63,9 @@ class XrfWindowCard(Card):
         self.preset = QComboBox()
         self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.preset.setMinimumContentsLength(10)
-        self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset))
+        from aurora.app.help_text import term_button
+        self.preset_help = term_button("xrf-window")      # Easy: 'What is the emission window?'
+        self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset_help, self.preset))
         self.caption = TermLabel(CAPTION)                  # Easy: what the plot is and what to keep
         self.caption.setObjectName("muted")
         self.body.addWidget(self.caption)
@@ -138,7 +140,7 @@ class XrfWindowCard(Card):
         self.remember_btn.clicked.connect(lambda: self.remember_requested.emit(self.choice()))
         on_theme_changed(self, lambda _s: (self._style_regions(), self._draw()))
         mark_advanced(self.adv_box, self.det_box)
-        mark_easy(self.caption)
+        mark_easy(self.caption, self.preset_help)
         on_mode_changed(self, lambda _a: (self._describe(), self.refresh_spectrum(), self._paint_note()), call_now=False)
         self.set_stack(None, None)
 

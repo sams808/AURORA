@@ -13,7 +13,7 @@ TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
           "ipfy": "Inverse yield (IPFY) of the sample", "tey": "Electron yield (TEY): the surface",
           "i0": "Beam intensity (I0) during the scan"}
 SUM_NAME = "sum of the detectors in use"
-SPIKES_NAME = "● repaired points (spikes)"
+SPIKES_NAME = "repaired points (spikes)"          # the legend draws the red dot itself
 BANDS_NOTE = "Grey bands: the energy ranges before and after the edge used to scale the spectrum."
 
 
