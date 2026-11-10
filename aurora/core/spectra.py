@@ -12,7 +12,8 @@ Beyond the zone tool (ScanSettings fields added by AURORA):
   coherent_despike, i0_despike); its noise scale never goes below the point-to-point noise of the trace
   (noise_sigma), where the classic MAD collapses on smooth, high-S/N traces (a whole pad);
 - energies whose I0 is below I0_LOW_FRAC of its median are left out of every / I0 trace (docs/HANDOFF.md 5.2);
-- signal 'ipfy' divides I0 by the counts of the (non-resonant) line, aurora.core.yields.ipfy;
+- signal 'ipfy' divides I0 by the counts of the (non-resonant) line, aurora.core.yields.ipfy; with the resonant line
+  of the edge (F Kα on an F K stack) that is 1 / PFY, and a note says so;
 - ZoneTraces.notes says what was done in words and in eV (spike energies, masked energies, the signal).
 """
 from __future__ import annotations
@@ -25,6 +26,7 @@ import numpy as np
 
 from aurora.core.constants import COHERENT_MIN_SDDS, DESPIKE_K, DETS, EDGE_SPIKE_STEPS, I0_LOW_FRAC
 from aurora.core.io.config import ScanSettings
+from aurora.core.lines import line_element
 from aurora.core.yields import describe as describe_ipfy
 from aurora.core.yields import ipfy
 
@@ -600,6 +602,11 @@ def build_traces(sums: "ZoneSums", settings: ScanSettings, good_curve: np.ndarra
                          f"({_ev_list(E, idx)} eV): left out of the / I0 traces")
     if is_ipfy:
         out.notes.append(describe_ipfy(line, getattr(settings, "ipfy_mode", "ratio")))
+        edge = getattr(sums, "edge", None)
+        if edge and line_element(line) == edge[0]:
+            out.notes.append(f"IPFY of the resonant line: {line} is the line of the {edge[0]} {edge[1]} edge, so I0 / "
+                             f"{line} is 1 / PFY, not an inverse partial fluorescence yield; choose a line of another "
+                             "element (O Kα across the F K edge)")
         if n_nonpos:
             out.notes.append(f"IPFY: {_plural(n_nonpos, 'energy', 'energies')} without {line} counts left out")
     return out

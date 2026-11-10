@@ -503,7 +503,7 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
         msgs.append(("ok", f"{_n(nb, 'bad point')} of {nE}"
                            + (f" ({nlow} with I0 below {I0_LOW_FRAC:.0%} of its median, left out)" if nlow else " interpolated")))
     for note in traces.notes:
-        if "near the edge" in note:
+        if "near the edge" in note or note.startswith("IPFY of the resonant line"):
             msgs.append(("warn", note))
         elif note.startswith("signal: IPFY") or note.startswith("IPFY:"):
             msgs.append(("ok", note))

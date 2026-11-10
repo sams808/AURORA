@@ -244,6 +244,7 @@ class ZoneSums:
     sid: str = ""
     windows: dict[str, list[int]] | None = None     # per-SDD channel windows [lo, hi) used, None = the fixed line bins
     notes: list[str] = field(default_factory=list)
+    edge: tuple[str, str] | None = None         # the stack's edge ('F', 'K'): IPFY of its own line is 1 / PFY
 
 
 def zone_sums(stack, pix, settings: ScanSettings | None = None) -> ZoneSums:
@@ -257,7 +258,7 @@ def zone_sums(stack, pix, settings: ScanSettings | None = None) -> ZoneSums:
     s = stack.sum_over(pix)
     out = ZoneSums(E=stack.E, n_pix=int(s["n"]), i0=s["i0"], tey=s["tey"], det=dict(s["det"]), main=stack.main,
                    edge_ev=getattr(stack, "edge_ev", None), valid=getattr(stack, "valid", None),
-                   sid=str(getattr(stack, "id", "")))
+                   sid=str(getattr(stack, "id", "")), edge=getattr(stack, "edge", None))
     roi = getattr(settings, "roi", None) if settings is not None else None
     if roi and pix.size:
         from aurora.core import xrf_windows as xw

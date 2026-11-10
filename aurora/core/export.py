@@ -245,7 +245,7 @@ def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=N
     st = copy.copy(settings)
     st.line = line
     sums = ZoneSums(E=E, n_pix=n, i0=i0 * scale, tey=tey * scale, det={line: det * scale}, main=line,
-                    edge_ev=getattr(stack, "edge_ev", None), valid=None, sid=sid)
+                    edge_ev=getattr(stack, "edge_ev", None), valid=None, sid=sid, edge=getattr(stack, "edge", None))
     traces = build_traces(sums, st) if n else None
     sp = traces.spikes if traces is not None else {}
     clean = det.copy()
