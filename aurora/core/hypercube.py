@@ -35,6 +35,8 @@ import logging
 import os
 import shutil
 import time
+import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,6 +63,11 @@ EXPORT_BLOCK = 64                           # HDF5 chunk edge (pixels) of the Py
 
 class CacheSpaceError(OSError):
     """Not enough free disk space for the cube: 'needs 4.1 GB in <folder>, 2.0 GB free'. Nothing was written."""
+
+
+# a damaged cache file (as in io/cache.py): a cut or garbled .npy, a cut .npz (BadZipFile), a broken member (Bad CRC-32,
+# zlib.error, EOFError), a mapped file shorter than its header says (OSError on Windows, ValueError elsewhere)
+_DAMAGE = (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile, zlib.error)
 
 
 # ----------------------------------------------------------------------------- small helpers
@@ -423,13 +430,19 @@ class Hypercube:
         files = [folder / f"cube_{d}.npy" for d in DETS] + [folder / "cube_aux.npz", folder / "xrf_total.npy"]
         if not all(p.exists() for p in files):
             return None
+        cubes: list = []
+        xrf = None
         try:
-            cubes = [np.load(p, mmap_mode="r") for p in files[:len(DETS)]]
+            for p in files[:len(DETS)]:
+                cubes.append(np.load(p, mmap_mode="r"))
             with np.load(folder / "cube_aux.npz") as aux:
                 i0, tey, valid, spec_all = aux["i0"], aux["tey"], aux["valid"].astype(bool), aux["spec_all"]
             xrf = np.load(folder / "xrf_total.npy", mmap_mode="r")
-        except (OSError, ValueError, KeyError) as err:
-            log.warning("%s: hypercube cache unreadable (%s); rebuilt", folder, err)
+        except _DAMAGE as err:
+            cubes.clear()                            # unmapped now: Windows refuses to move a folder with a mapped file
+            xrf = None
+            gc.collect()
+            log.warning("%s: hypercube cache unreadable (%s); rebuilt", folder, str(err))    # text: no traceback kept
             return None
         if cubes[0].shape != (len(E), len(x), N_CH):
             return None
