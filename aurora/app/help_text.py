@@ -80,8 +80,9 @@ HELP: dict[str, tuple[str, str, str]] = {
     "survey.invert": ("Flip the colour scale (high-energy surveys, where samples are darker than the plate).",
                       "invert the colour scale", "3-survey"),
     "survey.clip": ("Trim the colour range at both ends by this percentage (0.5 % by default).", "clip", "3-survey"),
-    "survey.footprints": ("Show the stacks of the holder as rectangles: click a complete one to open it in Reduce.",
-                          "show the scan footprints", "3-survey"),
+    "survey.footprints": ("Show the stacks of the holder as rectangles. With Move, a click on a complete one outside "
+                          "every zone opens it in Reduce; a double-click inside a zone opens the stack under it with "
+                          "the zone selected.", "show the scan footprints", "3-survey"),
     "survey.zones": ("Show the zones of the holder with their labels.", "show the zones", "3-survey"),
     "survey.import": ("Read a zones_all.json written by the browser zone tool or by another AURORA.", "Import zones",
                       "3-survey"),

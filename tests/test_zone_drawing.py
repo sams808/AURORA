@@ -21,6 +21,7 @@ from aurora.core import testdata  # noqa: E402
 from aurora.core.model import Project  # noqa: E402
 from aurora.core.zones import members  # noqa: E402
 from wp3_helpers import close, open_window, pump, qdrag, qmove, qrelease, view_to_viewport  # noqa: E402
+from aurora.core.constants import DETS  # noqa: E402
 from zone_helpers import WIDE, inner_box, row_points, zone_project  # noqa: E402
 
 
@@ -451,3 +452,539 @@ def test_preview_moves_its_curves_in_place(qapp, win):
     pv.show_sdd.setChecked(False)                           # another structure: rebuilt
     assert "sdd0" not in pv._items and pv._items["sum"] is not items["sum"]
     pv.show_sdd.setChecked(True)
+
+
+# ============================================================================= stage B
+@pytest.fixture
+def sproject(tmp_path):
+    from zone_helpers import survey_project
+    return Project.discover(survey_project(tmp_path / "bt"))
+
+
+@pytest.fixture
+def swin(qapp, sproject):
+    """The window on the beamtime whose survey covers both stacks, Survey shown (Easy mode)."""
+    mode.set_advanced(False)
+    w, sid = open_window(qapp, sproject)
+    w.sid = sid
+    w.show_perspective("survey")
+    pump(qapp, 10)
+    yield w
+    mode.set_advanced(False)
+    close(w)
+
+
+def _visible_texts(page) -> list[str]:
+    from PySide6.QtWidgets import QAbstractButton, QLabel, QWidget
+    out = []
+    for w in page.findChildren(QWidget):
+        if w.isVisible() and isinstance(w, (QAbstractButton, QLabel)):
+            out.append(getattr(w, "full_text", w.text)())
+    return out
+
+
+def _footprint_box(sd, pad=0.05):
+    x0, x1, y0, y1 = sd.bbox
+    return _box_path(x0 - pad, x1 + pad, y0 - pad, y1 + pad)
+
+
+def qdclick(qapp, map_view, pt) -> None:
+    """A real double-click on the map at pt (mm): press, release, double-click, release, as a mouse sends them
+    (QTest.mouseDClick sends the double-click event alone, which pyqtgraph never turns into a click)."""
+    vp, p = map_view.viewport(), view_to_viewport(map_view, *pt)
+    QTest.mouseClick(vp, Qt.LeftButton, Qt.NoModifier, p)
+    QTest.mouseEvent(QTest.MouseAction.MouseDClick, vp, Qt.LeftButton, Qt.NoModifier, p)
+    QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, p)
+    qapp.processEvents()
+
+
+def _scan_by(ses, name):
+    return next(s for s in ses.stacks_of() if s.name == name)
+
+
+# ----------------------------------------------------------------------------- Z4: the tool bar
+def test_easy_toolbar_and_names(qapp, swin):
+    from aurora.app.zone_tools import SHAPE_TEXT
+    win = swin
+    for key in ("survey", "reduce"):
+        win.show_perspective(key)
+        pump(qapp, 5)
+        page = win.pages[key]
+        bar = page.toolbar
+        for adv in (False, True):
+            mode.set_advanced(adv)
+            pump(qapp, 5)
+            shown = {s for s, b in bar.shape_buttons.items() if b.isVisible()}
+            assert shown == ({"navigate", "rect", "brush", "lasso"} | ({"polygon"} if adv else set())), (key, adv)
+            for b in (bar.draw_btn, bar.erase_btn, bar.undo_btn, bar.clear_btn):
+                assert b.isVisible(), (key, adv, b.text())
+            assert bar.new_each.isVisible() == adv
+            bar.set_shape("rect")
+            assert not bar.brush_size.isVisible()
+            bar.set_shape("brush")
+            assert bar.brush_size.isVisible() and page.map.vb.tool.startswith("brush")
+            bar.set_shape("rect")
+        mode.set_advanced(False)
+        pump(qapp, 5)
+        assert [bar.shape_buttons[s].text() for s in SHAPE_TEXT] == ["Move", "Rectangle", "Brush", "Lasso", "Polygon"]
+        assert (bar.draw_btn.text(), bar.erase_btn.text()) == ("Draw", "Erase")
+        for w in [bar.draw_btn, bar.erase_btn, bar.undo_btn, bar.clear_btn, bar.new_each, bar.brush_size,
+                  *bar.shape_buttons.values()]:
+            assert w.accessibleName() and w.toolTip() and w.property("aurora_help_key"), w
+        assert bar.draw_btn.accessibleName() == "draw zones" and bar.erase_btn.accessibleName() == "erase from the zone"
+        assert bar.brush_size.accessibleName() == "brush size in map points" and bar.brush_size.suffix() == " px"
+        for t in _visible_texts(page):
+            assert not any(j in t for j in ("rect+", "rect-", "brush+", "brush-", "lasso+", "polygon+")), (key, t)
+    # Draw / Erase from Move go back to the last drawing shape
+    sv = win.survey
+    win.show_perspective("survey")
+    sv.set_tool("navigate")
+    sv.toolbar.erase_btn.click()
+    assert sv.map.vb.tool == "rect-" and sv.toolbar.erase()
+    sv.toolbar.draw_btn.click()
+    assert sv.map.vb.tool == "rect+"
+    # Undo follows the stack
+    ses = win.session
+    assert not sv.toolbar.undo_btn.isEnabled()
+    sd = ses.stack_loaded(win.sid)
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    assert sv.toolbar.undo_btn.isEnabled() and win.reduce.toolbar.undo_btn.isEnabled() and _zones(ses)
+    sv.toolbar.undo_btn.click()
+    pump(qapp)
+    assert not _zones(ses) and not sv.toolbar.undo_btn.isEnabled()
+
+
+# ----------------------------------------------------------------------------- Z15: the keys of both pages
+def test_zone_shortcuts_both_perspectives(qapp, swin):
+    from aurora.app import shortcuts
+    win, ses = swin, swin.session
+    for key, section in (("survey", "Survey"), ("reduce", "Reduce")):
+        page = win.pages[key]
+        other = win.reduce if key == "survey" else win.survey
+        win.show_perspective(key)
+        pump(qapp, 5)
+        reg = {a.text(): a.shortcut().toString() for a in shortcuts.registered(win)
+               if shortcuts.section_of(a) == section}
+        for text, k in (("Move (pan and zoom)", "V"), ("Rectangle", "R"), ("Brush", "B"), ("Lasso", "L"),
+                        ("Draw mode", "D"), ("Erase mode", "E"), ("Switch between Draw and Erase", "X"),
+                        ("Brush in Erase mode", "Shift+B"), ("Larger brush", "+"), ("Smaller brush", "-"),
+                        ("New sample", "N"), ("Delete the sample", "Del"), ("Fit the view", "F"),
+                        ("Previous sample", "Alt+Up"), ("Next sample", "Alt+Down")):
+            assert reg.get(text) == k, (section, text, reg.get(text))
+        other_tool = other.map.vb.tool
+        win.activateWindow()
+        page.map.setFocus()
+
+        def press(k, mods=Qt.NoModifier):
+            QTest.keyClick(win, k, mods)
+            pump(qapp)
+            return page.map.vb.tool
+        page.set_tool("navigate")
+        assert press(Qt.Key_R) == "rect+" and press(Qt.Key_E) == "rect-" and press(Qt.Key_L) == "lasso-"
+        assert press(Qt.Key_X) == "lasso+" and press(Qt.Key_B) == "brush+" and press(Qt.Key_D) == "brush+"
+        assert press(Qt.Key_B, Qt.ShiftModifier) == "brush-" and press(Qt.Key_V) == "navigate"
+        n = page.toolbar.brush_n()
+        [a for a in shortcuts.registered(win) if shortcuts.section_of(a) == section and a.text() == "Larger brush"][0].trigger()
+        assert page.toolbar.brush_n() == n + 1 and page.map.vb.brush_n == n + 1
+        assert other.map.vb.tool == other_tool              # a key on one page never changes the other page's tool
+        zones = len(_zones(ses))
+        press(Qt.Key_N)
+        assert len(_zones(ses)) == zones + 1 and ses.zone() is not None
+        press(Qt.Key_Delete)
+        assert len(_zones(ses)) == zones
+        press(Qt.Key_F)
+    # Esc cancels a stroke on the Survey too (map-level, before 'Cancel the running task')
+    sv = win.survey
+    win.show_perspective("survey"); pump(qapp)
+    sv.set_tool("rect+")
+    sd = ses.stack_loaded(win.sid)
+    n = ses.undo_stack.count()
+    qdrag(qapp, sv.map, _footprint_box(sd), release=False)
+    sv.map.setFocus()
+    QTest.keyClick(sv.map, Qt.Key_Escape)
+    qrelease(qapp, sv.map, _footprint_box(sd)[-1])
+    pump(qapp)
+    assert ses.undo_stack.count() == n and not _zones(ses)
+
+
+# ----------------------------------------------------------------------------- Z6: drawing on the Survey
+def test_survey_draws_and_clicks(qapp, swin):
+    from PySide6.QtWidgets import QMenu
+    from zone_helpers import WIDE
+    win, ses, sv = swin, swin.session, swin.survey
+    sd = ses.stack_loaded(win.sid)
+    assert sv.map.vb.tool == "navigate" and sv.toolbar.shape() == "navigate"     # opens in Move
+    assert sv.map.zone_tools and sv.map.pitch is not None
+    # Draw + Rectangle over the stack's footprint: one zone of the holder, attached to the stacks it covers
+    sv.set_tool("rect+")
+    n = ses.undo_stack.count()
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    z = ses.zone()
+    assert len(_zones(ses)) == 1 and ses.undo_stack.count() == n + 1 and len(z.rects) == 1
+    covered = set()
+    for s in ses.stacks_of():
+        x, y, pitch, _n = ses.coordinates(ses.stack_id(s))
+        if members(z, x, y, pitch).size:
+            covered.add(ses.stack_id(s))
+    assert set(z.settings) == covered == {win.sid}
+    assert sv.zone_table.rowCount() == 1 and sv.map.hint_text() == idle_hint("rect+")
+    c = sd.bbox
+    sv._hover((c[0] + c[1]) / 2, (c[2] + c[3]) / 2)                # the hover line names the footprint and the zone
+    assert testdata.STACK in sv.hint.full_text() and sv.hint.full_text().endswith(" · zone 1")
+    # a stroke over no survey point writes nothing and says why
+    sv.set_tool("rect+")
+    ses.select_zone(None); pump(qapp)
+    (vx0, vx1), (vy0, vy1) = sv.map.vb.viewRange()
+    survey = ses.survey()
+    below = (vy0 + float(survey.y.min()) - survey.pitch[1]) / 2           # in the view, under the plate map
+    qdrag(qapp, sv.map, _box_path(0.0, 0.6, below - 0.1, below + 0.1))
+    assert len(_zones(ses)) == 1 and sv.map.hint_text() == "no measured point there: draw over the coloured map"
+    # Move: a click inside the zone selects it; a click on a complete footprint outside every zone opens it
+    sv.set_tool("navigate")
+    opened = []
+    sv.open_requested.connect(lambda s: opened.append(s.name))
+    c = sd.bbox
+    QTest.mouseClick(sv.map.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     view_to_viewport(sv.map, (c[0] + c[1]) / 2, (c[2] + c[3]) / 2))
+    pump(qapp)
+    assert ses.current_zone == z.id and opened == []
+    wx = (2.0 + 4.75) / 2
+    win.show_perspective("survey"); pump(qapp)
+    QTest.mouseClick(sv.map.viewport(), Qt.LeftButton, Qt.NoModifier, view_to_viewport(sv.map, wx, 5.4))
+    pump(qapp)
+    assert opened == [WIDE] and win.stack.currentWidget() is win.reduce
+    # a double-click inside the zone over the footprint: that stack in Reduce, the zone selected
+    win.show_perspective("survey"); pump(qapp)
+    opened.clear()
+    ses.select_zone(None); pump(qapp)
+    qdclick(qapp, sv.map, ((c[0] + c[1]) / 2, (c[2] + c[3]) / 2))
+    pump(qapp, 10)
+    assert opened[-1:] == [testdata.STACK] and ses.current_zone == z.id and win.stack.currentWidget() is win.reduce
+    # the zone's right-click menu offers its stacks in Reduce
+    win.show_perspective("survey"); pump(qapp)
+    m = sv.zone_menu(z.id)
+    texts = [a.text() for a in m.actions() if a.text()]
+    assert texts[:5] == ["Rename…", "Duplicate", "Delete", "Copy geometry", "Zoom to zone"]
+    assert any(t.startswith("Open 09:27") and t.endswith("in Reduce") for t in texts)
+    QTest.mouseClick(sv.map.viewport(), Qt.RightButton, Qt.NoModifier,
+                     view_to_viewport(sv.map, (c[0] + c[1]) / 2, (c[2] + c[3]) / 2))
+    pump(qapp)
+    assert isinstance(sv.last_menu, QMenu) and sv.last_menu.isVisible()
+    sv.last_menu.close(); pump(qapp)
+    # Grid of zones (Advanced) still opens its dialog; the tool bar is off while it is armed
+    mode.set_advanced(True); pump(qapp)
+    sv.grid_btn.setChecked(True); pump(qapp)
+    assert not sv.toolbar.isEnabled() and sv.map.vb.tool == "rect+" and sv.map.hint_text() == ""
+    n = len(_zones(ses))
+    qdrag(qapp, sv.map, _box_path(1.8, 4.9, 4.9, 5.85))
+    assert sv.grid_dialog is not None and len(_zones(ses)) == n and not sv.grid_btn.isChecked()
+    assert sv.toolbar.isEnabled() and sv.map.vb.tool == sv.toolbar.tool()
+    sv.grid_dialog.reject(); pump(qapp)
+
+
+# ----------------------------------------------------------------------------- Z7: the Survey's Zone preview
+def test_survey_preview_emission(qapp, swin):
+    from zone_helpers import BINS, LINE_A, LINE_B, sample_box, sample_points
+    win, ses, sv = swin, swin.session, swin.survey
+    zp = sv.zone_preview
+    sd = ses.stack_loaded(win.sid)
+    survey = ses.survey()
+    assert zp.summary.text().startswith("Select a zone, or draw one on the map")
+    sv.channel.setCurrentText(LINE_A); pump(qapp)
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _box_path(*sample_box(sd)))             # the sample's survey points
+    z = ses.zone()
+    pix = members(z, survey.x, survey.y, survey.pitch)
+    assert set(pix.tolist()) == set(sample_points(survey, sd).tolist()) and pix.size == 12
+    assert set(z.settings) == {win.sid} and len(z.members[win.sid]) == sd.n_pix     # and the whole stack
+    d = zp.emission.data
+    want = survey.per_point[pix].sum(axis=0) / pix.size
+    assert np.allclose(d["per_point"], want) and np.allclose(d["sum"], want.sum(axis=0)) and d["n"] == pix.size
+    y = zp.emission.curves[0].yData
+    assert np.allclose(y[np.isfinite(y)], want[0][want[0] > 0])
+    assert zp.emission.plot.getPlotItem().titleLabel.text == f"XRF at {survey.energy:.1f} eV · {pix.size} survey points"
+    assert [tuple(r.getRegion()) for r in zp.emission.regions] == [tuple(BINS[LINE_A][d]) for d in DETS]
+    assert [t.value() for t in zp.emission.ticks] == [np.mean([(lo + hi) / 2 for lo, hi in BINS[LINE_B].values()])]
+    assert zp.summary.full_text().startswith(f"zone 1: {pix.size} survey points · {LINE_A} window 60–73 ch (SDD1)")
+    sv.channel.setCurrentText(LINE_B); pump(qapp)              # the map's channel moves the shaded window
+    assert [tuple(r.getRegion()) for r in zp.emission.regions] == [tuple(BINS[LINE_B][d]) for d in DETS]
+    sv.channel.setCurrentText("total"); pump(qapp)             # no window for the total XRF
+    assert zp.emission.regions == []
+
+    # the sample and the plate around it: different line A / line B ratios
+    def ratio(per_point):
+        tot = per_point.sum(axis=0)
+        return tot[60:74].sum() / tot[46:58].sum()
+    sample = ratio(zp.emission.data["per_point"])
+    ses.select_zone(None); pump(qapp)
+    qdrag(qapp, sv.map, _box_path(0.75, 1.65, 4.45, 4.85))       # plate only
+    plate = ratio(zp.emission.data["per_point"])
+    assert sample > 3 and plate < 1, (sample, plate)
+
+
+def test_survey_preview_xas_of_covered_stack(qapp, swin):
+    from aurora.app.zone_preview import MSG_NO_STACK
+    from aurora.core.zones import zone_traces
+    from zone_helpers import WIDE
+    win, ses, sv = swin, swin.session, swin.survey
+    zp = sv.zone_preview
+    sd = ses.stack_loaded(win.sid)
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    z = ses.zone()
+    assert zp.scan_combo.currentData() == win.sid and zp.xas.isVisible()
+    want = zone_traces(sd, members(z, sd.x, sd.y, sd.pitch), z.settings[win.sid]).sum
+    assert np.allclose(zp.xas_sum(), want, equal_nan=True)
+    assert zp.summary.full_text().endswith(f"on 09:27: {sd.n_pix} of {sd.n_pix} pixels")
+    # a stack not loaded: read in a job once the stroke is written (the key Reduce uses), then drawn
+    wid = ses.stack_id(_scan_by(ses, WIDE))
+    assert ses.stack_loaded(wid) is None
+    waits = []
+    real = zp.xas.set_traces
+    zp.xas.set_traces = lambda traces, waiting="": (waits.append(waiting), real(traces, waiting=waiting))[1]
+    ses.select_zone(None); pump(qapp)
+    qdrag(qapp, sv.map, _box_path(1.9, 4.85, 4.9, 5.85))
+    z2 = ses.zone()
+    assert z2.id != z.id and set(z2.settings) == {wid}
+    assert any(w == "reading 09:30 …" for w in waits), waits
+    assert win.jobs.wait_idle(30000)
+    pump(qapp, 10)
+    wsd = ses.stack_loaded(wid)
+    assert wsd is not None and zp.scan_combo.currentData() == wid
+    assert np.allclose(zp.xas_sum(), zone_traces(wsd, members(z2, wsd.x, wsd.y, wsd.pitch), z2.settings[wid]).sum,
+                       equal_nan=True)
+    # a zone over no stack names the holder
+    ses.select_zone(None); pump(qapp)
+    qdrag(qapp, sv.map, _box_path(0.75, 1.65, 4.45, 4.85))
+    assert not zp.xas.isVisible() and zp.xas_note.text() == MSG_NO_STACK.format(zone="zone 3", holder="N5")
+    # Open in Reduce: the stack and the zone there
+    ses.select_zone(z.id); pump(qapp)
+    assert zp.open_btn.isEnabled()
+    zp.open_btn.click()
+    pump(qapp, 10)
+    win.jobs.wait_idle(30000); pump(qapp)
+    assert win.stack.currentWidget() is win.reduce and ses.current_zone == z.id and ses.current_stack == win.sid
+
+
+# ----------------------------------------------------------------------------- Z8: the live preview
+def test_live_preview_during_drag(qapp, swin):
+    from aurora.app.zone_tools import FIRST_MS
+    from aurora.core.zones import zone_traces
+    win, ses, sv = swin, swin.session, swin.survey
+    sd = ses.stack_loaded(win.sid)
+    survey = ses.survey()
+    # Survey: the emission of the draft's points before the release, nothing written yet
+    sv.set_tool("rect+")
+    before = json.dumps(ses.zones.to_json(), sort_keys=True, default=str)
+    n = ses.undo_stack.count()
+    path = _footprint_box(sd)
+    qdrag(qapp, sv.map, path[:3], release=False)
+    QTest.qWait(FIRST_MS + 120); pump(qapp)
+    d = sv.editor.draft()
+    assert d is not None and d.members_after.size
+    want = survey.per_point[d.members_after].sum(axis=0) / d.members_after.size
+    assert np.allclose(sv.zone_preview.emission.data["per_point"], want)
+    assert json.dumps(ses.zones.to_json(), sort_keys=True, default=str) == before and ses.undo_stack.count() == n
+    assert sv.map.stroke_preview_counts()[0] == d.added.size
+    qrelease(qapp, sv.map, path[2]); pump(qapp)
+    assert ses.undo_stack.count() == n + 1 and sv.map.stroke_preview_counts() == (0, 0)
+    # Reduce: the traces of the draft's pixels on the current stack, drawn in place
+    rd = win.reduce
+    win.show_perspective("reduce"); pump(qapp, 5)
+    ses.select_zone(None); pump(qapp)
+    rd.set_tool("rect+")
+    n = ses.undo_stack.count()
+    path = _around(sd, np.arange(6))
+    qdrag(qapp, rd.map, path, release=False)
+    QTest.qWait(FIRST_MS + 120); pump(qapp)
+    d = rd.editor.draft()
+    (name, t, _meta), = rd.preview._traces
+    st = rd._draft_settings(d, sd)
+    assert t.n_pix == d.members_after.size and np.allclose(t.sum, zone_traces(sd, d.members_after, st).sum,
+                                                           equal_nan=True)
+    assert "while drawing" in rd.region_caption.text() and ses.undo_stack.count() == n
+    qrelease(qapp, rd.map, path[-1]); pump(qapp)
+    assert ses.undo_stack.count() == n + 1 and "while drawing" not in rd.region_caption.text()
+
+
+def test_preview_throttle_counts(qapp, swin, monkeypatch):
+    import math
+    import time
+    from aurora.app import zone_tools as zt
+    win, ses = swin, swin.session
+    rd = win.reduce
+    win.show_perspective("reduce"); pump(qapp, 5)
+    sd = ses.stack_loaded(win.sid)
+    rd.set_tool("rect+")
+    qdrag(qapp, rd.map, _around(sd, np.arange(4)))           # zone 1 on the left: the brush below adds to it
+    rd.set_tool("brush+")
+    xs = np.linspace(float(sd.x.min()), float(sd.x.max()), 31)
+    ys = float(np.median(sd.y))
+    previews = []
+    monkeypatch.setattr(rd, "update_preview", lambda: previews.append(1))
+    runs = rd.throttle.runs
+    t0 = time.perf_counter()
+    qdrag(qapp, rd.map, [(float(x), ys) for x in xs], release=False, delay=40)      # 30 moves, about 1.2 s
+    assert previews == [] and rd.throttle.runs > runs                              # live while it moves
+    qrelease(qapp, rd.map, (float(xs[-1]), ys)); pump(qapp)
+    took = (time.perf_counter() - t0) * 1000
+    drag_runs = rd.throttle.runs - runs
+    assert 1 <= drag_runs <= math.ceil(took / zt.INTERVAL_MS) + 2, (drag_runs, took)
+    assert previews == [1]                                                          # once more, at the release
+    QTest.qWait(zt.INTERVAL_MS + 60); pump(qapp)
+    assert rd.throttle.runs - runs == drag_runs and not rd.throttle.pending()       # nothing after the release
+    monkeypatch.undo()
+    # a slow preview: the next ones without de-spike, then only at the release (and the map says so)
+    seen = []
+    real = rd.throttle._run
+    rd.throttle._run = lambda d, fast: (seen.append(fast), real(d, fast))[1]
+    clock = iter(np.arange(0.0, 1e4, 0.2))                    # every preview measures 200 ms > SLOW_MS
+    rd.throttle.clock = lambda: float(next(clock))
+    ses.select_zone(None); pump(qapp)
+    rd.set_tool("rect+")
+    qdrag(qapp, rd.map, [(float(x), ys) for x in xs[::3]], release=False, delay=40)
+    QTest.qWait(zt.INTERVAL_MS + 80); pump(qapp)
+    assert seen[:2] == [False, True] and len(seen) == 2 and rd.throttle.state == "release", seen
+    assert rd.map.hint_text().endswith(zt.SLOW_HINT)
+    qrelease(qapp, rd.map, (float(xs[-1]), ys)); pump(qapp)
+    assert rd.throttle.state == "live" and len(seen) == 2 and rd.preview._traces
+
+
+# ----------------------------------------------------------------------------- Z10: messages of the previews
+def test_preview_messages(qapp, swin):
+    from aurora.app.reduce import PREVIEW_NO_SCAN, PREVIEW_NO_ZONE
+    from aurora.app.zone_preview import MSG_EMPTY, MSG_NO_ZONE, MSG_OFF_PLATE
+    from zone_helpers import WIDE
+    win, ses, sv, rd = swin, swin.session, swin.survey, swin.reduce
+    sd = ses.stack_loaded(win.sid)
+    zp = sv.zone_preview
+    assert zp.summary.text() == MSG_NO_ZONE
+    z = ses.new_zone(); pump(qapp)                             # an empty zone
+    assert zp.summary.text() == MSG_EMPTY.format(zone=f"zone {z.id}")
+    with ses.edit("a zone off the plate"):
+        z.rects.append([-3.0, -2.5, 8.0, 8.5])
+    pump(qapp)
+    assert zp.summary.full_text().startswith(f"zone {z.id}: 0 survey points") and \
+        zp.emission.plot.getPlotItem()._aurora_hint.toPlainText() == MSG_OFF_PLATE.format(zone=f"zone {z.id}")
+    # Reduce: no zone, an empty zone, a zone outside this scan naming the scans it covers, no scan
+    win.show_perspective("reduce"); pump(qapp, 5)
+    ses.select_zone(None); pump(qapp)
+    assert rd.preview._waiting == PREVIEW_NO_ZONE
+    zid = ses.new_zone().id; pump(qapp)
+    assert rd.preview._waiting == f"zone {zid} is empty: drag on the map to draw it"
+    wid = ses.stack_id(_scan_by(ses, WIDE))
+    with ses.edit("a zone on the other stack"):
+        ses.zone(zid).rects.append([1.9, 4.85, 4.9, 5.85])
+    pump(qapp)
+    assert ses.zone(zid).settings and wid in ses.zone(zid).settings and ses.stack_loaded(wid) is None
+    assert rd.preview._waiting == (f"zone {zid} holds no pixel of 09:27: it lies outside this scan. Scans it covers: "
+                                   "09:30 (pick one in step 1)")
+    ses.select_stack(None); pump(qapp)
+    ses.select_zone(None); pump(qapp)
+    assert rd.preview._waiting == PREVIEW_NO_SCAN
+
+
+def test_undo_after_drag_refreshes_previews(qapp, swin):
+    from aurora.app.zone_preview import MSG_NO_ZONE
+    win, ses, sv, rd = swin, swin.session, swin.survey, swin.reduce
+    sd = ses.stack_loaded(win.sid)
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    drawn = sv.zone_preview.summary.full_text()
+    assert drawn.startswith("zone 1: ")
+    win.activateWindow()
+    QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier); pump(qapp)
+    assert sv.zone_preview.summary.text() == MSG_NO_ZONE and not _zones(ses)
+    QTest.keyClick(win, Qt.Key_Y, Qt.ControlModifier); pump(qapp)
+    assert sv.zone_preview.summary.full_text() == drawn
+    win.show_perspective("reduce"); pump(qapp, 5)
+    assert rd.preview._traces and rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 points")
+    QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier); pump(qapp)
+    assert rd.preview._traces == [] and rd.region_caption.text().startswith("Region: nothing selected")
+    QTest.keyClick(win, Qt.Key_Y, Qt.ControlModifier); pump(qapp)
+    assert rd.preview._traces and rd.region_caption.text().startswith("Region: 1 rectangle")
+
+
+# ----------------------------------------------------------------------------- Z11: what the map shows
+def test_map_feedback(qapp, wide):
+    from aurora.app.theme import MAP_OVERLAY
+    rd, ses = wide.reduce, wide.session
+    sd = ses.stack_loaded(wide.sid)
+    m = rd.map
+    rd.set_tool("rect+")
+    assert m.hint_text() == idle_hint("rect+") and m.vb.cursor().shape() == Qt.CrossCursor
+    rd.set_tool("rect-")
+    assert m.hint_text() == idle_hint("rect-") == "Drag over the selected zone to erase · right-drag draws"
+    rd.set_tool("navigate")
+    assert m.hint_text() == ""
+    # the points a stroke adds, in the new zone's colour; the points an erase removes, crossed
+    rd.set_tool("rect+")
+    row = row_points(sd, 1)
+    qdrag(qapp, m, _around(sd, row[:4]), release=False)
+    d = rd.editor.draft()
+    assert m.stroke_preview_counts() == (4, 0) and d.added.size == 4
+    add = m._stroke_items["add"]
+    assert abs(add.opts["brush"].color().alpha() - 0.45 * 255) <= 1 and add.opts["symbol"] == "s"
+    qrelease(qapp, m, _around(sd, row[:4])[-1]); pump(qapp)
+    assert m.stroke_preview_counts() == (0, 0)
+    qdrag(qapp, m, _around(sd, row[:2]), button=Qt.RightButton, release=False)
+    assert m.stroke_preview_counts() == (0, 2)
+    rem = m._stroke_items["remove"]
+    assert rem.opts["symbol"] == "x" and rem.opts["pen"].color().name().lower() == MAP_OVERLAY["erase"].lower()
+    assert m.vb._rubber.pen().color().name().lower() == MAP_OVERLAY["erase"].lower()      # the band in Erase colour
+    qrelease(qapp, m, _around(sd, row[:2])[-1], button=Qt.RightButton); pump(qapp)
+    # the brush square follows the pointer, snapped to the nearest point, n x n pitches
+    rd.set_tool("brush+")
+    rd.brush_n.setValue(3)
+    assert m.vb.cursor().shape() == Qt.BlankCursor
+    qmove(qapp, m, (float(sd.x[row[5]]) + 0.3 * sd.pitch[0], float(sd.y[row[5]]) - 0.2 * sd.pitch[1]))
+    r = m.footprint_rect()
+    assert r is not None and np.isclose(r.center().x(), sd.x[row[5]], atol=1e-3)
+    assert np.isclose(r.center().y(), sd.y[row[5]], atol=1e-3)
+    assert np.isclose(r.width(), 3 * sd.pitch[0]) and np.isclose(r.height(), 3 * sd.pitch[1])
+    qmove(qapp, m, (float(sd.x[row[5]]), float(sd.y.max()) + 3 * sd.pitch[1]))         # beyond the brush's reach
+    assert m.footprint_rect() is None
+    rd.set_tool("rect+")
+    assert m.footprint_rect() is None and m._footprint_n == 0
+
+
+def test_member_pixels_are_one_item(qapp, wide):
+    """Z17: the selected zone's member pixels are one scatter item of pitch-sized squares, not one item per pixel."""
+    import pyqtgraph as pg
+    rd, ses = wide.reduce, wide.session
+    sd = ses.stack_loaded(wide.sid)
+    rd.set_tool("rect+")
+    qdrag(qapp, rd.map, _around(sd, np.arange(sd.n_pix)))
+    z = ses.zone()
+    pix = members(z, sd.x, sd.y, sd.pitch)
+    items = [it for it in rd.map._overlays if isinstance(it, pg.ScatterPlotItem)]
+    assert len(items) == 1 and len(items[0].data) == pix.size == sd.n_pix
+    xs, ys = items[0].getData()
+    assert set(zip(np.round(xs, 6), np.round(ys, 6))) == set(zip(np.round(sd.x[pix], 6), np.round(sd.y[pix], 6)))
+    br = items[0].boundingRect()                             # pitch-sized squares, not points
+    assert np.ptp(sd.x) + sd.pitch[0] - 1e-6 <= br.width() <= np.ptp(sd.x) + 2 * sd.pitch[0]
+
+
+# ----------------------------------------------------------------------------- Z14: survey, inside the zone
+def test_window_source_survey_inside_the_zone(qapp, swin):
+    from aurora.core.constants import DETS as _D
+    win, ses, sv, rd = swin, swin.session, swin.survey, swin.reduce
+    sd = ses.stack_loaded(win.sid)
+    survey = ses.survey()
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    z = ses.zone()
+    mode.set_advanced(True)
+    win.show_perspective("reduce"); pump(qapp, 5)
+    wc = rd.window_card
+    wc.source.setCurrentIndex(wc.source.findData("survey_zone")); pump(qapp)
+    assert wc.source.currentText() == "survey, inside the zone" and wc.source.isVisible()
+    pix = members(z, survey.x, survey.y, survey.pitch)
+    assert np.allclose(wc._spectrum, survey.zone_spectrum(pix)) and len(_D) == wc._spectrum.shape[0]
+    assert wc.status.text().endswith(f"inside the zone ({pix.size} points)")
+    wc.source.setCurrentIndex(wc.source.findData("survey")); pump(qapp)
+    assert np.allclose(wc._spectrum, survey.spec)                  # the whole survey, as before
+    wc.source.setCurrentIndex(wc.source.findData("survey_zone")); pump(qapp)
+    ses.select_zone(None); pump(qapp)
+    assert np.allclose(wc._spectrum, survey.spec) and wc.status.text().startswith("no zone selected")
+    mode.set_advanced(False)

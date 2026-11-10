@@ -70,7 +70,7 @@ in Report, and the same chip over the Compare library).
 | Perspective | Easy mode | Advanced mode adds |
 |---|---|---|
 | Home | the scan tree, the project summary and the scan analysis summary | the Kind column, the folder, kind and label rows, the sgm_report notes, the full table of h5 attributes, the SDD geometry, the full error of a failed open |
-| Survey | the holder, the plate map with footprints and zones, the footprint legend, the sketch, the sample-sheet rows | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…** |
+| Survey | the holder, the plate map with footprints and zones, the zone tool bar (**Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**), the **Zone preview** (scan, **Open in Reduce**), the footprint legend, the sketch, the sample-sheet rows | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…**; **Polygon** and **every stroke starts a new zone** in the tool bar; **Show** in the **Zone preview** |
 | Reduce | the four numbered steps: **Scans of holder N5**, **XRF window** (preset, lo, hi), **Region** (the zone tool bar: **Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**; **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **Polygon** and **every stroke starts a new zone** in the tool bar, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview's **Show** menu |
 | Check | **Spectra to check** (**Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder N5** (**Run the checks on holder N5**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
@@ -295,11 +295,36 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
   scale for high-energy surveys where samples are darker than the plate. **clip** trims the colour range at both
   ends (0.5 % by default). All Advanced.
 - **footprints**: the stacks of the holder, one colour and dash per status (complete, aborted, in progress, test; the
-  legend sits under the map in both modes). Click one to open it in Reduce. **zones**: the zones of the holder with
-  their labels.
-- Hovering prints x, y and the value under the cursor.
-- The cards on the right show **Zones of holder N5**, the **Sketch** of the holder (`zones_html/sketches/<holder>.png`
-  when it exists) and the **Samples on holder N5 (sample sheet)**: the rows of the sample sheet that belong to it.
+  legend sits under the map in both modes). **zones**: the zones of the holder with their labels.
+- Zones are drawn and erased on the plate map with the same tool bar as Reduce's stack map (4.2): **Draw** or
+  **Erase**, then **Rectangle**, **Brush** or **Lasso** (**Polygon** in Advanced), and drag; **Undo** and **Clear** are
+  beside them. The page opens with **Move**, so a click never changes a zone: in **Move** a click inside a zone
+  selects it, a click on a complete footprint outside every zone opens that stack in Reduce, and a double-click inside
+  a zone over a complete footprint opens that stack in Reduce with the zone selected. A zone drawn here attaches to
+  every stack of the holder it covers, loaded or not (4.3). While **Grid of zones…** is armed the tool bar is off.
+- Right-click on a zone: **Rename…**, **Duplicate**, **Delete**, **Copy geometry**, **Zoom to zone**, and *Open … in Reduce* for each complete stack it
+  covers (the scan named). Right-click on the map outside the zones: **Fit view**.
+- Hovering prints x, y, the footprint and the zone under the cursor.
+- The cards on the right show **Zones of holder N5**, the **Zone preview**, the **Sketch** of the holder
+  (`zones_html/sketches/<holder>.png` when it exists) and the **Samples on holder N5 (sample sheet)**: the rows of
+  the sample sheet that belong to it. At the smallest window the column scrolls rather than squeezing the preview.
+- The **Zone preview** shows the selected zone, and the stroke while it is drawn (updated live, at most every 0.15 s):
+  - its XRF emission: the four detectors in their colours and dashes and their sum, log scale, in channels, at the
+    survey's energy, as counts per point (the mean over the zone's survey points, so drawing changes the shape, not
+    the scale). The title counts the points (*XRF at 695.0 eV · 30 survey points*). The window of the map's
+    **channel** is shaded per detector (its fixed bins in `config/roi_bins.json`), the other fixed lines are thin
+    labelled ticks, and the zone's own XRF windows on the scan below (when it has custom windows) are dashed. With
+    *total*, *TEY* or *I0* as the channel, or without fixed bins, no window is marked. Hovering gives the channel, its
+    eV with an SDD calibration, and the counts;
+  - its XAS on a stack it covers: **scan** lists the stacks the zone covers (*(not loaded)* marked); the current stack
+    when covered, else the earliest. A loaded stack previews live; one not loaded is read once the stroke is written
+    (progress and **Cancel** in the card), then drawn. **Open in Reduce** opens that stack in Reduce with the zone
+    selected. In Advanced, **Show** chooses the curves, as in Reduce's preview (4.7);
+  - one line that a screen reader reads too: *zone 1: 30 survey points · F Kα window 60–73 ch · on 09:27: 12 of 12
+    pixels*.
+  Without a zone it reads *Select a zone, or draw one on the map (Draw, then drag)*; an empty zone *zone 3 is empty:
+  drag on the map to draw it*; a zone off the plate *zone 3 holds no survey point: it lies outside the plate map*; a
+  zone over no stack *zone 3 covers no scan of holder N5: draw it over a scan footprint (dashed outlines)*.
 - **Import zones…** (Advanced) reads a zones_all.json (the browser zone tool's, or another AURORA's export or
   session). For a holder that already has other zones, the **Import zones** dialog asks what to do, per holder, in the
   column **What to do**: **Merge** (the default: the file's zones are added with free numbers, and a zone with the

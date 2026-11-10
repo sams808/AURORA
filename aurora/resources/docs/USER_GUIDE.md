@@ -82,10 +82,13 @@ Easy mode shows John Bussey's four steps as numbered cards:
 Made a mistake? **Ctrl+Z** undoes the last zone or settings change (**Edit > Undo** names it), **Ctrl+Y** redoes it;
 the zones are saved by themselves within a second.
 
-Advanced mode adds **Polygon**, **every stroke starts a new zone**, **Load all**, **Propose zones** (a first guess from the sgm_report summary or the bright pads of the
-survey), **Stitch…** (overlapping tiles into one stack), **Save polygon…** (John Bussey's
-`_polygon_roi.json`), the group and comment of the zone, and one settings card per attached scan: include, which SDDs,
-which line, PFY or IPFY, fluorescence normalisation (raw counts, / I0, / I0, pre-edge = 0, / I0, edge jump = 1, / I0,
+Zones can be drawn on the Survey's plate map too, with the same tool bar; its **Zone preview** shows the zone's XRF
+emission and its XAS on a stack it covers while you draw.
+
+Advanced mode adds **Polygon**, **every stroke starts a new zone**, **Load all**, **Propose zones** (a first guess
+from the sgm_report summary or the bright pads of the survey), **Stitch…** (overlapping tiles into one stack),
+**Save polygon…** (John Bussey's `_polygon_roi.json`), the group and comment of the zone, and one settings card per
+attached scan: include, which SDDs, which line, PFY or IPFY, fluorescence normalisation (raw counts, / I0, / I0, pre-edge = 0, / I0, edge jump = 1, / I0,
 area = 1, / I0, maximum = 1), TEY and its normalisation, de-spike threshold k, I0 source (own, or the good-I0 mean of
 the scans chosen in Check), pre/post windows in eV. **Copy to…** on each card and **Rules…** set many cards at once
 (MANUAL 4.5, 4.9). Defaults for new settings come from Settings; saturated SDDs start unticked and scans with an
