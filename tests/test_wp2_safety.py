@@ -69,9 +69,6 @@ def test_a_project_another_process_holds_opens_read_only_until_it_is_gone(qapp, 
         word, pid = proc.stdout.readline().split()         # the interpreter's pid (a venv launcher may sit between)
         assert word == "held"
         ses = session(fake_project)
-        msgs, warned = [], []
-        ses.status.connect(msgs.append)
-        ses.warned.connect(lambda t, m: warned.append(m))
         assert ses.read_only and f"process {pid}" in ses.read_only_reason
         assert "open in another AURORA" in ses.read_only_reason
         draw_zone(ses, "drawn in the second window")
@@ -194,6 +191,7 @@ def test_export_from_the_question_keeps_the_edits(qapp, fake_project, tmp_path, 
     ses = win.session
     assert ses.read_only and "cannot be saved here" in ses.read_only_reason
     assert win.session._ui.state == "read-only" and win.session._ui.indicator.property("tone") == "warn"
+    assert "cannot be saved here" in win.session._ui.last_message          # the non-modal box at open
     draw_zone(ses, "rescued zone")
     out = tmp_path / "rescued_zones_all.json"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), "JSON (*.json)"))
