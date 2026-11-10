@@ -26,7 +26,8 @@ and a larger text, at once. Long tasks run in the background with a progress str
 ## 1. Open a beamtime
 
 **File > Open project…**, or drop the folder that contains `raw/` (for example `my_beamtime`) on the window. A single
-day folder, a scan folder or one scan's `.h5` file works too. AURORA also opens the folder John Bussey's GUI used,
+day folder or a scan folder works too (that day alone: **Show every day** opens the rest), and so does one scan's
+`.h5` file dropped on the window. AURORA also opens the folder John Bussey's GUI used,
 where the scan folders sit side by side (`CLS GUI/`): choose that folder with **Open project…**. Its zones are saved
 inside it, in `.aurora/`.
 

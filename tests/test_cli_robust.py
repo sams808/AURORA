@@ -45,8 +45,8 @@ def test_a_folder_or_h5_as_first_argument_opens_the_gui(demo, monkeypatch):
 def test_a_failing_command_returns_1_and_logs_the_traceback(_log_dir, capsys):
     rc = cli.main(["report", "C:/does/not/exist"])
     assert rc == 1
-    err = capsys.readouterr().err
-    assert "Traceback (most recent call last)" in err and "aurora report failed" in err
+    err = capsys.readouterr().err                # a wrong path is a user error: one line, the traceback in the log
+    assert "Traceback (most recent call last)" not in err and err.startswith("aurora report: ")
     log = (_log_dir / "aurora.log").read_text(encoding="utf-8")
     assert "Traceback (most recent call last)" in log and "aurora report failed" in log
 
@@ -101,12 +101,12 @@ def test_utf8_output_through_a_pipe(demo, tmp_path):
 
 
 def test_main_is_guarded_in_a_subprocess(tmp_path):
-    """A headless failure in a fresh interpreter: exit code 1, the traceback on stderr, no hang."""
+    """A headless failure in a fresh interpreter: exit code 1, one line on stderr, the traceback in the log, no hang."""
     env = dict(os.environ, PYTHONPATH=str(ROOT), AURORA_LOG_DIR=str(tmp_path / "logs"))
     p = subprocess.run([sys.executable, "-m", "aurora", "report", str(tmp_path / "no such beamtime")],
                        capture_output=True, env=env, timeout=120)
     assert p.returncode == 1
-    assert b"Traceback" in p.stderr
+    assert p.stderr.startswith(b"aurora report: ") and b"Traceback" not in p.stderr
     assert b"Traceback" in (tmp_path / "logs" / "aurora.log").read_bytes()
 
 

@@ -3,9 +3,10 @@
 
 The headless commands never import Qt's GUI modules, so `aurora.core` keeps working without a display (`aurora report`
 reads the Settings author through QtCore when PySide6 is installed, which needs no display). Every command logs to the
-AURORA log file (aurora.logsetup); a headless command that fails writes its traceback to the log and to stderr and
-returns 1, so neither the console twin aurora-cli.exe nor the windowed AURORA.exe ever stops on an error window.
-Output is UTF-8 whatever the console or pipe.
+AURORA log file (aurora.logsetup); a headless command that fails returns 1, so neither the console twin
+aurora-cli.exe nor the windowed AURORA.exe ever stops on an error window. A user error (a path that is no beamtime or
+scan, a missing zones file, a malformed file) is one line on stderr, its traceback in the log only; any other failure
+writes its traceback to stderr too. Output is UTF-8 whatever the console or pipe.
 """
 from __future__ import annotations
 
@@ -32,6 +33,15 @@ def _utf8_streams() -> None:
 
 log = logging.getLogger("aurora.cli")
 FILE_ONLY = "aurora_file_only"            # LogRecord attribute: written to the log file, not echoed on the console
+# what a wrong path or a malformed file raises: one line for the user, the traceback in the log only
+USER_ERRORS = (FileNotFoundError, NotADirectoryError, IsADirectoryError, PermissionError, ValueError)
+
+
+def user_message(err: BaseException) -> str:
+    """The line printed for a user error: an OSError as 'reason: path' (not its repr with doubled backslashes)."""
+    if isinstance(err, OSError) and err.filename is not None and err.strerror:
+        return f"{err.strerror}: {err.filename}"
+    return str(err) or type(err).__name__
 
 
 def _console_logging(verbose: bool) -> logging.Handler | None:
@@ -79,9 +89,14 @@ def _guarded(name: str, fn, *args) -> int:
     except Exception as err:                  # noqa: BLE001  every failure ends as exit code 1, never a hang
         tb = traceback.format_exc()
         log.error("aurora %s failed: %s: %s\n%s", name, type(err).__name__, err, tb, extra={FILE_ONLY: True})
+        if isinstance(err, USER_ERRORS):
+            from aurora.logsetup import log_file
+            text = f"aurora {name}: {user_message(err)}\n  (details in {log_file()})\n"
+        else:
+            text = f"aurora {name} failed: {type(err).__name__}: {err}\n{tb}"
         if sys.stderr is not None:
             try:
-                sys.stderr.write(f"aurora {name} failed: {type(err).__name__}: {err}\n{tb}")
+                sys.stderr.write(text)
                 sys.stderr.flush()
             except (OSError, ValueError):
                 pass
@@ -110,8 +125,18 @@ def cmd_project(path: Path) -> int:
 
 def cmd_scan(path: Path) -> int:
     from aurora.core.io.raw import read_point_dir
-    from aurora.core.model import ScanInfo
+    from aurora.core.model import NotAProjectError, ScanInfo
+    path = Path(path)
+    if path.suffix.lower() == ".h5" and path.is_file():
+        path = path.parent                    # one scan's .h5: its scan folder, as `aurora <file>.h5` opens it
+    if path.is_file():
+        raise NotAProjectError(f"{path.name} is a file, not a scan folder (or a scan's .h5 file)")
+    if not path.is_dir():
+        raise FileNotFoundError(f"{path}: no such folder")
     s = ScanInfo.from_dir(path)
+    if s.kind == "other":
+        raise NotAProjectError(f"{path.name} is not a scan folder (a <HHMMSS>_<name>_survey or ..._stack folder); "
+                               "`aurora project` lists the scans of a beamtime")
     print(f"{s.name}: kind {s.kind}, status {s.status} ({s.status_reason}), edge {s.edge_text or '-'}, "
           f"{s.n_energies} energies {s.energy_text}, {s.n_points} points, h5 {s.h5}")
     for k, v in sorted(s.md.items()):
@@ -156,6 +181,11 @@ def cmd_report(args) -> int:
     from aurora.core.report import ReportBuilder, holder_keys
     proj = Project.discover(args.project)
     zpath = args.zones or (proj.root / ".aurora" / "session.json")
+    if not Path(zpath).is_file():
+        if args.zones:
+            raise FileNotFoundError(f"the zones file {zpath} does not exist")
+        raise FileNotFoundError(f"no zones yet in {proj.root.name} (.aurora/session.json is missing): draw zones in "
+                                "AURORA's Reduce, or pass --zones <file>")
     zones = ZonesFile.load(zpath)
     out = args.out or (proj.root / "reports" / "aurora")
     author, source = report_author(args.author)
@@ -178,9 +208,9 @@ def cmd_report(args) -> int:
 
 
 def cmd_demo(folder: Path) -> int:
-    """A synthetic beamtime with fixed ROI bins, a sample sheet and a few zones, for the tutorials. Only into a new or
-    empty folder: the demo's day and scan names are those of a real beamtime, so written into one it would replace
-    raw files and the beamtime's config/roi_bins.json."""
+    """A synthetic beamtime with fixed ROI bins, a sample sheet, reduced spectra and references, for the tutorials
+    (no zones: the tutorials draw them). Only into a new or empty folder: the demo's day and scan names are those of
+    a real beamtime, so written into one it would replace raw files and the beamtime's config/roi_bins.json."""
     import json
     from aurora.core import testdata
     from aurora.core.io.safety import is_protected
@@ -250,7 +280,17 @@ def _as_gui_path(argv: list[str]) -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     """The command line; every option and argument carries its help text (tests/test_cli_robust.py checks it)."""
-    p = argparse.ArgumentParser(prog="aurora", description=f"{APP_NAME} {__version__}")
+    p = argparse.ArgumentParser(
+        prog="aurora", formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=f"{APP_NAME} {__version__}: CLS SGM XAS and XRF map analysis\n(version 2 of John Bussey's SGM "
+                    "XAS GUI, based on James J. Dynes' notebooks)",
+        epilog="examples:\n"
+               "  aurora                          the application\n"
+               "  aurora <beamtime folder>        the application on that beamtime (also a scan's .h5 file)\n"
+               "  aurora demo <folder>            write the synthetic demo beamtime of the tutorials\n"
+               "  aurora project <beamtime>       list its days, holders and scans\n"
+               "  aurora report <beamtime>        build the report from the zones saved in AURORA\n"
+               "  aurora <command> --help         the options of one command")
     p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}",
                    help="print the version and exit")
     p.add_argument("--distcheck", action="store_true", help="smoke-test this installation offscreen and exit")
@@ -272,7 +312,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("path", type=Path, help="the scan folder")
     r = sub.add_parser("report", help="build the group-organised report from a zones file (headless)")
     r.add_argument("project", type=Path, help="the beamtime folder")
-    r.add_argument("--zones", type=Path, help="zones_all.json (default: <project>/.aurora/session.json)")
+    r.add_argument("--zones", type=Path, help="a zones file (zones_all.json of the browser zone tool, or Survey > "
+                                              "Export zones…; default: the session AURORA saved, "
+                                              "<project>/.aurora/session.json)")
     r.add_argument("--out", type=Path, help="output folder (default: <project>/reports/aurora)")
     r.add_argument("--title", help="the title on the cover (default: 'AURORA report · <project>')")
     r.add_argument("--groups", nargs="*", help="only these sample groups")

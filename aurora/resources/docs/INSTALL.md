@@ -43,8 +43,9 @@ Download `AURORA-<version>-windows-x64-setup.exe` and run it.
   `%LOCALAPPDATA%\Programs\AURORA\unins000.exe /VERYSILENT`.
 
 Without an installer, `AURORA-<version>-windows-x64.zip` holds the same application: unzip it anywhere (for example
-`C:\Users\<you>\Apps\AURORA`) and run `AURORA.exe`. To update the portable copy, unzip the new version beside it or
-over it; settings, sessions and caches are not inside the application folder.
+`C:\Users\<you>\Apps\AURORA`) and run `AURORA.exe`. To update the portable copy, unzip the new version into a new folder
+and delete the old one, never over it (files of the old runtime would stay); settings, sessions and caches are not
+inside the application folder.
 
 The folder holds two executables: `AURORA.exe`, the windowed application, and `aurora-cli.exe`, its console twin for a
 terminal (cmd or PowerShell), which prints its output and returns an exit code.
@@ -73,7 +74,7 @@ download was altered on the way: download it again and compare it with `SHA256SU
 `AURORA.app` to the Trash (the settings and logs of section 5 stay).
 
 On macOS the executable inside the app, `AURORA.app/Contents/MacOS/AURORA`, is both the application and the command
-line.
+line. Finder's *Open With > AURORA* on a beamtime folder, or a folder dropped on AURORA's Dock icon, opens it.
 
 The macOS builds are tested on GitHub's hosted runners (macOS 15 and macOS 26 on Apple silicon, macOS 15 on Intel):
 each disk image is mounted read-only, its app is started directly and the way Finder starts it, the self-test runs,
@@ -93,8 +94,9 @@ aurora-cli.exe report "D:\beamtimes\my_beamtime" --holders N5 --preset draft --a
 `--selftest` checks every core path and every perspective on a synthetic beamtime in a temporary folder (with
 `--platform native` it uses the real window system instead of an offscreen one, `--no-gui` skips the perspectives,
 `--keep` keeps the temporary folder); its exit code is the number of failed checks, 0 when all passed. `--distcheck`
-is a faster smoke test. Every command writes to the log file (section 5). A command that fails prints the error and
-its traceback, writes them to the log and returns exit code 1; it never waits on an error window. `AURORA.exe <folder>`
+is a faster smoke test. Every command writes to the log file (section 5). A command that fails prints the error (a
+wrong path or file in one line, anything else with its traceback), writes its traceback to the log and returns exit
+code 1; it never waits on an error window. `AURORA.exe <folder>`
 (or a folder dropped on the shortcut, or *Open in AURORA*) opens that beamtime. MANUAL §11 lists every command and
 option.
 
@@ -180,12 +182,12 @@ A build fails when AURORA is running from `dist/`: close it first.
 |---|---|---|
 | tests | windows-latest and macos-15 (Python 3.11, 3.12 and 3.13); macos-15-intel, macos-26 and ubuntu-24.04 (Python 3.12) | the test suite and the self-test from source |
 | build-windows | windows-latest | the frozen app and `aurora-cli.exe` (version resource, licences, self-tests, the headless command line, a frozen report), the installer installed, upgraded and uninstalled, the portable zip |
-| test-windows | windows-2022, windows-11-arm | the installer installed for the user, the installed self-tests, the uninstall |
+| test-windows | windows-2022, windows-11-arm | the installer installed for the user, the installed self-tests, the portable zip unpacked and self-tested, the uninstall |
 | build-macos | macos-15 (arm64), macos-15-intel (x86_64) | the app (signature, architecture, measured minimum macOS, self-tests direct and through `open`, a frozen report) and its disk image |
 | test-macos | macos-15, macos-26 (arm64), macos-15-intel (x86_64) | each disk image mounted read-only, self-tests from the image directly and the Finder way, a copy in Applications with the quarantine workaround |
 
-Every job stops after 30 minutes and every step that runs the frozen app after 5, so an app that waits on a window
-fails the run.
+Every job stops after 30 minutes (the tests after 45) and every step that runs the frozen app after 5, so an app that
+waits on a window fails the run.
 
 Release procedure:
 

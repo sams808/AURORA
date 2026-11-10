@@ -76,9 +76,11 @@ def project_rows(project, facts: ProjectFacts | None = None) -> list[tuple[str, 
     counts = ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in status_counts(scans))
     rows = [("folder", str(project.root)),
             ("layout", "a loose folder of scan folders (John Bussey's GUI layout)" if project.loose
+             else "<day>/<scan>, the day folders without raw/" if Path(project.raw) == Path(project.root)
              else "raw/<day>/<scan>" + ("" if Path(project.raw) == Path(project.root) / "raw"
                                          else f" ({shown_path(project.raw, project.root)})")),
-            ("days", f"{len(days)}: {_names(days)}" if days else "none"),
+            ("days", (f"{len(days)}: {_names(days)}" if days else "none")
+             + (f" (opened alone; left out: {_names(project.days_left_out)})" if project.days_left_out else "")),
             ("holders", f"{len(holders)}: {_names(holders)}" if holders else "none (no survey found)"),
             ("scans", f"{len(scans)}" + (f" ({counts})" if counts else ""))]
     continued = [s for d in project.days for s in d.continued]

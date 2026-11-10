@@ -62,6 +62,10 @@ def main(argv: list[str]) -> int:
         Path(argv[1]).write_text(text, encoding="utf-8")
         print(f"wrote {argv[1]}")
     else:
+        try:                                  # a Windows console or pipe is cp1252, the notes hold '▸' and 'α'
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
         sys.stdout.write(text)
     return 0
 

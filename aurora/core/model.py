@@ -8,7 +8,11 @@ holder of the previous day.
 
 A folder that holds scan folders directly, the way John Bussey's GUI kept them ('CLS GUI/<scan folders>'), is a
 project of its own (a loose folder): its .aurora/ lives inside it, and each scan's day key is the date its .h5 file
-was written (h5io.file_day), else the folder name.
+was written (h5io.file_day), else the folder name. A folder that holds the day folders directly (the raw/ level left
+out when they were copied) is a beamtime whose raw folder is itself.
+
+A day folder, a scan folder or an .h5 path opens that one day of its beamtime: Project.days_left_out names the other
+day folders of raw/, so the window can say so.
 """
 from __future__ import annotations
 
@@ -28,6 +32,29 @@ from aurora.core.names import (holder_from_survey, pretty_edge, strip_scan_suffi
 log = logging.getLogger("aurora.model")
 
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+ARCHIVES = (".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".xz")
+
+
+class NotAProjectError(FileNotFoundError):
+    """A path that exists but is nothing AURORA opens (a file that is not a scan's .h5, an archive). Its text is one
+    sentence for the person who chose it, without the path: the window and the command line show the path."""
+
+
+def _not_a_project_file(p: Path) -> NotAProjectError:
+    """The error for an existing file that is not a scan's .h5: an archive, one file of a scan, any other file."""
+    if p.suffix.lower() in ARCHIVES:
+        return NotAProjectError(f"{p.name} is an archive, which AURORA does not read: extract it first, then open the "
+                                "extracted folder")
+    scan = next((d for d in (p.parent, p.parent.parent) if scan_kind(d.name) != "other"), None)
+    if scan is not None:                             # a detector .bin or mcc .csv, also inside an energy folder
+        return NotAProjectError(f"{p.name} is one file of the scan {scan.name}: open the scan folder or the beamtime "
+                                "folder instead")
+    return NotAProjectError(f"{p.name} is a file, not a folder: open the beamtime folder (the one that holds raw/), a "
+                            "scan folder or one scan's .h5 file")
+
+
+def _holds_scans(d: Path) -> bool:
+    return any(scan_kind(c.name) != "other" for c in d.iterdir() if c.is_dir())
 
 
 @dataclass
@@ -231,6 +258,7 @@ class Project:
     plate_layout: dict = field(default_factory=dict)
     sample_elements: dict = field(default_factory=dict)
     loose: bool = False                         # a loose folder of scan folders (John Bussey's GUI), its own root
+    days_left_out: list[str] = field(default_factory=list)   # day folders of raw/ not opened (a day, scan or .h5 path)
 
     @property
     def processed(self) -> Path:
@@ -253,8 +281,9 @@ class Project:
 
     @staticmethod
     def resolve(path: Path) -> tuple[Path, Path, list[Path]]:
-        """(project root, raw root, day folders) for a project folder, a raw folder, a day folder, a scan folder, a
-        loose folder of scan folders (its own root and its only 'day' folder) or a scan's .h5 file."""
+        """(project root, raw root, day folders) for a project folder, a raw folder, a folder of day folders without
+        raw/ (its own raw root), a day folder, a scan folder, a loose folder of scan folders (its own root and its only
+        'day' folder) or a scan's .h5 file. Any other file raises NotAProjectError."""
         p = Path(path).resolve()
         if p.suffix.lower() == ".h5" and not p.is_dir():
             return Project.resolve(p.parent)
@@ -268,15 +297,28 @@ class Project:
             return root, p.parent, [p]
         if scan_kind(p.name) != "other":
             return Project.resolve(p.parent)
-        if any(scan_kind(c.name) != "other" for c in p.iterdir() if c.is_dir()):
+        if p.is_file():
+            raise _not_a_project_file(p)
+        children = [c for c in p.iterdir() if c.is_dir()]
+        if any(scan_kind(c.name) != "other" for c in children):
             return p, p, [p]                         # loose: the folder of scan folders is the project
-        raise FileNotFoundError(f"{p}: not a project folder (no raw/<day>/<scan> layout found)")
+        days = sorted(c for c in children if _DAY.fullmatch(c.name))
+        if any(_holds_scans(d) for d in days):
+            return p, p, days                        # the day folders without raw/: the folder is its own raw root
+        raise FileNotFoundError(f"{p}: not a project folder (no raw/<day>/<scan> layout found): open the folder that "
+                                "holds raw/, a day folder, a scan folder or a loose folder of scans")
 
     @classmethod
     def discover(cls, path: Path, progress=None, now: float | None = None) -> "Project":
         root, raw, day_dirs = cls.resolve(path)
         log.info("project %s (raw %s): %d day folders", root, raw, len(day_dirs))
         proj = cls(root=root, raw=raw, loose=day_dirs == [root])
+        if len(day_dirs) == 1 and not proj.loose:   # a day, scan or .h5 path: the other days of its raw folder
+            proj.days_left_out = sorted(d.name for d in raw.iterdir()
+                                        if d.is_dir() and _DAY.fullmatch(d.name) and d != day_dirs[0])
+            if proj.days_left_out:
+                log.info("only %s of %s opened: %d other day folders left out", day_dirs[0].name, root,
+                         len(proj.days_left_out))
         cfg = proj.config_dir
         # sgm_report keeps the calibration in the CLS library folder next to the project when there is one
         lib_cal = root.parent / "SGM_Beamline_Analysis-main" / "sdd_calibration.json"

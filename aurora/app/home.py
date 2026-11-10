@@ -2,8 +2,10 @@
 with status and flags; read the project summary and a scan's summary (John Bussey's 'Scan Analysis Summary').
 
 Before a project is open, a welcome panel offers Open project…, the demo beamtime, the tutorials and the recent
-projects (File > Open recent lists the same ten). A failed open says so with Retry and Choose another. The GUI thread
-never looks at a project path: discovery, the recent-projects check and the incomplete-maps check run as jobs.
+projects (File > Open recent lists the same ten). A failed open says so with Retry and Choose another (a file that is
+no project gets Choose another only). A day or scan folder opens that day only: the path line says so, and Show every
+day opens the whole beamtime. The GUI thread never looks at a project path: discovery, the recent-projects check and
+the incomplete-maps check run as jobs.
 """
 from __future__ import annotations
 
@@ -35,8 +37,8 @@ KIND_COL, TIME_COL, STATUS_COL, FLAGS_COL = 2, 1, 4, 7
 NO_PROJECT = "no project open"
 MAX_RECENT = 10                                   # File > Open recent and the welcome list (settings keep 10)
 RECENT_ROWS = 6                                   # rows of the welcome list shown before it scrolls
-WELCOME_TEXT = ("No project open. Open a beamtime folder (the one that holds raw/), a loose folder of scans or one "
-                ".h5 file, or try the demo beamtime.")
+WELCOME_TEXT = ("No project open. Open a beamtime folder (the one that holds raw/), a loose folder of scans or a scan "
+                "folder, or try the demo beamtime.")
 MONO_KEYS = {"folder", "scan", "scan name", "layout"}
 
 
@@ -77,6 +79,8 @@ def failure_reason(text: str) -> str:
     """One calm sentence for a failed open, from the job's error text (its last line)."""
     last = text.strip().splitlines()[-1].strip() if text.strip() else ""
     name, _sep, msg = last.partition(": ")
+    if name.endswith("NotAProjectError"):            # a file that is no project: its own sentence, which starts with
+        return msg                                   # the file name (kept as it is written)
     if "not a project folder" in last:
         why = "this is not a beamtime: no raw/<day>/<scan> layout and no scan folders in it"
     elif name in ("FileNotFoundError", "NotADirectoryError"):
@@ -86,6 +90,22 @@ def failure_reason(text: str) -> str:
     else:
         why = msg or last or "unknown error"
     return why[:1].upper() + why[1:]
+
+
+def retry_helps(text: str) -> bool:
+    """False for a file that is no project (model.NotAProjectError): opening it again can never work."""
+    last = text.strip().splitlines()[-1].strip() if text.strip() else ""
+    return not last.partition(": ")[0].endswith("NotAProjectError")
+
+
+def path_line(project: Project) -> str:
+    """The Scans card's path line: the root, days, holders and scans; '1 of 4 days' when a day or scan path opened one
+    day of a beamtime with more."""
+    n_days = len(project.days) + len(project.days_left_out)
+    days = (f"{project.days[0].date} only (1 of {n_days} days)" if project.days_left_out and project.days
+            else plural(len(project.days), "day"))
+    return (f"{project.root}   ·   {days}, {plural(project.n_holders, 'holder')}, "
+            f"{plural(len(project.scans), 'scan')}")
 
 
 def breakable(text: str) -> str:
@@ -174,7 +194,7 @@ class HomePerspective(QWidget):
         head = QHBoxLayout()
         h1 = QLabel("Home")
         h1.setObjectName("h1")
-        sub = ElidedLabel("open a beamtime folder (raw/<day>/<scan>), a loose folder of scans or one .h5 file",
+        sub = ElidedLabel("open a beamtime folder (raw/<day>/<scan>), a loose folder of scans or a scan folder",
                           Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1)
@@ -182,9 +202,14 @@ class HomePerspective(QWidget):
         self.open_btn = QPushButton(icon("folder", TOKENS["ink"]), " Open project…")
         self.open_btn.clicked.connect(self.choose_project)
         self.reload_btn = QPushButton(icon("refresh", TOKENS["ink"]), " Reload")
-        self.reload_btn.clicked.connect(lambda: self.open_path(self.project.root) if self.project else None)
+        self.reload_btn.clicked.connect(self.reload)
+        # a day or scan path opened one day of a beamtime with more: this opens all of them (hidden otherwise)
+        self.all_days_btn = QPushButton("Show every day")
+        self.all_days_btn.clicked.connect(self.show_every_day)
+        self.all_days_btn.hide()
         head.addWidget(self.open_btn)
         head.addWidget(self.reload_btn)
+        head.addWidget(self.all_days_btn)
         root.addLayout(head)
 
         self.taskbar = TaskBar(self)
@@ -233,6 +258,7 @@ class HomePerspective(QWidget):
         self.recent_menu.aboutToShow.connect(self.fill_recent_menu)
         explain(self.open_btn, "home.open")
         explain(self.reload_btn, "home.reload")
+        explain(self.all_days_btn, "home.all_days")
         header_tips(self.tree, {i: f"home.col.{c.lower()}" for i, c in enumerate(COLS)})
         on_theme_changed(self, lambda _s: self._theme_changed())
         # Easy mode: the Kind column, the full h5 attribute table, the SDD geometry and the sgm_report notes are Advanced
@@ -246,6 +272,8 @@ class HomePerspective(QWidget):
     def update_actions(self) -> None:
         busy = jobs.of(self).job("discover") is not None
         set_enabled(self.reload_btn, self.project is not None and not busy, "open a project first")
+        self.all_days_btn.setVisible(self.project is not None and bool(self.project.days_left_out) and not self._failed)
+        self.all_days_btn.setEnabled(not busy)
         self.empty_state.set_shown(self.project is None and not self._failed)
         self.failure_state.set_shown(bool(self._failed))
 
@@ -284,6 +312,7 @@ class HomePerspective(QWidget):
     def choose_project(self) -> None:
         rec = recent_projects()
         start = str(Path(rec[0]).parent) if rec else default_dir("project")
+        # a folder dialog: it lists no files, so a scan's .h5 opens by a drop or from the command line instead
         d = QFileDialog.getExistingDirectory(self, "Open a beamtime folder, a loose folder of scans or a scan folder",
                                              start)
         if d:
@@ -312,6 +341,16 @@ class HomePerspective(QWidget):
     def open_project(self, path: Path) -> None:
         """Former name of open_path."""
         self.open_path(path)
+
+    def reload(self) -> None:
+        """Read the open project again (Reload, F5): the same scope, so a day opened alone stays alone."""
+        if self.project is not None:
+            self.open_path(self.project.days[0].path if self.project.days_left_out else self.project.root)
+
+    def show_every_day(self) -> None:
+        """Open the whole beamtime of the one day shown (Show every day)."""
+        if self.project is not None:
+            self.open_path(self.project.root)
 
     def retry(self) -> None:
         """Open the last path asked for again (the failure panel's Retry)."""
@@ -346,8 +385,7 @@ class HomePerspective(QWidget):
         self.open_btn.setEnabled(True)
         remember_project(project.root)
         self._recent_found[str(project.root)] = True
-        self.path_label.setText(f"{project.root}   ·   {plural(len(project.days), 'day')}, "
-                                f"{plural(project.n_holders, 'holder')}, {plural(len(project.scans), 'scan')}")
+        self.path_label.setText(path_line(project))
         self._fill_tree(project)
         self._render_details()
         self.update_actions()
@@ -357,22 +395,25 @@ class HomePerspective(QWidget):
 
     def _on_failed(self, text: str) -> None:
         self.open_btn.setEnabled(True)
-        last = text.strip().splitlines()[-1] if text.strip() else ""
+        self.taskbar.hide()                           # the panel below (or the path line) says it in one sentence
         if self._quiet:                               # the last project at start: say so, keep the welcome page
             self._quiet = False
-            self.path_label.setText(f"the last project could not be opened ({last})" if last else
-                                    "the last project could not be opened")
+            name = f", {self._last_path.name}," if self._last_path is not None and self._last_path.name else ""
+            why = failure_reason(text)
+            self.path_label.setText(f"the last project{name} could not be opened: {why[:1].lower()}{why[1:]}. "
+                                    "Pick another one below.")
             self.refresh_recent()
             return
         self._failed = text.strip() or "unknown error"
         self.path_label.setText("could not open the project")
-        buttons = [("Retry", self.retry), ("Choose another…", self.choose_project)]
+        buttons = [("Retry", self.retry, "home.retry")] if retry_helps(self._failed) else []
+        buttons.append(("Choose another…", self.choose_project, "home.choose_another"))
         if self.project is not None:
-            buttons.append(("Keep the open project", self._dismiss_failure))
+            buttons.append(("Keep the open project", self._dismiss_failure, "home.keep"))
         where = breakable(self._last_path) if self._last_path is not None else "the folder"
         self.failure_state.set_content(f"Could not open the project\n{where}\n{failure_reason(self._failed)}.",
-                                       buttons)
-        for b, key in zip(self.failure_state.buttons, ("home.retry", "home.choose_another", "home.keep")):
+                                       [b[:2] for b in buttons])
+        for b, (_text, _fn, key) in zip(self.failure_state.buttons, buttons):
             explain(b, key)
         self._shown = None
         self._render_details()
@@ -382,8 +423,7 @@ class HomePerspective(QWidget):
     def _dismiss_failure(self) -> None:
         self._failed = ""
         if self.project is not None:
-            self.path_label.setText(f"{self.project.root}   ·   {plural(len(self.project.days), 'day')}, "
-                                    f"{plural(self.project.n_holders, 'holder')}, {plural(len(self.project.scans), 'scan')}")
+            self.path_label.setText(path_line(self.project))
         self._render_details()
         self.update_actions()
 
@@ -611,9 +651,12 @@ class HomePerspective(QWidget):
                 "<p>Open one of these with <b>Open project…</b>, by dropping it on the window, or from the command "
                 "line (<code>aurora &lt;folder&gt;</code>):</p><ul>"
                 "<li>a beamtime folder that holds <code>raw/&lt;day&gt;/&lt;scan&gt;</code> (for example "
-                "<code>my_beamtime</code>), or one of its day or scan folders;</li>"
+                "<code>my_beamtime</code>), or its day folders without <code>raw/</code>;</li>"
+                "<li>one day or scan folder of a beamtime: that day opens alone, and <b>Show every day</b> opens "
+                "the others;</li>"
                 "<li>a loose folder of scan folders, the way John Bussey's GUI kept them (<code>CLS GUI</code>);</li>"
-                "<li>one scan's <code>.h5</code> file: its scan folder's project opens.</li></ul>"
+                "<li>one scan's <code>.h5</code> file, dropped on the window or given on the command line (the "
+                "folder dialog lists folders only): its scan folder's project opens.</li></ul>"
                 "<p>The demo beamtime is synthetic: every perspective has data without a real beamtime. The "
                 "tutorials walk through it.</p>")
 
@@ -622,10 +665,12 @@ class HomePerspective(QWidget):
         where = e(breakable(self._last_path)) if self._last_path is not None else "the folder"
         detail = (f"<h4>Details</h4><pre>{e(self._failed)}</pre>" if is_advanced() else
                   f"<p style='color:{TOKENS['muted']}'>Advanced mode shows the full error.</p>")
+        why = ("<p>The folder may be missing, on a share that is not reachable now, or not a beamtime "
+               "(no raw/&lt;day&gt;/&lt;scan&gt; and no scan folders in it). <b>Retry</b> tries the same path "
+               "again; <b>Choose another…</b> opens the folder dialog.</p>" if retry_helps(self._failed) else
+               "<p><b>Choose another…</b> opens the folder dialog.</p>")
         return (f"<h3>Could not open the project</h3><p>{where}</p><p><b>{e(failure_reason(self._failed))}.</b></p>"
-                "<p>The folder may be missing, on a share that is not reachable now, or not a beamtime "
-                "(no raw/&lt;day&gt;/&lt;scan&gt; and no scan folders in it). <b>Retry</b> tries the same path "
-                "again; <b>Choose another…</b> opens the folder dialog.</p>" + detail)
+                + why + detail)
 
     def _project_html(self) -> str:
         p = self.project
