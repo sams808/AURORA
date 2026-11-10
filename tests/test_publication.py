@@ -66,7 +66,8 @@ def test_no_home_folder_in_tracked_text(tracked):
 
 
 def test_the_pattern_catches_an_account_path():
-    for path in (r"C:\Users\jdoe\Desktop\beamtime", "C:/Users/jdoe/data", "/Users/jdoe/Data/x", "/home/jdoe/x"):
+    u = "jdoe"                                  # built at run time, so this file does not trip its own scan
+    for path in (f"C:\\Users\\{u}\\Desktop\\beamtime", f"C:/Users/{u}/data", f"/Users/{u}/Data/x", f"/home/{u}/x"):
         assert HOME.search(path), path
     for path in (r"C:\Users\<you>\Apps\AURORA", r"C:\Users\RUNNER~1\AppData", "/Users/Shared/x", r"C:\Users\Public\x"):
         assert not HOME.search(path), path

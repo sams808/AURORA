@@ -143,6 +143,38 @@ def test_a_server_that_is_down_gives_no_dialog_and_one_info_line(qapp, monkeypat
     win.deleteLater()
 
 
+class _NoRelease(BaseHTTPRequestHandler):
+    """GitHub's answer to releases/latest while a repository has only tags or draft releases."""
+    def do_GET(self):  # noqa: N802
+        body = json.dumps({"message": "Not Found", "status": "404"}).encode("utf-8")
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_no_published_release_is_said_calmly(qapp, monkeypatch):
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _NoRelease)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("AURORA_UPDATE_URL", f"http://127.0.0.1:{srv.server_address[1]}/repos/sams808/AURORA/releases/latest")
+    try:
+        win = QMainWindow()
+        checker = updates.check_now(win)
+        assert wait(checker)
+        assert checker.info is not None and not checker.info["published"] and not checker.info["newer"]
+        msg = win.statusBar().currentMessage()
+        assert "no AURORA release is published" in msg and __version__ in msg and "could not" not in msg
+        assert "404" not in msg and getattr(win, "update_dialog", None) is None
+        win.deleteLater()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_the_asset_for_this_platform(monkeypatch):
     rel = release("v1.2.3")["assets"]
     monkeypatch.setattr(updates.sys, "platform", "win32")

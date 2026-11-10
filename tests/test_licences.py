@@ -102,3 +102,68 @@ def test_help_licences_reads_the_bundled_folder(monkeypatch, tmp_path):
         assert "THIRD-PARTY LICENCES -- AURORA test" in d.text()
     finally:
         d.deleteLater()
+
+
+def test_a_licence_named_by_its_suffix_is_included():
+    """packaging ships LICENSE plus LICENSE.APACHE and LICENSE.BSD (its LICENSE only points at them); fontTools adds
+    LICENSE.external. Code and data files with 'license' in the name stay out."""
+    for name in ("LICENSE", "LICENSE.txt", "COPYING.md", "LICENSE.APACHE", "LICENSE.BSD", "LICENSE.external"):
+        assert tpl._is_licence_file(name), name
+    for name in ("license.py", "licenses.json", "LICENSE.html", "license_expression.pyc", "README.md"):
+        assert not tpl._is_licence_file(name), name
+    dist = tpl.distributions().get("packaging")
+    if dist is None or not any(f.name == "LICENSE.BSD" for f in dist.files or []):
+        pytest.skip("this environment has no 'packaging' with LICENSE.BSD")
+    text = tpl.entry(dist).text
+    assert "Redistribution and use in source and binary forms" in text and "Apache License" in text
+
+
+def test_the_xraydb_note_matches_its_licence():
+    entries = {e.name.lower(): e for e in tpl.generate()}
+    assert "MIT" in entries["xraydb"].licence
+    head = tpl.header("x", [], "scope")
+    assert "xraydb: MIT licence" in head and "public domain" not in head.lower()
+
+
+def test_the_credits_carry_no_internal_notes():
+    """CREDITS.md ships next to AURORA.exe, in the disk image and in Help > Licences: no to-do, no library list of
+    its own (THIRD_PARTY_LICENSES.txt is generated from what is bundled)."""
+    text = (ROOT / "CREDITS.md").read_text(encoding="utf-8")
+    assert "to be confirmed" not in text.lower() and "todo" not in text.lower() and "licences to list" not in text
+    assert "Third-party libraries (" not in text and "THIRD_PARTY_LICENSES.txt" in text
+    assert "version 2 of John Bussey's SGM XAS GUI" in text
+    assert "James J. Dynes' SGM_Beamline_Analysis Jupyter notebooks" in text
+
+
+# what the reviewers found absent from AURORA's code: the pattern that would show it, and the credit word
+ABSENT = {"lmfit": r"^\s*(?:import|from) lmfit", "RIXS": r"(?i)rixs",
+          "triangulation": r"(?i)tripcolor|delaunay|triangulat", "email": r"(?i)\.eml\b|e-?mail draft",
+          "hole detection": r"(?i)hole detect|detect_holes", "recalibration": r"(?i)recalibrat"}
+
+
+def test_the_credits_table_claims_only_what_aurora_has():
+    """The column 'What AURORA takes from it' names no feature that is not in the code; those belong to the column
+    'Left in the original'."""
+    import re
+    code = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "aurora").rglob("*.py"))
+    rows = [ln.split("|") for ln in (ROOT / "CREDITS.md").read_text(encoding="utf-8").splitlines()
+            if ln.startswith("| ") and not ln.startswith("| Who")]
+    assert rows and all(len(r) >= 5 for r in rows)
+    takes = " ".join(r[2] for r in rows)
+    for word, pattern in ABSENT.items():
+        if not re.search(pattern, code, flags=re.M):
+            assert word.lower() not in takes.lower(), f"CREDITS.md credits AURORA with {word!r}, which it does not have"
+
+
+def test_help_licences_shows_the_credits_as_a_table():
+    pytest.importorskip("PySide6")
+    from aurora.app.main import create_app
+    create_app(["aurora-tests"])
+    from aurora.app.diagnostics import LicencesDialog
+    d = LicencesDialog()
+    try:
+        tab = next(d.tabs.widget(i) for i in range(d.tabs.count()) if d.tabs.tabText(i) == "Credits")
+        shown = tab.toPlainText()
+        assert "James J. Dynes" in shown and "|---|" not in shown and "# Credits" not in shown
+    finally:
+        d.deleteLater()

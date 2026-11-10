@@ -6,12 +6,10 @@ The text below (aurora/credits.py, CREDITS) is printed in the About dialog and o
 
 ## Detail
 
-| Who | What AURORA takes from it |
-|---|---|
-| John Bussey, WSU | Tabs Reduce, Check scans, Compare & plot, LCF, MCR-ALS, ITFA; per-detector ROI pairs; shared bad-point mask; larch-style and legacy normalisation; wide comparison CSV; `_full_reduced.csv` / `_absorption.csv` / `_gui_settings.json` / `_polygon_roi.json` formats; worker-thread + cancel pattern; exceptions shown in a dialog. |
-| James J. Dynes and the SGM staff, CLS | Loader for the bluesky h5 + bin + csv layout; SDD calibration JSON; alignment (roll, trim); masked-triangulation rendering; hypercube dashboard; auto element ROI; external I0 preview; IPFY; PCA / K-Means / cluster merger; PyMca 3D and 4D exports; stitching; RIXS-like map; emission peak tracking; lmfit layer; guides. `sf.py` (aXis2000 port, GPL-3) is not reused; xraydb replaces it. |
-| Sami Soudani, WSU | Survey pad and hole detection; plate layouts and rotation; fixed ROI bins; SDD recalibration from the day's sum; per-SDD consistency check; saturation detection; stack status; holder summary and technical reports; email draft; the AURORA application, name, logo and design. |
+| Who | What AURORA takes from it | Left in the original |
+|---|---|---|
+| John Bussey, WSU | Tabs Reduce, Check scans, Compare & plot, LCF, MCR-ALS, ITFA; per-detector ROI pairs; shared bad-point mask; the checks of Check scans with their thresholds; larch-style and legacy normalisation; wide comparison CSV; `_full_reduced.csv` / `_absorption.csv` / `_gui_settings.json` / `_polygon_roi.json` formats; worker-thread + cancel pattern; exceptions shown in a dialog. | |
+| James J. Dynes and the SGM staff, CLS | Loader for the bluesky h5 + bin + csv layout; SDD calibration JSON; hypercube dashboard (maps of any window and energy, ROI spectra, elemental maps, RGB composites); external I0 preview (the I0 explorer, mesh vs photodiode); IPFY; PCA / K-Means / cluster merger; PyMca 3D and 4D exports; stitching. | Alignment (roll, trim); masked-triangulation rendering; auto element ROI; RIXS-like map; emission peak tracking; the lmfit layer; the guides. `sf.py` (aXis2000 port, GPL-3) is not reused; xraydb replaces it. |
+| Sami Soudani, WSU | Survey pad detection (zone proposals); plate layouts and rotation; fixed ROI bins; per-SDD consistency check; saturation detection; stack status; holder summary and technical reports (the AURORA report); the AURORA application, name, logo and design. | Hole detection; SDD recalibration from the day's sum; email draft. |
 
-Names on the CLS side to be confirmed with the beamline before the first public release.
-
-Third-party libraries (licences to list in the About dialog): PySide6 (LGPL), numpy, scipy, pandas, matplotlib, h5py, lmfit, pymcr, scikit-learn, scikit-image, xraydb, platformdirs, pyqtgraph; fonts Inter and JetBrains Mono (OFL).
+The licences of the third-party packages bundled with the installers are in THIRD_PARTY_LICENSES.txt, next to this file in an installation and under Help > Licences.

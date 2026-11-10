@@ -4,7 +4,8 @@
   the frozen Python carries no CA bundle). GitHub already leaves drafts and prereleases out of 'latest'.
 - User-Agent AURORA/<version>, 5 s timeout; the tag is compared with __version__ as integer tuples.
 - Newer: a calm status line and a dialog with the release notes, the release page and the asset for this OS and
-  architecture. Up to date: a status line only. Nothing is ever downloaded or installed.
+  architecture. Up to date: a status line only. No release published yet (GitHub answers 404 while the repository
+  has only tags or drafts): a calm status line saying so. Nothing is ever downloaded or installed.
 - Failures go to the log at INFO level, never to a dialog. The time of the last check is kept in the settings.
 - AURORA_UPDATE_URL overrides the URL (the tests use a local http.server).
 """
@@ -105,8 +106,8 @@ class UpdateDialog(QDialog):
 
 
 class UpdateChecker(QObject):
-    """One request; `finished(info | None)` on the GUI thread. info = {'version', 'tag', 'newer', 'notes', 'page',
-    'asset_name', 'asset_url'}; None after a failure."""
+    """One request; `finished(info | None)` on the GUI thread. info = {'version', 'tag', 'newer', 'published', 'notes',
+    'page', 'asset_name', 'asset_url'} ('published' False: no release yet); None after a failure."""
     finished = Signal(object)
 
     def __init__(self, parent: QObject | None = None):
@@ -129,18 +130,23 @@ class UpdateChecker(QObject):
     def _finished(self) -> None:
         reply = self.reply
         try:
-            if reply.error() != QNetworkReply.NoError:
-                raise OSError(reply.errorString())
-            data = json.loads(bytes(reply.readAll()).decode("utf-8"))
-            tag = str(data.get("tag_name") or "")
-            if not version_tuple(tag):
-                raise ValueError(f"no version in the tag {tag!r}")
-            asset = platform_asset(data.get("assets") or [])
-            ver = ".".join(str(x) for x in version_tuple(tag))
-            self.info = {"version": ver, "tag": tag, "newer": is_newer(tag), "notes": str(data.get("body") or ""),
-                         "page": str(data.get("html_url") or ""),
-                         "asset_name": str(asset.get("name", "")) if asset else "",
-                         "asset_url": str(asset.get("browser_download_url", "")) if asset else ""}
+            if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) == 404:
+                # releases/latest answers 404 while the repository has no published release (only tags or drafts)
+                self.info = {"version": "", "tag": "", "newer": False, "published": False, "notes": "", "page": "",
+                             "asset_name": "", "asset_url": ""}
+            else:
+                if reply.error() != QNetworkReply.NoError:
+                    raise OSError(reply.errorString())
+                data = json.loads(bytes(reply.readAll()).decode("utf-8"))
+                tag = str(data.get("tag_name") or "")
+                if not version_tuple(tag):
+                    raise ValueError(f"no version in the tag {tag!r}")
+                asset = platform_asset(data.get("assets") or [])
+                ver = ".".join(str(x) for x in version_tuple(tag))
+                self.info = {"version": ver, "tag": tag, "newer": is_newer(tag), "published": True,
+                             "notes": str(data.get("body") or ""), "page": str(data.get("html_url") or ""),
+                             "asset_name": str(asset.get("name", "")) if asset else "",
+                             "asset_url": str(asset.get("browser_download_url", "")) if asset else ""}
         except Exception as err:                # noqa: BLE001  a failed check is never an error for the user
             self.error = str(err) or type(err).__name__
             self.info = None
@@ -175,6 +181,11 @@ def check_now(window, quiet: bool = False) -> UpdateChecker:
         if info is None:
             if not quiet:
                 _status(window, f"could not check for updates ({checker.error})")
+            return
+        if not info["published"]:
+            if not quiet:
+                _status(window, f"no {APP_NAME} release is published on GitHub yet; this is {APP_NAME} {__version__}")
+            log.info("update check: no release published yet, this %s", __version__)
             return
         if info["newer"]:
             _status(window, f"{APP_NAME} {info['version']} is available (this is {__version__})")
