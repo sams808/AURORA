@@ -4,6 +4,7 @@ a project switch without asking, malformed geometry is refused when a file is re
 holders, a damaged Compare library is kept, results of a job started for one project never land in another, recovery
 takes the newest state, rules edits are undo steps, a BOM is accepted, snapshots survive a time-zone move, and a
 failing save neither blocks nor leaves temporary files."""
+import contextlib
 import datetime as dt
 import json
 import os
@@ -589,18 +590,33 @@ def test_a_newest_snapshot_in_the_future_does_not_stop_the_snapshots(qapp, fake_
 
 
 # ----------------------------------------------------------------------------- data-safety-19: failing saves
+@contextlib.contextmanager
+def unwritable(path: Path):
+    """`path` cannot be replaced while inside: a read-only file on Windows; on macOS and Linux, where a read-only file
+    can still be replaced by a rename, its folder is made read-only too."""
+    if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores file permissions")
+    folder_mode = path.parent.stat().st_mode
+    os.chmod(path, stat.S_IREAD)
+    if os.name != "nt":
+        os.chmod(path.parent, stat.S_IREAD | stat.S_IEXEC)
+    try:
+        yield
+    finally:
+        if os.name != "nt":
+            os.chmod(path.parent, folder_mode)
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+
+
 def test_a_read_only_target_fails_at_once_and_leaves_no_temporary_file(tmp_path):
     from aurora.core.io.textio import write_text_atomic
     target = tmp_path / "session.json"
     target.write_text("{}", encoding="utf-8")
-    os.chmod(target, stat.S_IREAD)
-    try:
+    with unwritable(target):
         t0 = time.monotonic()
         with pytest.raises(PermissionError):
             write_text_atomic(target, "{\"a\": 1}")
         assert time.monotonic() - t0 < 0.5
-    finally:
-        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
     assert target.read_text(encoding="utf-8") == "{}" and not list(tmp_path.glob(".*.tmp"))
 
 
@@ -646,13 +662,10 @@ def test_a_failed_save_says_why_in_plain_words(qapp, fake_project):
     assert ses.flush()
     msgs = []
     ses.status.connect(msgs.append)
-    os.chmod(ses.session_file, stat.S_IREAD)
-    try:
+    with unwritable(ses.session_file):
         draw_zone(ses, "two")
         t0 = time.monotonic()
         assert ses.flush() is False
         assert time.monotonic() - t0 < 1.5
-    finally:
-        os.chmod(ses.session_file, stat.S_IWRITE | stat.S_IREAD)
     text = next(m for m in msgs if m.startswith("could not save the session"))
     assert "\\\\" not in text and str(ses.session_file.parent) in text, text

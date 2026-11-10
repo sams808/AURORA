@@ -76,10 +76,15 @@ def test_good_i0_stacks_are_read_in_a_job(qapp, tmp_path):
     z.settings[sid].i0_source = "good"
     threads = []
     real = Session.stack
+    gate = threading.Event()        # the job's read waits until the waiting state was checked (a fast runner's job
+                                    # finished before the second update_preview, which then drew at once)
 
     def spy(self, s, progress=None):
         if s not in self._stacks:
-            threads.append(threading.current_thread() is threading.main_thread())
+            on_gui = threading.current_thread() is threading.main_thread()
+            threads.append(on_gui)
+            if not on_gui:
+                gate.wait(30)
         return real(self, s, progress=progress)
     Session.stack = spy
     try:
@@ -90,9 +95,11 @@ def test_good_i0_stacks_are_read_in_a_job(qapp, tmp_path):
         job = win.jobs.job("stacks:good-i0")
         assert job is not None and job.label == "reading the good-I0 scans"
         assert win.reduce.preview._traces == [] and win.reduce.preview._waiting == "reading the good-I0 scans …"
+        gate.set()
         assert win.jobs.wait_idle(30000)
         qapp.processEvents()
     finally:
+        gate.set()
         Session.stack = real
     assert threads == [False]                                # read once, by the job's worker
     assert ses.stack_loaded(good_sid) is not None and win.reduce.preview._traces
