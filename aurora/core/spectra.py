@@ -33,16 +33,54 @@ NORM_MODES = ("raw", "i0", "i0pre", "i0jump", "area", "max")
 
 
 # ----------------------------------------------------------------------------- de-spiking
+# The running medians and the Hampel scale are vectorised over a NaN-padded sliding window (one sort per call, not one
+# per energy): the same values, bit for bit, as the zone tool's loops, which tests/test_zones.py keeps as references.
+def _windows(y: np.ndarray, h: int) -> np.ndarray:
+    """(n, 2h + 1) view of y around each point, edges shrunk: NaN outside the trace and where y is not finite."""
+    n = len(y)
+    pad = np.full(n + 2 * h, np.nan)
+    pad[h:h + n] = np.where(np.isfinite(y), y, np.nan)
+    return np.lib.stride_tricks.sliding_window_view(pad, 2 * h + 1)
+
+
+def _upper_median(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Per row: sorted(values of the valid entries)[count // 2], the tool's "upper" median; NaN for a row without a
+    valid entry. `values` holds NaN at the invalid entries (they sort last)."""
+    s = np.sort(values, axis=1)
+    c = valid.sum(axis=1)
+    rows = np.arange(len(s))
+    out = s[rows, np.minimum(c // 2, max(s.shape[1] - 1, 0))] if s.size else np.full(len(s), np.nan)
+    return np.where(c > 0, out, np.nan)
+
+
+def _nanmedian(a: np.ndarray, axis: int | None = None):
+    """np.nanmedian, the same values (the middle value, or the mean of the two middle ones for an even count; NaN
+    without a value), from one sort: np.nanmedian goes through masked arrays for short rows and costs milliseconds."""
+    a = np.asarray(a, float)
+    if axis is None:
+        v = np.sort(a[~np.isnan(a)].ravel())
+        c = v.size
+        if not c:
+            return float("nan")
+        return float(v[c // 2]) if c % 2 else float((v[c // 2 - 1] + v[c // 2]) / 2)
+    a = np.moveaxis(a, axis, -1)
+    s = np.sort(a, axis=-1)
+    c = (~np.isnan(a)).sum(axis=-1)
+    hi = np.take_along_axis(s, np.minimum(c // 2, a.shape[-1] - 1)[..., None], axis=-1)[..., 0]
+    lo = np.take_along_axis(s, np.maximum(c // 2 - 1, 0)[..., None], axis=-1)[..., 0]
+    with np.errstate(invalid="ignore", over="ignore"):
+        out = np.where(c % 2 == 1, hi, (lo + hi) / 2)
+    return np.where(c > 0, out, np.nan)
+
+
 def run_median(y: np.ndarray, w: int = 5) -> np.ndarray:
-    """Running median over a window of w points (edges shrink), ignoring NaN; NaN where the window is empty."""
+    """Running median over a window of w points (edges shrink), ignoring NaN; NaN where the window is empty. The
+    tool's "upper" median, sorted[count // 2] of the finite values, kept for bit-equality."""
     y = np.asarray(y, float); n = len(y); h = w // 2
-    out = np.full(n, np.nan)
-    for i in range(n):
-        seg = y[max(0, i - h): i + h + 1]
-        seg = seg[np.isfinite(seg)]
-        if seg.size:
-            out[i] = np.sort(seg)[seg.size // 2]       # the tool's "upper" median, kept for bit-equality
-    return out
+    if n == 0:
+        return np.full(0, np.nan)
+    win = _windows(y, h)
+    return _upper_median(win, np.isfinite(win))
 
 
 def despike(y: np.ndarray, k: float = DESPIKE_K) -> tuple[np.ndarray, list[int]]:
@@ -121,16 +159,22 @@ def hampel(y: np.ndarray, k: float) -> list[int]:
     ar = np.abs(res[np.isfinite(res)])
     g = float(np.sort(ar)[ar.size // 2]) if ar.size else 0.0
     out = []
-    for i in range(n):
-        if not np.isfinite(res[i]):
-            continue
-        seg = y[max(0, i - 2): i + 3]
-        seg = seg[np.isfinite(seg)]
-        loc = float(np.sort(np.abs(seg - med[i]))[seg.size // 2]) if seg.size else 0.0
-        s = max(loc, g)
-        if s > 0 and abs(res[i]) > k * 1.4826 * s:
-            out.append(i)
+    if n:
+        out = _hampel_hits(y, med, res, g, k)
     return out
+
+
+def _hampel_hits(y: np.ndarray, med: np.ndarray, res: np.ndarray, g: float, k: float) -> list[int]:
+    """hampel's test at every energy at once: |res| > k * 1.4826 * max(S, g), S being the upper median of the absolute
+    deviations of the finite values of the 5-point window from the running median `med`. The zone tool's loop, bit for
+    bit (tests/test_zones.py keeps it as the reference)."""
+    win = _windows(y, 2)                                # the 5-point window of each energy, finite values only
+    ok = np.isfinite(win)
+    with np.errstate(invalid="ignore", over="ignore"):
+        loc = _upper_median(np.where(ok, np.abs(win - med[:, None]), np.nan), ok)
+        s = np.maximum(loc, g)
+        hit = np.isfinite(res) & (s > 0) & (np.abs(res) > k * 1.4826 * s)
+    return [int(i) for i in np.where(hit)[0]]
 
 
 def coherent_count(dets, i: int, sign: float) -> int:
@@ -163,9 +207,11 @@ def despike_coherent(dets, k: float = DESPIKE_K) -> tuple[list, list[list[int]]]
     arrs = [None if d is None else np.asarray(d, float) for d in dets]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        levels = [float(np.nanmedian(a)) if a is not None and np.isfinite(a).any() else float("nan") for a in arrs]
+        levels = [_nanmedian(a) if a is not None and np.isfinite(a).any() else float("nan") for a in arrs]
     out: list = []
     spikes: list[list[int]] = []
+    meds: dict[int, np.ndarray] = {}            # a detector's running median and outliers, computed once for
+    outs: dict[int, set[int]] = {}              # every detector it is a reference of
     for j, a in enumerate(arrs):
         if a is None:
             out.append(None); spikes.append([])
@@ -178,13 +224,13 @@ def despike_coherent(dets, k: float = DESPIKE_K) -> tuple[list, list[list[int]]]
         scaled = np.column_stack([arrs[i] * (levels[j] / levels[i]) for i in refs])
         with warnings.catch_warnings(), np.errstate(all="ignore"):
             warnings.simplefilter("ignore", RuntimeWarning)
-            ref = np.nanmedian(scaled, axis=1)
+            ref = _nanmedian(scaled, axis=1)
             ratio = np.where(ref > 0, a / ref, np.nan)
-        med = run_median(a, 5)
+        med = meds[j] if j in meds else meds.setdefault(j, run_median(a, 5))
         res = a - med
         others = [arrs[i] for i in refs]
-        omed = [run_median(b, 5) for b in others]
-        oout = [set(hampel(b, k)) for b in others]
+        omed = [meds[i] if i in meds else meds.setdefault(i, run_median(arrs[i], 5)) for i in refs]
+        oout = [outs[i] if i in outs else outs.setdefault(i, set(hampel(arrs[i], k))) for i in refs]
 
         def common(i: int) -> bool:
             """At least COHERENT_MIN_SDDS detectors in all (this one and the others) show the same local extremum here,

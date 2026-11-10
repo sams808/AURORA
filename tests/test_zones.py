@@ -55,6 +55,125 @@ def test_run_median_and_despike():
     assert sp2 == [4] and np.isnan(out2[6]) and np.isfinite(out2[4])
 
 
+# reference copies of the zone tool's loops (aurora.core.spectra before they were vectorised), kept for equality
+def _run_median_ref(y, w=5):
+    y = np.asarray(y, float); n = len(y); h = w // 2
+    out = np.full(n, np.nan)
+    for i in range(n):
+        seg = y[max(0, i - h): i + h + 1]
+        seg = seg[np.isfinite(seg)]
+        if seg.size:
+            out[i] = np.sort(seg)[seg.size // 2]
+    return out
+
+
+def _hampel_hits_ref(y, med, res, g, k):
+    out = []
+    for i in range(len(y)):
+        if not np.isfinite(res[i]):
+            continue
+        seg = y[max(0, i - 2): i + 3]
+        seg = seg[np.isfinite(seg)]
+        loc = float(np.sort(np.abs(seg - med[i]))[seg.size // 2]) if seg.size else 0.0
+        s = max(loc, g)
+        if s > 0 and abs(res[i]) > k * 1.4826 * s:
+            out.append(i)
+    return out
+
+
+def _nanmedian_ref(a, axis=None):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return float(np.nanmedian(a)) if axis is None else np.nanmedian(a, axis=axis)
+
+
+def _references(monkeypatch):
+    from aurora.core import spectra
+    monkeypatch.setattr(spectra, "run_median", _run_median_ref)
+    monkeypatch.setattr(spectra, "_hampel_hits", _hampel_hits_ref)
+    monkeypatch.setattr(spectra, "_nanmedian", _nanmedian_ref)
+
+
+def _traces_of_the_fake_stack(root):
+    root = testdata.make_fake_project(root)
+    proj = Project.discover(root)
+    sd = StackData.load(proj, proj.find(testdata.STACK))
+    s = sd.sum_over(np.arange(sd.n_pix))
+    det = s["det"][sd.labels[0]]
+    return [det[:, k] for k in range(det.shape[1])] + [s["i0"], s["tey"]]
+
+
+def test_spectra_vectorised_equal(monkeypatch, tmp_path):
+    """run_median, hampel's test and the medians of despike_coherent are vectorised: the same values as the zone
+    tool's loops, bit for bit, on 300 random traces with NaN (and inf) and on the fake stack's traces, and at least
+    10 times faster in the same process (a ratio, robust to the machine's load)."""
+    import time
+
+    from aurora.core import spectra
+    from aurora.core.zones import ZoneSums
+    rng = np.random.default_rng(1)
+    traces = []
+    for trial in range(300):
+        n = int(rng.integers(0, 400))
+        y = rng.poisson(50, n).astype(float) + 200 * (rng.random(n) < 0.03)
+        y[rng.random(n) < 0.05] = np.nan
+        if trial % 7 == 0 and n:
+            y[rng.random(n) < 0.02] = np.inf
+        traces.append(y)
+    traces += _traces_of_the_fake_stack(tmp_path / "bt")
+    seen = []
+    real_hits = spectra._hampel_hits
+
+    def spy(y, med, res, g, k):
+        seen.append((y, med, res, g, k))
+        return real_hits(y, med, res, g, k)
+    monkeypatch.setattr(spectra, "_hampel_hits", spy)
+    for y in traces:
+        for w in (1, 3, 4, 5, 7):
+            assert np.array_equal(spectra.run_median(y, w), _run_median_ref(y, w), equal_nan=True)
+        for k in (3.0, 6, 10.0):
+            got = spectra.hampel(y, k)
+            if len(y):
+                yy, med, res, g, kk = seen[-1]
+                assert got == _hampel_hits_ref(yy, med, res, g, kk)
+                assert real_hits(yy, med, res, 0.0, kk) == _hampel_hits_ref(yy, med, res, 0.0, kk)
+        m = rng.normal(size=(len(y), 3)); m[rng.random(m.shape) < 0.3] = np.nan
+        a, b = _nanmedian_ref(y), spectra._nanmedian(y)
+        assert (np.isnan(a) and np.isnan(b)) or a == b
+        assert np.array_equal(_nanmedian_ref(m, axis=1), spectra._nanmedian(m, axis=1), equal_nan=True)
+    monkeypatch.setattr(spectra, "_hampel_hits", real_hits)
+    # despike_coherent: the same spikes and values with the vectorised code and with the reference loops
+    E = np.linspace(670.0, 720.0, 341)
+    edge = 1.0 / (1.0 + np.exp(-(E - 690.0) / 1.5))
+    det = np.stack([rng.poisson(3000 * (0.3 + edge) * (1 + 0.1 * k)) for k in range(4)], axis=1).astype(float)
+    det[50, 1] += 4000                                       # a loose-electron spike on SDD2
+    det[200, :] *= 1.3                                       # a feature of all four detectors: kept
+    det[120, 3] = np.nan
+    dets = [det[:, k] for k in range(4)]
+    new = spectra.despike_coherent(dets, 6.0)
+    sums = ZoneSums(E=E, n_pix=36, i0=2.5e4 * (1 + 0.01 * rng.standard_normal(341)),
+                    tey=1e3 * (0.5 + edge) + rng.standard_normal(341), det={"F Kα": det}, main="F Kα", edge_ev=690.0)
+    st = ScanSettings(line="F Kα", despike=True, despike_mode="coherent")
+    t_new = spectra.build_traces(sums, st)
+
+    def best(f, n):
+        b = float("inf")
+        for _ in range(n):
+            t0 = time.perf_counter(); f(); b = min(b, time.perf_counter() - t0)
+        return b
+    fast = best(lambda: spectra.build_traces(sums, st), 5)
+    with monkeypatch.context() as mp:
+        _references(mp)
+        old = spectra.despike_coherent(dets, 6.0)
+        t_old = spectra.build_traces(sums, st)
+        slow = best(lambda: spectra.build_traces(sums, st), 3)
+    assert new[1] == old[1] and 50 in new[1][1] and 200 not in new[1][1]
+    assert all(np.array_equal(p, q, equal_nan=True) for p, q in zip(new[0], old[0]))
+    assert t_new.spikes == t_old.spikes and np.array_equal(t_new.sum, t_old.sum, equal_nan=True)
+    assert slow / fast >= 10, f"build_traces (coherent): {fast * 1e3:.1f} ms against {slow * 1e3:.1f} ms with the loops"
+
+
 def test_normalise_modes():
     E = np.linspace(680, 730, 101)
     i0 = np.full(101, 2.0)
