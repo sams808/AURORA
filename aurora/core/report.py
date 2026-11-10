@@ -84,6 +84,31 @@ PAGE = (8.27, 11.69)         # A4 portrait, inches
 NORM_TEXT = {"raw": "raw counts", "i0": "divided by I0", "i0pre": "divided by I0, pre-edge line removed",
              "i0jump": "divided by I0, pre-edge line removed, edge jump = 1", "area": "divided by I0, area = 1",
              "max": "divided by I0, maximum = 1"}
+# the figure captions and Appendix C in words (aurora.app.vocab.NORM_LABELS says the same on screen)
+NORM_WORDS = {"raw": "raw counts", "i0": "÷ beam intensity (I0)", "i0pre": "÷ beam intensity (I0), pre-edge line removed",
+              "i0jump": "÷ beam intensity (I0), pre-edge line removed, edge step = 1",
+              "area": "÷ beam intensity (I0), area = 1", "max": "÷ beam intensity (I0), maximum = 1"}
+NORM_SHORT = {"raw": "raw counts", "i0": "/ I0", "i0pre": "/ I0, pre-edge = 0", "i0jump": "/ I0, edge jump = 1",
+              "area": "/ I0, area = 1", "max": "/ I0, maximum = 1"}
+
+
+def detectors_text(sdd) -> str:
+    """[T, T, F, T] -> 'detectors 1, 2 and 4'; all four -> 'detectors 1–4'; none -> 'no detector (TEY only)'."""
+    ks = [k + 1 for k in range(4) if sdd[k]]
+    if not ks:
+        return "no detector (TEY only)"
+    if ks == [1, 2, 3, 4]:
+        return "detectors 1–4"
+    if len(ks) == 1:
+        return f"detector {ks[0]}"
+    return "detectors " + ", ".join(str(k) for k in ks[:-1]) + f" and {ks[-1]}"
+
+
+def reading_lines(width: int = 104) -> list[str]:
+    """'How to read the figures' of the cover: the glossary's sentences (aurora.glossary.report_paragraph), wrapped."""
+    import textwrap
+    from aurora.glossary import report_paragraph
+    return ["  " + ln for ln in textwrap.wrap(" ".join(report_paragraph()), width=width)]
 # presets: Final = everything at 600 dpi; Draft = quick, 110 dpi, no Appendix A or B (Appendix C, the quality notes,
 # is always printed). The Report perspective also limits a Draft to the current holder.
 PRESETS = {"final": {"png_dpi": 600, "appendix": True, "maps": True},
@@ -1124,8 +1149,8 @@ class ReportBuilder:
             f"Beamtime project {self.zones.project or proj.root.name}, SGM beamline (ambxas endstation), Canadian Light Source",
             f"Days: {', '.join(days)}",
             f"Holders: {', '.join(holders)}",
-            f"{len(entries)} zone spectra in {len(groups)} sample groups; {len(self.not_included)} scans marked not included; "
-            f"{len(self.skipped)} skipped (see QC pages)",
+            f"{_plural(len(entries), 'zone spectrum', 'zone spectra')} in {_plural(len(groups), 'sample group')}; "
+            f"{_plural(len(self.not_included), 'scan')} marked not included; {len(self.skipped)} skipped (see QC pages)",
             self.scope_text(),
             "",
             "Provenance",
@@ -1141,14 +1166,10 @@ class ReportBuilder:
         ] + [f"  {c}" for c in changes] + [
             "",
             "How to read the figures",
-            "  Fluorescence = partial fluorescence yield of the line named in each panel, summed over the zone pixels",
-            "  and the ticked silicon drift detectors, normalised as stated in the caption (default: divided by I0,",
-            "  pre-edge line removed, edge jump = 1). TEY = total electron yield, same normalisation. Traces are offset.",
-            "  Spikes (single-point outliers from loose electrons) were interpolated; the counts are in the QC pages.",
-            "  Colour never carries the meaning alone: the line style and the label at the right end identify each trace.",
+        ] + reading_lines() + [
             "",
             "Contents",
-        ] + [f"  {g}: {len(by_group[g])} spectra" for g in groups] + [
+        ] + [f"  {g}: {_plural(len(by_group[g]), 'spectrum', 'spectra')}" for g in groups] + [
             "  Appendix A: the four detectors per zone" if self.appendix else "",
             "  Appendix B: plate maps with the zones" if self.maps else "",
             "  Appendix C: quality notes, the check before building, scans not included, skipped",
@@ -1198,7 +1219,8 @@ class ReportBuilder:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=PAGE, gridspec_kw={"height_ratios": [3, 2], "hspace": 0.28},
                                        constrained_layout=False)
         fig.subplots_adjust(left=0.1, right=0.78, top=0.9, bottom=0.07 + 0.0125 * len(items))     # room for the captions
-        fig.suptitle(f"{group} · {edge} · {len(items)} spectra" + (f" (page {page} of {pages})" if pages > 1 else ""),
+        fig.suptitle(f"{group} · {edge} · {_plural(len(items), 'spectrum', 'spectra')}"
+                     + (f" (page {page} of {pages})" if pages > 1 else ""),
                      fontsize=12, weight="bold", x=0.1, ha="left", color="#15213B")
         off1 = off2 = 0.0
         gap1 = 0.0
@@ -1219,12 +1241,12 @@ class ReportBuilder:
                 ax2.text(e_max + 0.01 * (e_max - e_min), self._last_finite(y2), e.zone.label, fontsize=6.5, color=col, va="center")
                 rng = np.nanmax(t.tey) - np.nanmin(t.tey)
                 off2 += (rng if np.isfinite(rng) else 1.0) * 0.6 + 0.35 * (rng if np.isfinite(rng) and rng > 0 else 1.0)
-            sdd_txt = "".join(str(k + 1) for k in range(4) if e.settings.sdd[k]) or "none (TEY only)"
-            captions.append(f"{e.zone.label}: {t.n_pix} px, SDD {sdd_txt}, "
-                            f"{NORM_TEXT.get(e.settings.fluo_norm, e.settings.fluo_norm)}"
-                            + (", IPFY" if e.settings.signal == "ipfy" else "")
-                            + (", I0 = good-I0 mean" if e.settings.i0_source == "good" else "")
-                            + (f", spikes {sum(e.spikes_removed.values())}" if e.spikes_removed else "")
+            captions.append(f"{e.zone.label}: {_plural(t.n_pix, 'pixel')}, {detectors_text(e.settings.sdd)}, "
+                            f"{NORM_WORDS.get(e.settings.fluo_norm, e.settings.fluo_norm)}"
+                            + (", inverse yield (IPFY)" if e.settings.signal == "ipfy" else "")
+                            + (", beam intensity = the mean of the good scans" if e.settings.i0_source == "good" else "")
+                            + (f", {_plural(sum(e.spikes_removed.values()), 'spike')} removed"
+                               if e.spikes_removed else "")
                             + (f"; {'; '.join(e.flags)}" if e.flags else "")
                             + (f"; {'; '.join(t.notes)}" if t.notes else ""))
             if e.stack.edge_ev and e_min < e.stack.edge_ev < e_max:
@@ -1342,8 +1364,9 @@ class ReportBuilder:
             flags = "; ".join(e.flags).replace(" (sgm_report)", " [sgm]").replace(" (AURORA check)", " [check]").replace(
                 "good-I0 requested but no good scan ticked: own I0 used (report)", "no good I0 ticked")
             rows.append(f"{e.holder:>5} {e.zone.label[:24]:24} {e.scan.time} {e.scan.label[:20]:20} {e.edge_key:7} "
-                        f"{e.traces.n_pix:4d}px SDD{''.join(str(k + 1) for k in range(4) if e.settings.sdd[k]) or '-':4} "
-                        f"{e.settings.fluo_norm:6} {('spk ' + sp) if sp else '':24.24} {flags[:40]}")
+                        f"{e.traces.n_pix:4d} pixels {detectors_text(e.settings.sdd):22.22} "
+                        f"{NORM_SHORT.get(e.settings.fluo_norm, e.settings.fluo_norm):19.19} "
+                        f"{('spikes ' + sp) if sp else '':24.24} {flags[:40]}")
         lines = ["Appendix C · quality notes", "", "Zone spectra included (holder, zone, scan, edge, pixels, detectors, "
                  "normalisation, spikes interpolated, flags with their source):"] + rows
         findings = self.plan.findings if self.plan else []

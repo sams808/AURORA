@@ -23,6 +23,7 @@ DEFAULTS = {
     "text_size": "normal",           # normal / large / larger
     "advanced_mode": False,          # Easy mode on first start
     "update_check": False,           # opt-in: ask GitHub for a newer release at start (at most once a day)
+    "show_guide": True,              # Easy mode: the getting-started strip on Home and the Next link of the top bar
 }
 COLORMAPS = ["viridis", "magma", "inferno", "plasma", "cividis"]
 
@@ -103,12 +104,15 @@ class SettingsDialog(QDialog):
         form.addRow("report author", self.author)
         self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
         form.addRow("", self.open_last)
-        self.advanced = QCheckBox("advanced mode (every option; Easy mode shows the basic workflow)")
+        self.advanced = QCheckBox("advanced mode (every option; Easy mode shows the main steps with standard settings)")
         self.advanced.setChecked(get("advanced_mode"))
         form.addRow("", self.advanced)
         self.update_check = QCheckBox("check GitHub for a newer AURORA at start (once a day)")
         self.update_check.setChecked(get("update_check"))
         form.addRow("", self.update_check)
+        self.show_guide = QCheckBox("show the getting-started guide (Easy mode)")
+        self.show_guide.setChecked(get("show_guide"))
+        form.addRow("", self.show_guide)
         # Advanced rows
         self.k = QDoubleSpinBox(); self.k.setRange(1, 50); self.k.setValue(get("despike_k")); self.k.setSuffix(unit_suffix("MAD"))
         form.addRow("de-spike threshold k (new zone settings)", self.k)
@@ -136,6 +140,7 @@ class SettingsDialog(QDialog):
         lay.addWidget(buttons)
         for w, key in ((self.appearance, "appearance"), (self.text_size, "text_size"), (self.author, "author"),
                        (self.open_last, "open_last"), (self.advanced, "advanced"), (self.update_check, "update_check"),
+                       (self.show_guide, "show_guide"),
                        (self.k, "k"), (self.fn, "fluo"), (self.tn, "tey"), (self.cmap, "cmap"), (self.ref_dir, "ref_dir")):
             explain(w, f"settings.{key}")
         from aurora.app.mode import mark_advanced_row
@@ -154,6 +159,7 @@ class SettingsDialog(QDialog):
         s.setValue("report_author", self.author.text().strip())
         s.setValue("open_last_project", self.open_last.isChecked())
         s.setValue("update_check", self.update_check.isChecked())
+        s.setValue("show_guide", self.show_guide.isChecked())
         s.setValue("reference_dir", self.ref_dir.text().strip())
         s.setValue("appearance", self.appearance.currentData())
         s.setValue("text_size", self.text_size.currentData())

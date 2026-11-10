@@ -55,15 +55,16 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     assert (tmp_path / "comparison.csv").exists() and (tmp_path / "comparison_config.json").exists()
     # LCF: target M from A and B
     fit.refresh()
-    fit.target.setCurrentText("M [sdd-scaled]")
-    for i in range(fit.components.count()):
-        it = fit.components.item(i); it.setCheckState(Qt.Checked if it.text() != "M [sdd-scaled]" else Qt.Unchecked)
+    fit.select_target("M", "sdd-scaled")
+    fit.check_components([fit.item_key(fit.components.item(i)) for i in range(fit.components.count())
+                          if fit.item_key(fit.components.item(i)) != "M [sdd-scaled]"])
     fit.bootstrap.setValue(20)
     fit.run_lcf()
     assert win.jobs.wait_idle(30000)
     r = fit.lcf_result
     assert r is not None and abs(r.total - 1) < 1e-6 and r.rmse < 0.05
-    coef = {fit.lcf_table.item(i, 0).text(): float(fit.lcf_table.item(i, 1).text()) for i in range(fit.lcf_table.rowCount())}
+    coef = {fit.lcf_table.item(i, 0).data(Qt.UserRole): float(fit.lcf_table.item(i, 1).text())
+            for i in range(fit.lcf_table.rowCount())}
     assert abs(coef["A [sdd-scaled]"] - 0.7) < 0.1 and abs(coef["B [sdd-scaled]"] - 0.3) < 0.1
     fit.export_lcf(tmp_path / "lcf.csv")
     assert (tmp_path / "lcf.csv").read_text().startswith("# LCF of M [sdd-scaled]")
@@ -76,7 +77,7 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     assert m is not None and m.C.shape == (3, 2) and fit.prop_table.rowCount() == 3
     files = fit.export_mcr(tmp_path / "mcr", m, "MCR")
     assert all(p.exists() for p in files)
-    fit.itfa_sample.setCurrentText("A [sdd-scaled]"); fit.itfa_pct.setText("100, 0"); fit._add_target()
+    fit.select_key(fit.itfa_sample, "A [sdd-scaled]"); fit.itfa_pct.setText("100, 0"); fit._add_target()
     assert fit.targets.count() == 1
     fit.run_itfa()
     assert win.jobs.wait_idle(30000)

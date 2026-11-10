@@ -234,6 +234,7 @@ class Session(QObject):
         self._surveys: dict[str, SurveyData] = {}
         self.sheet_rows: list = []
         self.check_queue: list[CheckItem] = []
+        self.folder_read_only = False           # the project folder refused the lock / session file (a banner says so)
         self.read_only = False                  # True: edits stay in memory, save() refuses (a newer session schema,
         #                                         the project open in another AURORA, a folder that cannot be written)
         self.read_only_reason = ""              # why, in words ('' when the session saves)
@@ -299,6 +300,7 @@ class Session(QObject):
         self.undo_stack.clear()
         self.read_only = self._newer = False
         self.read_only_reason = self._save_error = ""
+        self.folder_read_only = False
         self._dirty = self._user_edits = False
         self._pending_path = None
         self._file_stamp = self._file_schema = self._file_bytes = None
@@ -477,6 +479,7 @@ class Session(QObject):
         except OSError as err:              # a protected folder, a read-only share or file
             reason = getattr(err, "strerror", None) or str(err)
             text = UNWRITABLE_TEXT.format(why=reason)
+            self.folder_read_only = True        # the beamtime folder itself cannot be written (the window's banner)
         log.warning("%s: %s", self.project.root, text)
         self.read_only = True
         self.read_only_reason = text
@@ -727,7 +730,9 @@ class Session(QObject):
         stamp = self._file_stamp or _file_stamp(self.session_file)
         if stamp is None:
             return ""
-        return f"saved {dt.datetime.fromtimestamp(stamp[0] / 1e9):%H:%M}"
+        when = dt.datetime.fromtimestamp(stamp[0] / 1e9)
+        today = (self.clock() if callable(getattr(self, "clock", None)) else dt.datetime.now()).date()
+        return f"saved {when:%H:%M}" if when.date() == today else f"saved {when:%Y-%m-%d %H:%M}"
 
     # ------------------------------------------------------------------ holders / scans
     def holder(self, key: str | None = None) -> Holder | None:
@@ -1285,7 +1290,8 @@ class Session(QObject):
             self._remove_tmp(path)
             log.warning("could not save the session to %s: %s", path, err)
             self._save_error = f"the last save failed ({_os_text(err)})"
-            self.status.emit(f"could not save the session: {_os_text(err)}")
+            from aurora.app.widgets import plain_error
+            self.status.emit(f"Could not save your outlines: {plain_error(err, self.project.root if self.project else None)}")
             self.save_state.emit("not saved")
             return False
         self._file_stamp = _file_stamp(path)

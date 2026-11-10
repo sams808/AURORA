@@ -189,7 +189,7 @@ def test_search_and_the_help_menu(qapp):
     win._help.find_edit.setText("zzz-not-in-the-manual")
     assert not win._help.find() and win._help.find_info.text() == "not found"
     titles = [a.text().replace("&", "") for a in win.menus["help"].actions() if not a.isSeparator()]
-    assert titles == ["User guide", "Manual", "Tutorials", "Installation and sharing", "Help on this page",
+    assert titles == ["User guide", "Glossary", "Manual", "Tutorials", "Installation and sharing", "Help on this page",
                       "Keyboard shortcuts", "What's this?", "Open the demo beamtime", "Run self-test…",
                       "Report a problem…", "Check for updates…", "Licences…", "About AURORA"]
     assert win.help_actions["USER_GUIDE.md"].shortcut().isEmpty()        # F1 belongs to Help on this page

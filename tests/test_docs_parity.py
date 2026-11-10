@@ -54,6 +54,7 @@ SETTINGS_ROWS = {
     "default TEY normalisation": "tey_norm",
     "map colour map": "map_colormap",
     "reference spectra folder": "reference_dir",
+    "show the getting-started guide (Easy mode)": "show_guide",
 }
 
 NUMBERS = {w: i for i, w in enumerate(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",

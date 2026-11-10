@@ -22,19 +22,19 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
-from aurora.app.help_text import explain_all, header_tips, labelled
-from aurora.app.mode import mark_advanced, on_mode_changed
+from aurora.app.help_text import explain_all, header_tips, labelled, say
+from aurora.app.mode import is_advanced, mark_advanced, mark_easy, on_mode_changed
 from aurora.app.session import ALL_HOLDERS, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
-from aurora.app.vocab import DET_LABELS
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, set_enabled,
+from aurora.app.vocab import DET_LABELS, plural
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, TermLabel, notify_saved, overlay_host, set_enabled,
                                 held_file, set_plot_hint, write_error_text)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
@@ -49,14 +49,37 @@ COLS = ("Time", "Scan", "Edge", "Status", "I0 level", "I0", "SDD1 kcps", "SDD2 k
 COL_HELP = {0: "check.col.time", 1: "check.col.scan", 2: "check.col.edge", 3: "check.col.status", 4: "check.col.i0_level",
             5: "check.col.i0", 6: "check.col.kcps", 7: "check.col.kcps", 8: "check.col.kcps", 9: "check.col.kcps",
             10: "check.col.saturated", 11: "check.col.high", 12: "check.col.notes"}
-QCOLS = ("Sample", "Scan", "Zone pts", "Bad pts", "Messages", "Looks OK")
+QCOLS = ("Sample", "Scan", "Pixels", "Bad energies", "Messages", "Looks OK")
 QCOL_HELP = {0: "check.qcol.sample", 1: "check.qcol.scan", 2: "check.qcol.pts", 3: "check.qcol.bad", 4: "check.qcol.messages",
              5: "check.qcol.ok"}
 Q_OK = QCOLS.index("Looks OK")
 Q_MSG = QCOLS.index("Messages")
 # John Bussey's five preview views of a checked scan (CheckTab._plot), in AURORA's words
-VIEWS = (("signals", "detector signals, cleaned"), ("sum", "fluorescence sum and its bad points"),
-         ("i0tey", "I0 / max and TEY / max"), ("ratio", "sum / I0 and TEY / I0"), ("minmax", "/ I0, min-max scaled"))
+VIEWS = (("signals", "the four detectors (spikes repaired)"), ("sum", "sum of the detectors, bad energies marked"),
+         ("i0tey", "beam intensity (I0) and electron yield (TEY)"),
+         ("ratio", "fluorescence and TEY divided by the beam (I0)"), ("minmax", "the same, scaled 0 to 1"))
+GUIDE = ("AURORA ticked {{looks-ok|Looks OK}} where its own checks found no problem; untick any spectrum that looks "
+         "wrong to you.")
+LOOK_FOR = ("What to look for: one rise at the edge, then a roughly level curve · the four detectors with the same shape "
+            "(their heights may differ) · no single point far off the curve · a flat or very noisy curve means the "
+            "outline missed the sample.")
+READ_ONLY_NOTE = ("Not saved: this beamtime folder is read-only. Copy it to this computer and open the copy to keep "
+                  "your spectra, or press Show in Compare without saving.")
+def source_words(source: str) -> str:
+    """Where a checked spectrum's counts were read, in words (Easy mode: no cache path, no 'bins')."""
+    import re as _re
+    src = str(source or "")
+    m = _re.search(r"\((?:fixed bins|fixed window) of (.+)\)\s*$", src)
+    line = f"; the fixed {m.group(1)} window of the beamtime" if m else ""
+    if src.startswith("raw energy folders"):
+        return "Read from the raw energy folders of the scan, with the window set in step 2."
+    if src.startswith("aurora cache"):
+        return f"Read from AURORA's saved copy of the stack{line}."
+    if src.startswith("reduced from raw"):
+        return f"Read from the raw files of the stack{line}."
+    return _re.sub(r"\s*\(fixed bins of ([^)]+)\)", lambda mm: f" (the fixed {mm.group(1)} window)", src)
+
+
 EASY_DESPIKE_MODE = "coherent"          # new zone x scan settings (I25); files without 'dsm' stay 'classic'
 
 
@@ -103,10 +126,13 @@ def _by_max(y: np.ndarray) -> np.ndarray:
 
 
 class CheckPerspective(QWidget):
+    saved = Signal(int)                   # spectra written by Save ticked (the getting-started guide)
+
     def __init__(self, session: Session, parent: QWidget | None = None):
         super().__init__(parent)
         self.session = session
         self.library = None                   # the Compare library (MainWindow sets it)
+        self.n_saved = 0                      # spectra saved in this session (the getting-started guide)
         self._rates: dict[str, CountRate] = {}
         self._results: dict[str, QcResult] = {}     # sid -> the stored or fresh checks of every holder's scans
         self._cands = []
@@ -147,15 +173,28 @@ class CheckPerspective(QWidget):
         self.queue.itemSelectionChanged.connect(self._draw_preview)
         self.queue.setContextMenuPolicy(Qt.CustomContextMenu)
         self.queue.customContextMenuRequested.connect(self._queue_menu)
+        self.guide_label = TermLabel(GUIDE)               # Easy: what AURORA ticked and what to look for
+        self.look_for = QLabel(LOOK_FOR); self.look_for.setObjectName("muted"); self.look_for.setWordWrap(True)
+        qcard.body.addWidget(self.guide_label)
+        qcard.body.addWidget(self.look_for)
         qcard.body.addWidget(self.queue, 1)
         qrow = QHBoxLayout()
         self.tick_all_btn = QPushButton("Tick all"); self.tick_all_btn.clicked.connect(lambda: self.set_all_ok(True))
         self.untick_all_btn = QPushButton("Untick all"); self.untick_all_btn.clicked.connect(lambda: self.set_all_ok(False))
         self.save_btn = QPushButton("Save ticked → Compare"); self.save_btn.setObjectName("primary")
         self.save_btn.clicked.connect(self.save_ticked)
-        qrow.addWidget(self.tick_all_btn); qrow.addWidget(self.untick_all_btn); qrow.addStretch(1); qrow.addWidget(self.save_btn)
+        # while the beamtime cannot be written: the ticked spectra go to Compare in memory only
+        self.unsaved_btn = QPushButton("Show in Compare without saving")
+        self.unsaved_btn.setToolTip("Add every ticked spectrum without a ✗ bad message to Compare without writing "
+                                    "files (they are lost when AURORA closes)")
+        self.unsaved_btn.clicked.connect(lambda: self.show_in_compare())
+        self.unsaved_btn.hide()
+        qrow.addWidget(self.tick_all_btn); qrow.addWidget(self.untick_all_btn); qrow.addStretch(1)
+        qrow.addWidget(self.unsaved_btn); qrow.addWidget(self.save_btn)
         qcard.body.addLayout(qrow)
         self.queue_note = QLabel(""); self.queue_note.setObjectName("muted"); self.queue_note.setWordWrap(True)
+        self.queue_note.setOpenExternalLinks(False)
+        self.queue_note.linkActivated.connect(self._note_link)
         qcard.body.addWidget(self.queue_note)
         top.addWidget(qcard)
         self.preview_card = pcard = Card("Preview of the selected spectrum", help_anchor="51-spectra-to-check")
@@ -261,8 +300,8 @@ class CheckPerspective(QWidget):
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="check",
                                       parent=self.body)
-        self.queue_state = EmptyState("No spectra to check yet. In Reduce, draw the region of a sample and press "
-                                      "'Add to Check'.", [("Go to Reduce", lambda: nav.go(self, "reduce"))],
+        self.queue_state = EmptyState("No spectra to check yet. In Reduce, outline a sample and press Add to Check.",
+                                      [("Go to Reduce", lambda: nav.go(self, "reduce"))],
                                       icon="check", parent=self.queue)
         self.run_state = EmptyState("The checks have not run on this holder yet.",
                                     [("Run the checks on this holder", self.run_checks)], icon="check", parent=self.table)
@@ -292,6 +331,7 @@ class CheckPerspective(QWidget):
         # the I0 explorer (the four cards of the earlier versions, unchanged)
         self.i0_card, self.sdd_card, self.explorer_card = i0c, sddc, i0x
         mark_advanced(self.table_card, self.i0_card, self.sdd_card, self.explorer_card, self.bottom)
+        mark_easy(self.guide_label, self.look_for)
         for plot in (self.i0_plot, self.sdd_plot, self.x_plot):     # readable in Advanced (the page scrolls if needed)
             plot.setMinimumHeight(140)
         on_mode_changed(self, self._mode_changed)
@@ -302,8 +342,10 @@ class CheckPerspective(QWidget):
     def _mode_changed(self, adv: bool) -> None:
         if adv:                                 # room for the queue, the holder table and the three cards
             self.split.setSizes([430, 170, 300])
-        self.sub.setText("spectra to check · Looks OK · save to Compare" + (
+        self.sub.setText(say("check.subtitle") + (
             " · count rate, saturation, I0 validity per scan · good I0 · the four detectors on a zone" if adv else ""))
+        if self._rows:                          # the messages name their source in Advanced mode only
+            self._fill_queue()
 
     def _holder_busy(self, key: str | None) -> bool:
         m = jobs.of(self)
@@ -336,16 +378,18 @@ class CheckPerspective(QWidget):
         self.run_state.set_shown(show_run)
         # the queue
         n = len(self._rows)
-        empty_reason = "the queue is empty: send spectra from Reduce with 'Add to Check'"
+        empty_reason = "the queue is empty: send spectra from Reduce with Add to Check"
         set_enabled(self.tick_all_btn, n > 0, empty_reason)
         set_enabled(self.untick_all_btn, n > 0, empty_reason)
         ticked = [r for r in self._rows if r.state == "ready" and r.settings.include]
         saving = jobs.of(self).job("check:save") is not None
         can = has and self.library is not None and bool(ticked) and not saving
         set_enabled(self.save_btn, can, "open a project first" if not has else (
-            "saving …" if saving else (empty_reason if not n else ("tick 'Looks OK' for the spectra to save"
+            "saving …" if saving else (empty_reason if not n else ("tick Looks OK for the spectra to save"
                                                                    if not ticked else "Compare is not available"))))
         self.queue_state.set_shown(has and n == 0)
+        self.unsaved_btn.setVisible(has and n > 0 and bool(self.saving_blocked()))
+        set_enabled(self.unsaved_btn, bool(ticked) and self.library is not None, "tick Looks OK for the spectra to show")
 
     def _theme_changed(self) -> None:
         refill_tones(self.table)
@@ -875,17 +919,21 @@ class CheckPerspective(QWidget):
                 icon, word = status_text(level)
                 chip = Chip(f"{icon} {word}", level)
                 chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-                chip.setToolTip("\n".join(msgs))
-                chip.setAccessibleName(f"{word}: " + "; ".join(msgs))
+                shown = [self._msg_text(m) for m in msgs]
+                chip.setToolTip("\n".join(shown))
+                chip.setAccessibleName(f"{word}: " + "; ".join(shown))
                 lay.addWidget(chip)
-            first = next((m for lv, m in row.messages if lv == "bad"), None) or \
-                next((m for lv, m in row.messages if lv == "warn"), None) or "no problem found"
-            text = first
+            text = qc.headline(row.messages)
         lab = ElidedLabel(text, Qt.ElideRight)
         lab.setObjectName("muted")
         lay.addWidget(lab, 1)
-        w.setToolTip("\n".join(f"{status_text(lv)[0]} {m}" for lv, m in row.messages) or text)
+        w.setToolTip("\n".join(f"{status_text(lv)[0]} {self._msg_text(m)}" for lv, m in row.messages) or text)
         return w
+
+    @staticmethod
+    def _msg_text(m) -> str:
+        """A message as shown: its source in parentheses in Advanced mode ('… (sgm_report)')."""
+        return qc.full_text(m) if is_advanced() else str(m)
 
     def _fill_queue(self) -> None:
         sel = self._selected_item()
@@ -894,7 +942,7 @@ class CheckPerspective(QWidget):
         for r, row in enumerate(self._rows):
             it, z, st = row.item, row.zone, row.settings
             fr = row.frame
-            pts = f"{fr.n} / {fr.N}" if fr is not None else "…"
+            pts = f"{fr.n} of {fr.N}" if fr is not None else "…"
             bad = str(int(fr.bad.sum())) if fr is not None else "…"
             vals = [z.label, self._scan_text(it.sid), pts, bad, "", ""]
             for c, v in enumerate(vals):
@@ -910,7 +958,7 @@ class CheckPerspective(QWidget):
                     cell.setFlags((cell.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
                     cell.setCheckState(Qt.Checked if st.include else Qt.Unchecked)
                     cell.setText("looks OK" if st.include else "")
-                    cell.setToolTip("Looks OK: the spectrum is saved and goes to the report (the scan's include tick)")
+                    cell.setToolTip("Ticked: saved by Save ticked → Compare and kept for the report.")
                 self.queue.setItem(r, c, cell)
             self.queue.setCellWidget(r, Q_MSG, self._messages_widget(row))
         self.queue.blockSignals(False)
@@ -1010,6 +1058,7 @@ class CheckPerspective(QWidget):
             return
         set_plot_hint(p, None)
         view = self.view_combo.currentData()
+        fluo = "inverse yield" if getattr(row.settings, "signal", "pfy") == "ipfy" else "fluorescence"
         E = fr.E
         ticked = [DETS.index(d) for d in fr.dets_in_total]
         ys = []
@@ -1023,45 +1072,52 @@ class CheckPerspective(QWidget):
             if view == "signals":
                 for k in range(len(DETS)):
                     on = k in ticked
-                    line(fr.det[:, k], curve(k), DET_LABELS[k] + ("" if on else " (off)"), dash(k), 1.6 if on else 0.8)
-                ylab = "mean counts" if fr.mode == "mean" else "summed counts"
+                    line(fr.det[:, k], curve(k), DET_LABELS[k] + ("" if on else " (left out)"), dash(k), 1.6 if on else 0.8)
+                ylab = "counts (mean per pixel)" if fr.mode == "mean" else "counts (sum over the pixels)"
             elif view == "sum":
-                line(fr.total, pc("sum"), "sum of the ticked SDDs", width=2.0)
+                line(fr.total, pc("sum"), "sum of the detectors in use", width=2.0)
                 bad = fr.bad & np.isfinite(fr.total)
                 measured = np.nansum(fr.det_measured[:, ticked], axis=1) if ticked else fr.total
                 if bad.any():
                     p.addItem(pg.ScatterPlotItem(E[bad], measured[bad], size=8, symbol="x", brush=pg.mkBrush(pc("spike")),
-                                                 pen=pg.mkPen(pc("spike"), width=1.4), name="bad points (as measured)"))
+                                                 pen=pg.mkPen(pc("spike"), width=1.4), name="bad energies (as measured)"))
                     ys.append(measured[bad])
                 ylab = "counts"
             elif view == "i0tey":
-                line(_by_max(fr.i0), pc("i0"), "I0 / max")
-                line(_by_max(fr.tey), pc("tey"), "TEY / max", Qt.DashLine)
-                ylab = "/ maximum"
+                line(_by_max(fr.i0), pc("i0"), "I0 (beam)")
+                line(_by_max(fr.tey), pc("tey"), "TEY (electron yield)", Qt.DashLine)
+                ylab = "scaled to maximum 1"
             elif view == "ratio":
-                line(_by_max(fr.total / fr.i0), pc("sum"), "sum / I0 (÷ max)", width=2.0)
-                line(_by_max(fr.tey / fr.i0), pc("tey"), "TEY / I0 (÷ max)", Qt.DashLine)
-                ylab = "/ I0, divided by the maximum"
+                line(_by_max(fr.total / fr.i0), pc("sum"), f"{fluo} ÷ I0", width=2.0)
+                line(_by_max(fr.tey / fr.i0), pc("tey"), "TEY ÷ I0", Qt.DashLine)
+                ylab = "÷ I0, scaled to maximum 1"
             else:
-                line(_minmax(fr.total / fr.i0), pc("sum"), "sum / I0", width=2.0)
-                line(_minmax(fr.tey / fr.i0), pc("tey"), "TEY / I0", Qt.DashLine)
-                ylab = "/ I0, min-max scaled"
+                line(_minmax(fr.total / fr.i0), pc("sum"), f"{fluo} ÷ I0", width=2.0)
+                line(_minmax(fr.tey / fr.i0), pc("tey"), "TEY ÷ I0", Qt.DashLine)
+                ylab = "÷ I0, scaled 0 to 1"
         p.plotItem.setLabel("left", ylab)
         vals = np.concatenate([y[np.isfinite(y)] for y in ys]) if ys else np.array([])
         if vals.size:
             lo, hi = float(vals.min()), float(vals.max())
             p.getViewBox().setRange(xRange=(float(E[0]), float(E[-1])) if len(E) > 1 else None,
                                     yRange=(lo, hi if hi > lo else lo + 1), padding=0.05, disableAutoRange=True)
-        self.msg_label.setText(f"{row.zone.label} · {self._scan_text(row.item.sid)} · {fr.n} of {fr.N} points · "
-                               f"{fr.source}\n" + "\n".join(f"{status_text(lv)[0]} {m}" for lv, m in row.messages))
+        if is_advanced():
+            head = f"{row.zone.label} · {self._scan_text(row.item.sid)} · {fr.n} of {fr.N} points · {fr.source}"
+            self.msg_label.setToolTip("")
+        else:                                   # Easy: no cache path; the source is the tooltip
+            line_ = (fr.traces.line if fr.traces is not None else "") or row.settings.line or "the step-2"
+            head = f"{row.zone.label} · {self._scan_text(row.item.sid)} · {fr.n} of {fr.N} pixels · {line_} window"
+            self.msg_label.setToolTip(source_words(fr.source))
+        self.msg_label.setText(head + "\n" + "\n".join(f"{status_text(lv)[0]} {self._msg_text(m)}"
+                                                       for lv, m in row.messages))
         self._fit_messages()
 
     def _fit_messages(self) -> None:
-        """The message box as tall as its text, up to six lines (it scrolls beyond)."""
+        """The message box as tall as its text, up to eight lines (it scrolls beyond)."""
         width = max(self.msg_scroll.viewport().width(), 200)
         line_h = self.fontMetrics().lineSpacing()
         need = self.msg_label.heightForWidth(width) if self.msg_label.text() else line_h
-        self.msg_scroll.setFixedHeight(min(max(need, line_h) + 6, line_h * 6 + 6))
+        self.msg_scroll.setFixedHeight(min(max(need, line_h) + 6, line_h * 8 + 6))
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
@@ -1091,6 +1147,47 @@ class CheckPerspective(QWidget):
             text += " Not saved either: " + ", ".join(f"'{lab}'" for lab, _err in failed[1:]) + "."
         return text
 
+    def saving_blocked(self) -> str:
+        """Why Save ticked cannot write ('' when it can): the beamtime folder is read-only or protected."""
+        ses = self.session
+        if ses.project is None:
+            return ""
+        from aurora.core.io.safety import is_protected
+        try:
+            out = export.default_folder(ses.project, "sample").parent
+        except (OSError, ValueError):
+            out = ses.project.root / "processed" / "reduced"
+        if is_protected(out) or getattr(ses, "folder_read_only", False):
+            return "this beamtime folder is read-only"
+        return ""
+
+    def _note_link(self, href: str) -> None:
+        if href.startswith("aurora:goto:"):
+            nav.go(self, href[len("aurora:goto:"):])
+        else:
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl(href))
+
+    def show_in_compare(self) -> int:
+        """'Show in Compare without saving': every ticked row without a ✗ bad message goes to the Compare library in
+        memory (the same traces Reduce sends), no file written."""
+        if self.library is None:
+            return 0
+        from aurora.app.library import add_zone_traces
+        n = 0
+        for r in self._rows:
+            if r.state != "ready" or not r.settings.include or r.frame is None or r.level == "bad":
+                continue
+            t = r.frame.traces
+            if t is None:
+                continue
+            h = self.session.holder(r.item.holder)
+            n += 1 if add_zone_traces(self.library, r.zone, r.item.sid, t, r.settings,
+                                      h.name if h is not None else "") else 0
+        self.queue_note.setText(f"{plural(n, 'spectrum')} shown in Compare, not saved (they are lost when AURORA "
+                                "closes).")
+        return n
+
     def save_ticked(self) -> None:
         """John's 'Save ticked scans' then 'Add saved scans to the Compare tab': every ticked row without a problem is
         written in his formats to <project>/processed/reduced/<sample>/ (write_john), then each folder is added to
@@ -1100,7 +1197,11 @@ class CheckPerspective(QWidget):
             return
         ticked = [r for r in self._rows if r.state == "ready" and r.settings.include and r.frame is not None]
         if not ticked:
-            self.queue_note.setText("Tick 'Looks OK' for the spectra to save.")
+            self.queue_note.setText("Tick Looks OK for the spectra to save.")
+            return
+        if self.saving_blocked():               # a read-only beamtime: say so, offer Compare without files
+            self.queue_note.setText(READ_ONLY_NOTE)
+            self.update_actions()
             return
         bad = [r for r in ticked if r.level == "bad"]
         good = [r for r in ticked if r.level != "bad"]
@@ -1163,6 +1264,9 @@ class CheckPerspective(QWidget):
 
         def done(result):
             written, failed = result
+            self.n_saved += len(written)
+            if written:
+                self.saved.emit(len(written))
             folders = []
             for paths in written:
                 if paths and paths[0].parent not in folders:
@@ -1172,14 +1276,23 @@ class CheckPerspective(QWidget):
                 for f in folders:
                     n_added += len(self.library.add_folder(f))
             flat = [p for paths in written for p in paths]
-            parts = [f"{len(written)} spectrum(s) saved in John Bussey's format and added to Compare ({n_added} rows)"
-                     ] if written else []
+            parts = [f"{plural(len(written), 'spectrum')} saved in processed/reduced/ and added to Compare "
+                     f"({plural(n_added, 'row')})"] if written else []
             if failed:
                 parts.append("not saved: " + ", ".join(f"'{lab}'" for lab, _err in failed))
             msg = "; ".join(parts + notes)
             if flat:
-                notify_saved(self.queue_note, flat)                 # 'wrote … → folder · Open folder' (rich text)
-                self.queue_note.setText(html.escape(msg) + "<br>" + self.queue_note.text())
+                from aurora.app.theme import TOKENS
+                folder = flat[0].parent.parent if len(folders) > 1 else flat[0].parent
+                a = f"style='color:{TOKENS['link']}'"
+                url = QUrl.fromLocalFile(str(folder)).toString()
+                self.queue_note.setTextFormat(Qt.RichText)
+                self.queue_note.setText(f"{html.escape(msg)} · <a href='{url}' {a}>Open folder</a> · "
+                                        f"<a href='aurora:goto:compare' {a}>Go to Compare</a>")
+                self.queue_note.setToolTip("\n".join(str(p) for p in flat))
+                win = self.window()
+                if hasattr(win, "statusBar"):
+                    win.statusBar().showMessage(msg, 10000)
             else:
                 self.queue_note.setText(msg)
             self.update_actions()

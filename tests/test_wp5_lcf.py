@@ -104,10 +104,8 @@ def test_bound_coefficient_is_flagged_in_the_table(qapp, tmp_path):
     lib.requests[-1].fit = True
     lib.changed.emit()
     fit.refresh()
-    fit.target.setCurrentText("glass [sdd-scaled]")
-    for i in range(fit.components.count()):
-        it = fit.components.item(i)
-        it.setCheckState(Qt.Checked if it.text() in ("NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "flat [x]") else Qt.Unchecked)
+    fit.select_target("glass", "sdd-scaled")
+    fit.check_components(["NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "flat [x]"])
     fit.bootstrap.setValue(20)
     job = fit.run_lcf()
     assert job is not None and win.jobs.wait_idle(30000)

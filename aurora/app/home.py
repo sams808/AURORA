@@ -16,8 +16,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QListWidget,
-                               QListWidgetItem, QMenu, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
+                               QListWidget, QListWidgetItem, QMenu, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, shortcuts
@@ -26,19 +26,31 @@ from aurora.app.icons import icon
 from aurora.app.mode import is_advanced, mark_advanced_column, on_mode_changed
 from aurora.app.settings import recent_projects, remember_project, settings
 from aurora.app.theme import MONO_FONT, TOKENS, on_theme_changed, refill_tones, set_item_tone, tone_of
-from aurora.app.vocab import plural
-from aurora.app.widgets import Card, ElidedLabel, EmptyState, TaskBar, default_dir, remember_dir, set_enabled
+from aurora.app import guide
+from aurora.app.vocab import edge_words, flag_words, plural
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, default_dir,
+                                remember_dir, set_enabled)
 from aurora.core import overview
 from aurora.core.constants import sdd_geometry
 from aurora.core.model import Project, ScanInfo
 
-COLS = ("Scan", "Time", "Kind", "Edge", "Status", "Energies", "Points", "Flags")
+COLS = ("Scan", "Time", "Kind", "Edge", "Status", "Energies", "Pixels", "Flags")
+COL_KEYS = ("scan", "time", "kind", "edge", "status", "energies", "points", "flags")     # HELP keys home.col.<key>
 KIND_COL, TIME_COL, STATUS_COL, FLAGS_COL = 2, 1, 4, 7
 NO_PROJECT = "no project open"
 MAX_RECENT = 10                                   # File > Open recent and the welcome list (settings keep 10)
 RECENT_ROWS = 6                                   # rows of the welcome list shown before it scrolls
-WELCOME_TEXT = ("No project open. Open a beamtime folder (the one that holds raw/), a loose folder of scans or a scan "
-                "folder, or try the demo beamtime.")
+WELCOME_TEXT = ("AURORA turns the maps recorded at the SGM beamline into one X-ray absorption spectrum per sample: you "
+                "outline each sample, AURORA adds up its pixels, checks the result and builds a report. Open the folder "
+                "of your beamtime (it contains a folder named raw), or try the demo first.")
+SUBTITLE = {   # (Advanced, project open) -> the line next to the page title
+    (False, False): "Open your beamtime, or the demo, to begin.",
+    (False, True): "The days, holders and scans of this beamtime.",
+    (True, False): "open a beamtime folder (raw/<day>/<scan>), a loose folder of scans or one .h5 file",
+    (True, True): "The days, holders and scans of this beamtime.",
+}
+NOT_USED_TIP = "stopped early (aborted) or beamline tests: drawn on the Survey map, not offered in Reduce"
+FLAG_ROLE = int(Qt.UserRole) + 7              # the raw flag words of a scan row (the cell shows them by mode)
 MONO_KEYS = {"folder", "scan", "scan name", "layout"}
 
 
@@ -169,8 +181,76 @@ class WelcomePanel(EmptyState):
         self.layout().addWidget(self.recent)
 
 
+class GuideStrip(QFrame):
+    """Getting started (Easy mode, once a project is open): the steps as chips (done ones ticked, the next one in the
+    accent tone), the next step in one sentence, its button, and Hide. MainWindow.refresh_guide() fills it."""
+    go = Signal(str)                    # the target of the button: a page key, 'open', 'demo', 'reload', 'folder', …
+    hidden_by_user = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("guidestrip")
+        self.setAccessibleName("getting started: next step")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setSpacing(10)
+        self.title = QLabel("Getting started")
+        self.title.setObjectName("cardtitle")
+        lay.addWidget(self.title)
+        box = QWidget()
+        self.flow = FlowLayout(box, spacing=4)
+        self.chips: dict[str, QLabel] = {}
+        for i, (key, title) in enumerate(guide.STEPS):
+            if i:
+                sep = QLabel("›")
+                sep.setObjectName("muted")
+                self.flow.addWidget(sep)
+            c = QLabel(title)
+            c.setProperty("aurora_step", key)
+            c.setToolTip(guide.STEP_LINES[key])
+            self.flow.addWidget(c)
+            self.chips[key] = c
+        lay.addWidget(box, 2)
+        self.sentence = TermLabel("")
+        lay.addWidget(self.sentence, 3)
+        self.action_btn = QPushButton("")
+        self.action_btn.clicked.connect(lambda: self.go.emit(self._target))
+        lay.addWidget(self.action_btn)
+        self.hide_btn = QPushButton("Hide")
+        self.hide_btn.setFlat(True)
+        self.hide_btn.setToolTip("Hide the getting-started guide; Settings shows it again")
+        self.hide_btn.setAccessibleName("Hide the getting-started guide")
+        self.hide_btn.clicked.connect(self.hidden_by_user.emit)
+        lay.addWidget(self.hide_btn)
+        self._target = ""
+        self.step: guide.NextStep | None = None
+
+    def show_step(self, step: "guide.NextStep", here: bool) -> None:
+        """Show a next step; `here`: Home is the current page (the button is then the page's primary one)."""
+        from aurora.app.theme import set_tone
+        self.step = step
+        for key, c in self.chips.items():
+            title = dict(guide.STEPS)[key]
+            done = key in step.done
+            c.setText(f"✓ {title}" if done else title)
+            set_tone(c, "muted" if done else None)
+            c.setProperty("chip", "ok" if key == step.page and not done else "")
+            c.style().unpolish(c)
+            c.style().polish(c)
+        self.sentence.set_markup(step.sentence)
+        act = step.actions[0] if step.actions else None
+        self._target = act[1] if act else ""
+        self.action_btn.setText(act[0] if act else "")
+        self.action_btn.setVisible(act is not None)
+        self.action_btn.setObjectName("primary" if here else "")
+        self.action_btn.style().unpolish(self.action_btn)
+        self.action_btn.style().polish(self.action_btn)
+        self.action_btn.setToolTip(step.sentence)
+
+
 class HomePerspective(QWidget):
     project_opened = Signal(object)
+    opening_changed = Signal(str)         # the name of the folder being read ('' once the read ended)
     scan_selected = Signal(object)
     scan_activated = Signal(object)       # double-click: open in Reduce
 
@@ -196,9 +276,9 @@ class HomePerspective(QWidget):
         head = QHBoxLayout()
         h1 = QLabel("Home")
         h1.setObjectName("h1")
-        sub = ElidedLabel("open a beamtime folder (raw/<day>/<scan>), a loose folder of scans or a scan folder",
-                          Qt.ElideRight)
+        sub = ElidedLabel(SUBTITLE[(False, False)], Qt.ElideRight)
         sub.setObjectName("muted")
+        self.subtitle = sub
         head.addWidget(h1)
         head.addWidget(sub, 1)
         self.open_btn = QPushButton(icon("folder", TOKENS["ink"]), " Open project…")
@@ -216,6 +296,9 @@ class HomePerspective(QWidget):
 
         self.taskbar = TaskBar(self)
         root.addWidget(self.taskbar)
+        self.guide_strip = GuideStrip(self)        # Easy mode, once a project is open (MainWindow.refresh_guide)
+        self.guide_strip.hide()
+        root.addWidget(self.guide_strip)
 
         split = QSplitter(Qt.Horizontal)
         left = Card("Scans", help_anchor="2-home")
@@ -243,6 +326,8 @@ class HomePerspective(QWidget):
         self.details_card = right = Card("Project", help_anchor="22-project-and-scan-summaries")
         self.details = QTextBrowser()
         self.details.setOpenExternalLinks(False)
+        self.details.setOpenLinks(False)              # glossary:, aurora:help: and aurora:goto: links (on_link)
+        self.details.anchorClicked.connect(self.on_link)
         self.details.setAccessibleName("summary of the project or of the selected scan")
         self.details.setHtml(self._welcome_html())
         right.body.addWidget(self.details, 1)
@@ -256,16 +341,19 @@ class HomePerspective(QWidget):
         self.recent_list.itemActivated.connect(lambda it: self._open_recent(it.data(Qt.UserRole)))
         self.recent_list.customContextMenuRequested.connect(self._recent_menu_at)
         self.failure_state = EmptyState("", [], icon="folder", parent=self.tree)
+        # while a beamtime is read: its name and the count of scans read (the welcome panel is hidden meanwhile)
+        self.opening_state = EmptyState("", [], icon="folder", parent=self.tree)
+        self._opening = ""
         self.recent_menu = shortcuts.add_menu(self, "Open recent", "file")     # File > Open recent
         self.recent_menu.aboutToShow.connect(self.fill_recent_menu)
         explain(self.open_btn, "home.open")
         explain(self.reload_btn, "home.reload")
         explain(self.all_days_btn, "home.all_days")
-        header_tips(self.tree, {i: f"home.col.{c.lower()}" for i, c in enumerate(COLS)})
+        header_tips(self.tree, {i: f"home.col.{c}" for i, c in enumerate(COL_KEYS)})
         on_theme_changed(self, lambda _s: self._theme_changed())
         # Easy mode: the Kind column, the full h5 attribute table, the SDD geometry and the sgm_report notes are Advanced
         mark_advanced_column(self.tree, KIND_COL)
-        on_mode_changed(self, lambda _adv: self._render_details(), call_now=False)
+        on_mode_changed(self, lambda _adv: (self._render_details(), self._mode_words()), call_now=False)
         self.fill_recent()
         self.fill_recent_menu()
         self.update_actions()
@@ -276,8 +364,11 @@ class HomePerspective(QWidget):
         set_enabled(self.reload_btn, self.project is not None and not busy, "open a project first")
         self.all_days_btn.setVisible(self.project is not None and bool(self.project.days_left_out) and not self._failed)
         self.all_days_btn.setEnabled(not busy)
-        self.empty_state.set_shown(self.project is None and not self._failed)
-        self.failure_state.set_shown(bool(self._failed))
+        opening = busy and bool(self._opening) and self.project is None
+        self.empty_state.set_shown(self.project is None and not self._failed and not opening)
+        self.failure_state.set_shown(bool(self._failed) and not opening)
+        self.opening_state.set_shown(opening)
+        self.subtitle.setText(SUBTITLE[(is_advanced(), self.project is not None)])
 
     def _theme_changed(self) -> None:
         self.open_btn.setIcon(icon("folder", TOKENS["ink"]))
@@ -335,10 +426,14 @@ class HomePerspective(QWidget):
         self._last_path = path
         self.path_label.setText(f"reading {path} …")
         self.open_btn.setEnabled(False)
-        mgr.submit("discover", lambda cb: discover(path, cb), on_done=self._discovered, on_failed=self._on_failed,
-                   on_end=lambda _s: self._open_ended(), label=f"reading {path.name}", taskbar=self.taskbar,
-                   report=False)
+        self._opening = path.name or str(path)
+        self.opening_state.set_content(f"Reading {self._opening} …")
+        job = mgr.submit("discover", lambda cb: discover(path, cb), on_done=self._discovered, on_failed=self._on_failed,
+                         on_end=lambda _s: self._open_ended(), label=f"reading {path.name}", taskbar=self.taskbar,
+                         report=False)
+        job.progressed.connect(self._opening_progress)
         self.update_actions()
+        self.opening_changed.emit(self._opening)
 
     def open_project(self, path: Path) -> None:
         """Former name of open_path."""
@@ -367,9 +462,16 @@ class HomePerspective(QWidget):
         """Let running jobs finish before the widget goes away (a QThread destroyed while running aborts Qt)."""
         jobs.of(self).wait_idle(30000)
 
+    def _opening_progress(self, i: int, n: int, _msg: str = "") -> None:
+        if self._opening:
+            self.opening_state.label.setText(f"Reading {self._opening} … {i} of {plural(n, 'scan')}" if n else
+                                             f"Reading {self._opening} …")
+
     def _open_ended(self) -> None:
         self.open_btn.setEnabled(True)
+        self._opening = ""
         self.update_actions()
+        self.opening_changed.emit("")
 
     def _discovered(self, result) -> None:
         project, facts = result
@@ -556,7 +658,9 @@ class HomePerspective(QWidget):
             for holder in day.holders:
                 n_ok = len(holder.stacks)
                 h_item = QTreeWidgetItem([f"holder {holder.name}", "", "", "", f"{n_ok} complete {'stack' if n_ok == 1 else 'stacks'}",
-                                          "", "", f"{len(holder.dropped)} dropped" if holder.dropped else ""])
+                                          "", "", f"{len(holder.dropped)} not used" if holder.dropped else ""])
+                if holder.dropped:
+                    h_item.setToolTip(FLAGS_COL, NOT_USED_TIP)
                 d_item.addChild(h_item)
                 for s in holder.scans:
                     h_item.addChild(self._scan_item(s))
@@ -568,9 +672,13 @@ class HomePerspective(QWidget):
 
     def _scan_item(self, s: ScanInfo) -> QTreeWidgetItem:
         when = f"{s.time} {later_note(s.day, s.continues)}" if s.continues else s.time
-        it = QTreeWidgetItem([s.name, when, s.kind, s.edge_text, s.status.replace("_", " "), s.energy_text,
-                              str(s.n_points) if s.n_points else "", ", ".join(s.flags) + (f"  {s.error}" if s.error else "")])
+        it = QTreeWidgetItem([s.name, when, s.kind, edge_words(s.edge_text), s.status.replace("_", " "), s.energy_text,
+                              str(s.n_points) if s.n_points else "", ""])
         it.setData(0, Qt.UserRole, s)
+        if s.edge_text:
+            it.setToolTip(3, s.edge_text)
+        it.setData(FLAGS_COL, FLAG_ROLE, (list(s.flags), s.error or ""))
+        self._flag_cell(it)
         set_item_tone(it, tone_of(s.status), STATUS_COL)          # word plus icon, colour from the tokens
         if s.flags or s.error:
             set_item_tone(it, "warn", FLAGS_COL)
@@ -580,6 +688,48 @@ class HomePerspective(QWidget):
             it.setToolTip(TIME_COL, f"recorded on {s.day}, after midnight: it continues holder {s.holder}, "
                                     f"which started on {s.continues}")
         return it
+
+    @staticmethod
+    def _flag_cell(it: QTreeWidgetItem) -> None:
+        """The Flags cell: plain words in Easy mode ('detectors 1 and 2 saturated'), the codes in Advanced; the full
+        flag text in the cell's tooltip."""
+        flags, error = it.data(FLAGS_COL, FLAG_ROLE) or ([], "")
+        codes = ", ".join(flags)
+        shown = codes if is_advanced() else "; ".join(flag_words(f) for f in flags)
+        it.setText(FLAGS_COL, shown + (f"  {error}" if error else ""))
+        if flags or error:
+            it.setToolTip(FLAGS_COL, codes + (f"  {error}" if error else ""))
+
+    def _mode_words(self) -> None:
+        """The cells that read differently by mode (Flags), and the subtitle."""
+        stack = [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())]
+        while stack:
+            it = stack.pop()
+            if it.data(FLAGS_COL, FLAG_ROLE) is not None:
+                self._flag_cell(it)
+            stack.extend(it.child(i) for i in range(it.childCount()))
+        self.subtitle.setText(SUBTITLE[(is_advanced(), self.project is not None)])
+
+    def on_link(self, url) -> None:
+        """Links of the summary panel: 'glossary:<key>' opens the glossary (empty key: its top), 'aurora:help:<doc>#<a>'
+        a manual, 'aurora:goto:<page>' a perspective; anything else is opened by the system."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        text = url.toString() if isinstance(url, QUrl) else str(url)
+        if text.startswith("glossary:"):
+            from aurora.app.help import open_glossary
+            open_glossary(self, text.split(":", 1)[1] or None)
+        elif text.startswith("aurora:help:"):
+            doc, _sep, anchor = text[len("aurora:help:"):].partition("#")
+            from aurora.app.help import open_help
+            open_help(self, doc or "USER_GUIDE.md", anchor or None)
+        elif text.startswith("aurora:goto:"):
+            from aurora.app.nav import window_of
+            win = window_of(self)
+            if win is not None and hasattr(win, "go_to"):
+                win.go_to(text[len("aurora:goto:"):])
+        elif isinstance(url, QUrl) and url.isValid():
+            QDesktopServices.openUrl(url)
 
     def _on_select(self, cur: QTreeWidgetItem | None, _prev=None) -> None:
         s = cur.data(0, Qt.UserRole) if cur is not None else None
@@ -653,18 +803,8 @@ class HomePerspective(QWidget):
 
     @staticmethod
     def _welcome_html() -> str:
-        return ("<h3>No project open</h3>"
-                "<p>Open one of these with <b>Open project…</b>, by dropping it on the window, or from the command "
-                "line (<code>aurora &lt;folder&gt;</code>):</p><ul>"
-                "<li>a beamtime folder that holds <code>raw/&lt;day&gt;/&lt;scan&gt;</code> (for example "
-                "<code>my_beamtime</code>), or its day folders without <code>raw/</code>;</li>"
-                "<li>one day or scan folder of a beamtime: that day opens alone, and <b>Show every day</b> opens "
-                "the others;</li>"
-                "<li>a loose folder of scan folders, the way John Bussey's GUI kept them (<code>CLS GUI</code>);</li>"
-                "<li>one scan's <code>.h5</code> file, dropped on the window or given on the command line (the "
-                "folder dialog lists folders only): its scan folder's project opens.</li></ul>"
-                "<p>The demo beamtime is synthetic: every perspective has data without a real beamtime. The "
-                "tutorials walk through it.</p>")
+        """Getting started in Easy mode; in Advanced mode, the kinds of folder that open (aurora.app.guide)."""
+        return guide.getting_started_html(is_advanced(), TOKENS)
 
     def _failure_html(self) -> str:
         e = html.escape
@@ -681,14 +821,21 @@ class HomePerspective(QWidget):
     def _project_html(self) -> str:
         p = self.project
         e = html.escape
-        return (f"<h3>{e(p.root.name)}</h3>{self._table(overview.project_rows(p, self.facts))}"
-                f"<p style='color:{TOKENS['muted']}'>Select a scan for its summary; double-click a stack to open it in "
-                "Reduce on its holder.</p>")
+        rows = overview.project_rows(p, self.facts) if is_advanced() else overview.easy_project_rows(p, self.facts)
+        return (f"<h3>{e(p.root.name)}</h3>{self._table(rows)}"
+                f"<p style='color:{TOKENS['muted']}'>Select a scan to read its summary; double-click a complete stack "
+                "to outline a sample on it in Reduce.</p>")
 
     def _scan_html(self, s: ScanInfo) -> str:
         e = html.escape
         key = str(s.path)
-        rows = overview.scan_rows(s, self.project, self._map_checks.get(key), self._map_errors.get(key, ""))
+        if is_advanced():
+            rows = overview.scan_rows(s, self.project, self._map_checks.get(key), self._map_errors.get(key, ""))
+        else:                                     # plain words: the edge and the flags as on the tree
+            rows = [(k, edge_words(v) if k == "edge" else ("; ".join(flag_words(f) for f in s.flags) if k == "flags"
+                                                            else v))
+                    for k, v in overview.easy_scan_rows(s, self.project, self._map_checks.get(key),
+                                                        self._map_errors.get(key, ""))]
         body = (f"<h3>{e(s.name)}</h3><h4>Scan analysis summary</h4>{self._table(rows)}")
         if not is_advanced():                     # Easy: the scan summary only
             return body

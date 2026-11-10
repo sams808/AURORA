@@ -106,12 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     lib.changed.emit()
     win.compare.show_peaks.setChecked(True); win.compare.table.selectRow(0)
     fit = win.fit
-    fit.refresh(); fit.target.setCurrentText("mixture 1 [sdd-scaled]")
-    for i in range(fit.components.count()):
-        it = fit.components.item(i)
-        it.setCheckState(Qt.Checked if it.text() in ("NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "BaY2F8 [sdd-scaled]") else Qt.Unchecked)
+    fit.refresh(); fit.select_target("mixture 1", "sdd-scaled")
+    fit.check_components(["NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "BaY2F8 [sdd-scaled]"])
     fit.bootstrap.setValue(100); fit.run_lcf(); fit.n_comp.setValue(3); fit.run_pca(); fit.run_mcr()
-    fit.pk_trace.setCurrentText("NaF [sdd-scaled]"); fit.pk_n.setValue(2); fit.run_peaks()
+    fit.select_trace("NaF", "sdd-scaled"); fit.pk_n.setValue(2); fit.run_peaks()
     mp = win.maps
     mp.set_hypercube(Hypercube.load(proj, scan)); mp.line.setCurrentIndex(1); mp.roi_mode.setCurrentIndex(1)
     mp.draw_elements(); mp.n_k.setValue(2); mp.run_clusters()

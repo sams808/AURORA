@@ -1,8 +1,10 @@
 # AURORA user guide
 
-AURORA reads the raw folders of an SGM beamtime (ambxas endstation, Canadian Light Source) and turns them into
-quality-checked spectra, comparisons, fits, maps and a report. AURORA is version 2 of John Bussey's SGM XAS GUI, based
-on James J. Dynes' SGM_Beamline_Analysis notebooks. Nothing is ever written into `raw/`.
+AURORA turns the maps recorded at the SGM beamline (ambxas endstation, Canadian Light Source) into one X-ray
+absorption spectrum per sample, checked and collected in a report, with comparisons, fits and maps for those who need
+them. New to X-ray absorption? Start with the quick start below and **Help > Glossary**. AURORA is version 2 of
+John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_Beamline_Analysis notebooks. Nothing is ever written into
+`raw/`.
 
 This is the short guide. `MANUAL.md` describes every control, `TUTORIALS.md` walks through the demo beamtime
 (**Help > Open the demo beamtime**, or `aurora demo <folder>`), `INSTALL.md` covers the installers (Windows 10 or 11;
@@ -10,9 +12,9 @@ macOS 15 or later, Apple silicon or Intel) and where things are stored. All four
 opens the manual at the section of the page you are on, and the small **?** of every panel at that panel's section.
 **Help > Keyboard shortcuts** (**Ctrl+/**) lists every shortcut.
 
-**Easy and Advanced mode.** AURORA starts in **Easy mode**, the basic path of John Bussey's SGM XAS GUI: open the
-beamtime, draw the samples in Reduce, check the spectra, compare them, fit them with LCF, build the report. Easy mode
-shows the controls of that path and states the values it uses. **Advanced mode** shows every option, and the Maps
+**Easy and Advanced mode.** AURORA starts in **Easy mode**, the main steps with standard settings: open the
+beamtime, outline the samples in Reduce, check the spectra, compare them, fit them with LCF, build the report. Easy mode
+shows the controls of that path, in plain words, and states the values it uses. **Advanced mode** shows every option, and the Maps
 perspective; switch with **View > Advanced mode**, the mode button at the right of the top bar (it reads **Easy mode**
 or **Advanced mode**), or **Ctrl+Shift+A**. Switching never changes a value, and the mode chosen is kept for the next
 start.
@@ -23,9 +25,53 @@ time: the session saves itself within a second of every change. **Ctrl+Z** undoe
 (**Edit > Undo** names it), **Ctrl+Y** redoes it. **View > Appearance** and **View > Text size** choose light or dark
 and a larger text, at once. Long tasks run in the background with a progress strip and **Cancel** (**Esc**).
 
+## Quick start for non-specialists
+
+**What the beamline measured, in five lines.**
+
+1. X-rays of one energy hit the sample. When the energy passes an *absorption edge* of an element (fluorine: near
+   697 eV), that element starts to absorb.
+2. Each absorption makes the sample give off X-rays of its own (*fluorescence*) and electrons (*electron yield*, TEY).
+   Four detectors count the X-rays, and a gold mesh measures the beam itself (*I0*).
+3. The beamline maps a holder of samples pixel by pixel: first a *survey* at one energy, to find the samples, then
+   *stacks*, the same small area mapped at many energies across the edge.
+4. Every pixel of a stack therefore holds an X-ray absorption spectrum (XAS): signal ÷ beam, energy by energy. Its
+   shape near the edge tells the chemical state and the neighbours of the element.
+5. AURORA adds up the pixels of each sample you outline into one spectrum, checks it, and builds a report.
+
+**Your first spectrum.** Easy mode, about ten minutes on the demo:
+
+1. **Home**: click **Open the demo beamtime** (or **Open project…** and the folder that contains `raw`). The
+   *Getting started* row at the top of Home, and the *Next* link of the top bar, say what to do next at every step.
+2. **Survey**: the map of the holder. The rectangles are the measured areas (stacks); click one to open it.
+3. **Reduce**: step **2 · Which X-rays to count** is preset for your element: keep it. In step **3 · Outline the
+   sample**, drag around your sample on the map and pick its name in **sample name**. Step **4 · Send to Check** says
+   in one sentence how the spectrum is made; press **Add to Check**.
+4. **Check**: look at the preview. A good spectrum rises once at the edge, then stays roughly level, and its four
+   detector curves have the same shape. Untick **Looks OK** on any that does not, then press **Save ticked →
+   Compare**.
+5. **Compare**: your saved spectra on one graph, each scaled so that its edge step is 1. **Fit** (optional) describes
+   one spectrum as a mix of reference spectra.
+6. **Report**: **Build the report** writes a PDF with one page per sample group, in a new folder each time.
+
+**Words.** **Help > Glossary** explains every term. The tooltip of a control that uses one ends with *What is …?*, and
+underlined words in the captions open the glossary at that word.
+
+**When something looks wrong.**
+
+| What you see | What it means | What to do |
+|---|---|---|
+| a flat or very noisy spectrum | the outline missed the sample, or holds very few pixels | draw the outline again over a bright part of the map |
+| a curve drawn dashed in Compare, *not scaled* | its energies do not reach far enough before or after the edge | nothing to fix in AURORA: the scan did not cover the edge; it is shown scaled 0 to 1 |
+| *inverse yield (IPFY)* in Check, and detector curves that dip | the window counts another element's X-rays; the spectrum is computed as beam ÷ counts and rises at the edge | normal; choose the line of the edge element in step 2 to count its own X-rays |
+| detector curves of different heights | the four detectors see the sample from different angles | normal when their shapes agree |
+| *saturated* detectors, or *no detector left in the sum* | too many X-rays for those detectors | use the electron-yield (TEY) spectrum of that scan |
+| *read-only* in the top bar, a banner about a read-only folder | AURORA cannot write in the beamtime folder | copy the beamtime folder to this computer and open the copy |
+
 ## 1. Open a beamtime
 
-**File > Open project…**, or drop the folder that contains `raw/` (for example `my_beamtime`) on the window. A single
+New to AURORA? The quick start above walks through every step on the demo. **File > Open project…**, or drop the
+folder that contains `raw/` (for example `my_beamtime`) on the window. A single
 day folder or a scan folder works too (that day alone: **Show every day** opens the rest), and so does one scan's
 `.h5` file dropped on the window. AURORA also opens the folder John Bussey's GUI used,
 where the scan folders sit side by side (`CLS GUI/`): choose that folder with **Open project…**. Its zones are saved
@@ -63,15 +109,16 @@ browser zone tool or another AURORA; merged per holder, duplicates skipped, one 
 
 ## 3. Reduce (the zone tool)
 
-Easy mode shows John Bussey's four steps as numbered cards:
+Easy mode shows the four steps as numbered cards, in plain words:
 
 1. **1 · Scans of holder N5**: pick a scan of the holder (the holder is chosen in the top bar).
-2. **2 · XRF window**: keep the fixed line (*F Kα (fixed bins)*) or drag the window over the emission line; **lo** /
-   **hi** are in channels (hi excluded).
-3. **3 · Region**: draw the sample with **rect+** or **lasso+**; a click inside another sample selects it; **New
-   sample** starts the next one; the caption counts the points (*Region: 6 of 12 points of …*). Zones are in mm, so
-   every scan of the holder that covers the area attaches to the zone automatically, loaded or not.
-4. **4 · Reduce**: check the settings line and press **Add to Check**.
+2. **2 · Which X-rays to count**: keep the fixed window of your element (*F Kα (fixed window)*) or drag the band over
+   the emission line; **from** / **to** are in detector channels (to excluded). The caption says what the plot is.
+3. **3 · Outline the sample**: draw the sample with **rect+** or **lasso+**; a click inside another sample selects it;
+   **New sample** starts the next one; the caption counts the pixels (*Region: 6 of 12 pixels of …*). Zones are in
+   mm, so every scan of the holder that covers the area attaches to the zone automatically, loaded or not.
+4. **4 · Send to Check**: one sentence says how the spectrum is made (the exact settings are in its tooltip); press
+   **Add to Check**, then follow **Go to Check ›**.
 
 Made a mistake? **Ctrl+Z** undoes the last zone or settings change (**Edit > Undo** names it), **Ctrl+Y** redoes it;
 the zones are saved by themselves within a second.
@@ -89,10 +136,10 @@ settings in use* says so (**Reset to Easy defaults** goes back).
 
 ## 4. Check
 
-In Check, every region sent with **Add to Check** is a row of **Spectra to check**, with John Bussey's sanity messages
-(*✓ ok*, *! check*, *✗ bad*). Look at the preview (**view** chooses one of his five views), untick **Looks OK** for
-anything that does not look right, then press **Save ticked → Compare**: the spectra are written in John Bussey's
-format to `processed/reduced/` and appear in Compare.
+In Check, every sample sent with **Add to Check** is a row of **Spectra to check**, with AURORA's checks
+(*✓ ok*, *! check*, *✗ bad*). Look at the preview (**view** chooses one of five views), untick **Looks OK** for
+anything that does not look right, then press **Save ticked → Compare**: the spectra are written in the format of
+John Bussey's SGM XAS GUI to `processed/reduced/` and appear in Compare.
 
 Advanced mode adds the checks of every scan of the holder (**Run the checks on holder N5**, **Run the checks on every
 holder**): the count rate per detector, *saturated* (the output no longer follows the input; fluorescence unusable,

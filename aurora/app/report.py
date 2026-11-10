@@ -17,15 +17,15 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, QTimer, QUrl, Qt
+from PySide6.QtCore import QRect, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox,
                                QSplitter, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
-from aurora.app.help_text import explain, explain_all, header_tips, labelled
-from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
+from aurora.app.help_text import explain, explain_all, header_tips, labelled, say
+from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.vocab import plural
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, TaskBar, default_dir, overlay_host, remember_dir,
@@ -53,7 +53,14 @@ def _in_or_above(path, folder: Path) -> bool:
     return p == f or f in p.parents or p in f.parents
 
 
+OUT_READ_ONLY = "The report folder cannot be written: choose another with Browse…"
+SUBTITLE = {False: "One PDF with every kept spectrum, one page per sample group.",
+            True: "the final report, organised by sample group, from the zones and their settings"}
+
+
 class ReportPerspective(QWidget):
+    built = Signal(str)                   # the folder of a finished build (the getting-started guide)
+
     def __init__(self, session: Session, parent: QWidget | None = None):
         super().__init__(parent)
         self.session = session
@@ -69,7 +76,7 @@ class ReportPerspective(QWidget):
         root.setSpacing(12)
         head = QHBoxLayout()
         h1 = QLabel("Report"); h1.setObjectName("h1")
-        sub = ElidedLabel("the final report, organised by sample group, from the zones and their settings", Qt.ElideRight)
+        self.subtitle = sub = ElidedLabel(SUBTITLE[False], Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
         root.addLayout(head)
@@ -88,6 +95,9 @@ class ReportPerspective(QWidget):
         left.body.addLayout(r2)
         self.author_line = QLabel(""); self.author_line.setObjectName("muted"); self.author_line.setWordWrap(True)
         left.body.addWidget(self.author_line)
+        self.out_note = QLabel(OUT_READ_ONLY); self.out_note.setObjectName("muted"); self.out_note.setWordWrap(True)
+        self.out_note.hide()                           # the output folder cannot be written (Build is disabled)
+        left.body.addWidget(self.out_note)
 
         self.scope_box = QWidget()                     # preset, dpi and appendices: Advanced
         sl = QVBoxLayout(self.scope_box); sl.setContentsMargins(0, 0, 0, 0)
@@ -141,6 +151,7 @@ class ReportPerspective(QWidget):
         left.body.addWidget(self.status)
         left.body.addStretch(0)                        # takes the room of the hidden options in Easy mode only
         self.left_split.addWidget(left)
+        self.options_card = left
 
         check = Card("Check before building", help_anchor="92-check-before-building")
         self.totals = QLabel("no project open"); self.totals.setWordWrap(True)
@@ -209,7 +220,7 @@ class ReportPerspective(QWidget):
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="report",
                                       parent=self.body)
-        self.zone_state = EmptyState("No zone yet: the report is built from the zones drawn in Reduce.",
+        self.zone_state = EmptyState(say("report.zone_state"),
                                      [("Go to Reduce", lambda: nav.go(self, "reduce"))], icon="report", parent=self.body)
         self.groups.setAccessibleName("groups to include")
         self.holders.setAccessibleName("holders to include")
@@ -246,6 +257,12 @@ class ReportPerspective(QWidget):
         mark_advanced(self.scope_box)
         mark_advanced_tab(self.check_tabs, self.scope_page)
         mark_easy(self.scope_line)
+        on_mode_changed(self, lambda _a: (self.subtitle.setText(SUBTITLE[is_advanced()]), self._scope_text(),
+                                          self._author_text(),
+                                          self.zone_state.set_content(say("report.zone_state"),
+                                                                      [("Go to Reduce", lambda: nav.go(self, "reduce"))])),
+                        call_now=False)
+        self.out_dir.textChanged.connect(lambda _t: self.update_actions())
         self._scope_text()
         self.update_actions()
 
@@ -256,8 +273,11 @@ class ReportPerspective(QWidget):
         has = self.session.project is not None
         busy = jobs.of(self).job("report") is not None
         zones = self.has_zones()
-        set_enabled(self.build_btn, has and zones and not busy,
-                    NO_PROJECT if not has else ("the report is being built" if busy else "draw a zone in Reduce first"))
+        blocked = has and self.out_blocked()
+        set_enabled(self.build_btn, has and zones and not busy and not blocked,
+                    NO_PROJECT if not has else ("the report is being built" if busy else
+                                                OUT_READ_ONLY if blocked else "draw a zone in Reduce first"))
+        self.out_note.setVisible(blocked)
         built = self._result is not None
         pages = len(self._result.page_pngs) if built else 0
         set_enabled(self.prev_btn, built and self._page > 0, "build the report first" if not built else "this is the first page")
@@ -267,6 +287,24 @@ class ReportPerspective(QWidget):
         set_enabled(self.current_holder_btn, has and self.session.current_holder is not None, NO_PROJECT)
         self.empty_state.set_shown(not has)
         self.zone_state.set_shown(has and not zones)
+
+    def out_blocked(self) -> bool:
+        """The output folder cannot be written: a protected folder (raw/, AURORA_PROTECT_DIRS) or a refused write."""
+        text = self.out_dir.text().strip()
+        if not text:
+            return False
+        from aurora.core.io.safety import is_protected
+        out = Path(text)
+        try:
+            if is_protected(out):
+                return True
+        except (OSError, ValueError):
+            return False
+        probe = out
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        import os
+        return probe.exists() and not os.access(probe, os.W_OK)
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
@@ -302,9 +340,32 @@ class ReportPerspective(QWidget):
         apps = [name for name, box in (("Appendix A (the four detectors)", self.appendix), ("Appendix B (plate maps)", self.maps))
                 if box.isChecked()]
         preset = "Final" if self.preset_key() == "final" else "Draft"
-        self.scope_line.setText(f"The report covers {holders} and {groups}"
-                                + (", with " + " and ".join(apps) if apps else ", without Appendix A or B")
-                                + f"; {preset} preset, figures at {self.dpi.value()} dpi.")
+        if is_advanced():
+            self.scope_line.setText(f"The report covers {holders} and {groups}"
+                                    + (", with " + " and ".join(apps) if apps else ", without Appendix A or B")
+                                    + f"; {preset} preset, figures at {self.dpi.value()} dpi.")
+            return
+        parts = []
+        if self.appendix.isChecked():
+            parts.append("each detector separately (Appendix A)")
+        if self.maps.isChecked():
+            parts.append("the holder maps with your outlines (Appendix B)")
+        parts.append("the quality notes (Appendix C)")
+        then = ", ".join(parts[:-1]) + f" and {parts[-1]}" if len(parts) > 1 else parts[0]
+        quality = "print quality" if self.dpi.value() >= 300 else "draft quality"
+        self.scope_line.setText(f"The report will hold one page per sample group ({groups}, {holders}) with the spectra "
+                                f"ticked Looks OK, then {then}. Figures at {quality} ({self.dpi.value()} dpi). Compare "
+                                "and Fit results are not in it: use Export… in Compare and Fit.")
+        QTimer.singleShot(0, self.fit_options)
+
+    def fit_options(self) -> None:
+        """The Options card as tall as its wrapped lines at its width (the splitter ignores word wrap)."""
+        from aurora.app.widgets import fit_to_content
+        fit_to_content(getattr(self, "options_card", None))
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        QTimer.singleShot(0, self.fit_options)
 
     def _project_changed(self, project) -> None:
         self.out_dir.setText(str(project.root / "reports" / "aurora"))
@@ -418,7 +479,11 @@ class ReportPerspective(QWidget):
 
     def _author_text(self) -> None:
         name, source = self.author()
-        if name:
+        if name and not is_advanced():
+            self.author_line.setText(f"Author: {name} (Settings > report author)" if source == "Settings" else
+                                     f"Author: {name} (from your computer account; change it in Settings > report "
+                                     "author)")
+        elif name:
             self.author_line.setText(f"Author: {name}, from {source}")
         else:
             self.author_line.setText("No author line (Settings > report author)")
@@ -492,7 +557,9 @@ class ReportPerspective(QWidget):
         self._fill_plan()
 
     def _plan_failed(self, text: str) -> None:
-        self.totals.setText("the check before building could not run: " + (text.strip().splitlines() or ["?"])[-1])
+        from aurora.app.widgets import plain_error
+        root = self.session.project.root if self.session.project is not None else None
+        self.totals.setText("the check before building could not run: " + plain_error(text, root))
 
     def _plan_end(self, _state: str) -> None:
         if self._plan_again:
@@ -655,6 +722,7 @@ class ReportPerspective(QWidget):
 
     def _on_done(self, result: ReportResult) -> None:
         self._result = result
+        self.built.emit(str(result.folder or result.pdf.parent))
         ch = ReportBuilder.changes_lines(result.changes, limit=3)
         self.status.setText(f"{result.folder.name if result.folder else result.pdf.parent.name}: "
                             f"{plural(result.pages, 'page')}, {plural(result.entries, 'zone spectrum', 'zone spectra')}, "

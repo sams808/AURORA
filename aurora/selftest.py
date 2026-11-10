@@ -530,7 +530,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         ranges = {"a": (680, 730), "b": (870, 900), "far": (2030, 2080)}
         assert q.reference_pool("a", ranges) == ["b"], q.reference_pool("a", ranges)
         msgs = q.check_zone(None)
-        assert q.worst(msgs) == "bad" and "contains 0 measurement points" in msgs[0][1], msgs
+        assert q.worst(msgs) == "bad" and "holds no pixel" in msgs[0][1], msgs
         return f"{len(res)} stacks checked, qc.json round trip, flag '{merged[-1]}', I0 pool ±150 eV"
     r.check("AURORA's checks persisted, flags and the energy-local I0 pool", qc_persisted)
 
@@ -1394,13 +1394,11 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         win.show_perspective("fit")
         fit.refresh()
         pump(5)
-        names = [fit.target.itemText(i) for i in range(fit.target.count())]
+        names = [fit.target.itemData(i) or fit.target.itemText(i) for i in range(fit.target.count())]
         target = next(t for t in names if t.startswith("mixture 1") and "sdd-scaled" in t)
-        fit.target.setCurrentText(target)
+        fit.select_key(fit.target, target)
         comps = {"NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "BaY2F8 [sdd-scaled]"}
-        for i in range(fit.components.count()):
-            it = fit.components.item(i)
-            it.setCheckState(Qt.Checked if it.text() in comps else Qt.Unchecked)
+        fit.check_components(comps)
         fit.bootstrap.setValue(20)
         assert fit.run_lcf() is not None, fit.lcf_info.text()
         wait_jobs()
@@ -1414,7 +1412,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         fit.run_mcr()
         wait_jobs()
         assert fit.mcr_chip.text().startswith("converged") or fit.mcr_chip.text(), fit.mcr_chip.text()
-        fit.pk_trace.setCurrentText("NaF [sdd-scaled]")
+        fit.select_trace("NaF", "sdd-scaled")
         fit.pk_n.setValue(1)
         fit.pk_centres.setText("692")
         fit.run_peaks()

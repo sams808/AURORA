@@ -97,10 +97,10 @@ def stack_status(stack_dir: Path, edirs: list[tuple[float, Path]] | None = None,
     if n == 0:
         return "empty", "no energy folders"
     if re.search(TEST_NAME_PATTERN, stack_dir.name):
-        return "test", "beamline diagnostic (name), not a sample scan"
+        return "test", "a beamline test (recognised from its name), not a sample"
     span = ed[-1][0] - ed[0][0]
     if span < MIN_SPAN_EV:
-        return "test", f"{n} energies over {span:.1f} eV"
+        return "test", f"only {n} energies over {span:.1f} eV: a test, not a spectrum"
     if planned is None:
         _, planned = stack_plan(stack_dir)
     if planned and n < len(planned):

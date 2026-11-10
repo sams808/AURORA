@@ -17,15 +17,28 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSpinBo
 
 from aurora.app import jobs
 from aurora.app.help_text import explain_all, labelled
-from aurora.app.mode import mark_advanced
+from aurora.app.help_text import say
+from aurora.app.mode import is_advanced, mark_advanced, mark_easy, on_mode_changed
 from aurora.app.theme import curve, dash, make_plot, mk_pen, on_theme_changed, with_alpha
 from aurora.app.vocab import DET_LABELS, unit_suffix
-from aurora.app.widgets import Card, FlowLayout, pair, set_plot_hint
+from aurora.app.widgets import Card, FlowLayout, TermLabel, pair, set_plot_hint
 from aurora.core import xrf_windows as xw
 from aurora.core.constants import DETS, N_CH
 
 SOURCES = (("stack", "the whole stack"), ("survey", "survey"), ("region", "inside the region"))   # short: Linux fonts
-CUSTOM = "custom"
+CUSTOM = "custom (drag the band on the plot)"
+CAPTION = ("The plot shows the X-rays your sample emits (its {{emission-spectrum|emission spectrum}}), one curve per "
+           "detector (SDD1 to SDD4). Only the counts inside the shaded band become your spectrum: keep the preset of "
+           "your element (F Kα for fluorine) unless told otherwise.")
+
+
+def preset_text(label: str) -> str:
+    """'F Kα' -> 'F Kα (fixed window)'; the total -> 'all X-rays (total XRF)'."""
+    return "all X-rays (total XRF)" if label == xw.TOTAL_LABEL else f"{label} (fixed window)"
+
+
+def axis_x(calibrated: bool) -> str:
+    return "detector channel (calibrated)" if calibrated else "detector channel (about 10 eV each)"
 
 
 class XrfWindowCard(Card):
@@ -51,8 +64,16 @@ class XrfWindowCard(Card):
         self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.preset.setMinimumContentsLength(10)
         self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset))
+        self.caption = TermLabel(CAPTION)                  # Easy: what the plot is and what to keep
+        self.caption.setObjectName("muted")
+        self.body.addWidget(self.caption)
+        self.note = TermLabel("")                          # Easy: the inverse-yield note (Reduce sets it)
+        self.note.setObjectName("muted")
+        self.note.hide()
+        self.body.addWidget(self.note)
+        self._label = ""                                   # the selected sample's name (the status line)
         # the spectrum
-        self.plot = make_plot(x="channel", y="counts")
+        self.plot = make_plot(x=axis_x(False), y="counts (log scale)")
         self.plot.setMinimumHeight(100)
         self.plot.getViewBox().disableAutoRange()
         self.plot.setLogMode(x=False, y=True)
@@ -76,8 +97,8 @@ class XrfWindowCard(Card):
             s.setMaximumWidth(86)
         row = QWidget()
         rl = FlowLayout(row, spacing=6)
-        rl.addWidget(pair(labelled("lo", self.lo, "reduce.window.lo"), self.lo))
-        rl.addWidget(pair(labelled("hi", self.hi, "reduce.window.hi"), self.hi))
+        rl.addWidget(pair(labelled("from", self.lo, "reduce.window.lo"), self.lo))
+        rl.addWidget(pair(labelled("to", self.hi, "reduce.window.hi"), self.hi))
         self.det = QComboBox(); self.det.addItems(list(DET_LABELS))
         self.det_box = pair(labelled("for", self.det, "reduce.window.det"), self.det)     # Advanced
         rl.addWidget(self.det_box)
@@ -117,6 +138,8 @@ class XrfWindowCard(Card):
         self.remember_btn.clicked.connect(lambda: self.remember_requested.emit(self.choice()))
         on_theme_changed(self, lambda _s: (self._style_regions(), self._draw()))
         mark_advanced(self.adv_box, self.det_box)
+        mark_easy(self.caption)
+        on_mode_changed(self, lambda _a: (self._describe(), self.refresh_spectrum(), self._paint_note()), call_now=False)
         self.set_stack(None, None)
 
     # ------------------------------------------------------------------ the stack and its presets
@@ -134,9 +157,9 @@ class XrfWindowCard(Card):
             labs = [lab for lab in self._labels if xw.bins_windows(bins, lab) is not None]
             labs += [lab for lab in (bins.labels if bins is not None else []) if bins.has(lab) and lab not in labs]
             for lab in labs:                            # every line of roi_bins.json, and the stack's own lines
-                self.preset.addItem(f"{lab} (fixed bins)", ("line", lab))
+                self.preset.addItem(preset_text(lab), ("line", lab))
             if self._edge_line is not None:
-                self.preset.addItem(f"line of the edge: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV",
+                self.preset.addItem(f"line of the edge element: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV",
                                     ("edge", self._edge_line.label))
             self.preset.addItem(CUSTOM, ("custom", ""))
         finally:
@@ -146,6 +169,8 @@ class XrfWindowCard(Card):
         self.det.setEnabled(sd is not None and not self.same_range.isChecked())
         edge = getattr(sd, "edge_text", "") if sd is not None else ""
         self.remember_btn.setText(f"Remember windows for {edge}" if edge else "Remember windows for the edge")
+        cal = getattr(proj, "calibration", None)
+        self.plot.setLabel("bottom", axis_x(bool(cal is not None and getattr(cal, "calibrated", False))))
         self.show_choice(choice)
         self.refresh_spectrum()
 
@@ -320,15 +345,21 @@ class XrfWindowCard(Card):
         lo, hi = self._windows[DETS[k]]
         a, b = xw.channel_ev(cal, DETS[k], lo), xw.channel_ev(cal, DETS[k], hi)
         nominal = cal is None or not getattr(cal, "calibrated", False)
-        who = "all detectors" if self.same_range.isChecked() and xw.same_for_all(self._windows) else DET_LABELS[k]
-        self.ev_label.setText(f"{who}: channels {lo}:{hi} = {a:.0f}–{b:.0f} eV"
-                              + (" (10 eV/ch nominal)" if nominal else " (calibrated)"))
+        same = self.same_range.isChecked() and xw.same_for_all(self._windows)
+        if is_advanced():
+            who = "all detectors" if same else DET_LABELS[k]
+            self.ev_label.setText(f"{who}: channels {lo}:{hi} = {a:.0f}–{b:.0f} eV"
+                                  + (" (10 eV/ch nominal)" if nominal else " (calibrated)"))
+            return
+        who = "All four detectors" if same else f"Detector {k + 1} ({DET_LABELS[k]})"
+        scale = "10 eV per channel, not calibrated" if nominal else "calibrated"
+        self.ev_label.setText(f"{who}: {a:.0f}–{b:.0f} eV (channels {lo} to {hi - 1}, {scale})")
 
     def refresh_spectrum(self) -> None:
         """Draw the spectrum of the chosen source; the stack's is read in a job the first time (cached)."""
         sd = self._sd
         self._spectrum = None
-        src = self.source.currentData()
+        src = self.effective_source()
         if sd is None:
             self.status.setText("")
             self._draw()
@@ -349,7 +380,7 @@ class XrfWindowCard(Card):
             self._show_emission(em, sd)
             return
         if xw.source_of(sd) is None:
-            self.status.setText("no raw spectra for this stack (stitched or not found): the fixed bins only")
+            self.status.setText(say("reduce.window.no_raw"))
             self._draw()
             return
         sid = sd.id
@@ -364,25 +395,43 @@ class XrfWindowCard(Card):
         if sd is self._sd:
             self._show_emission(em, sd)
 
+    def effective_source(self) -> str:
+        """The spectrum shown: the combo's choice in Advanced mode; in Easy mode the selected sample's pixels when it
+        has some on this stack, else the whole stack."""
+        if is_advanced():
+            return self.source.currentData()
+        return "region" if self._pix is not None and len(self._pix) else "stack"
+
     def _show_emission(self, em, sd) -> None:
-        src = self.source.currentData()
+        src = self.effective_source()
         if src == "region":
             if self._pix is None or not len(self._pix):
-                self.status.setText("nothing selected yet: the spectrum of the whole stack")
+                self.status.setText(say("reduce.window.whole"))
                 self._spectrum = em.spectrum(DETS)
             else:
                 self._spectrum = em.spectrum(DETS, self._pix)
-                self.status.setText(f"inside the region ({len(self._pix)} points), all energies")
+                self.status.setText(say("reduce.window.inside", label=self._label or "the sample", k=len(self._pix)))
         else:
             self._spectrum = em.spectrum(DETS)
-            self.status.setText(f"{sd.name}: all {sd.n_energies} energies, {sd.n_pix} points"
+            self.status.setText(say("reduce.window.stack", name=sd.name, e=sd.n_energies, n=sd.n_pix)
                                 + (f" · {em.notes[0]}" if em.notes else ""))
         self._draw()
 
-    def set_region(self, pix) -> None:
-        """The current region's members on the stack (for 'inside the region')."""
+    def set_note(self, text: str) -> None:
+        """The Easy inverse-yield note ('' hides it)."""
+        self._note = text or ""
+        self._paint_note()
+
+    def _paint_note(self) -> None:
+        text = getattr(self, "_note", "")
+        self.note.set_markup(text)
+        self.note.setVisible(bool(text) and not is_advanced())
+
+    def set_region(self, pix, label: str = "") -> None:
+        """The current region's members on the stack (for 'inside the region'), and the sample's name."""
         self._pix = None if pix is None else np.asarray(pix, int)
-        if self.source.currentData() == "region" and self._sd is not None:
+        self._label = label or ""
+        if (self.effective_source() == "region" or not is_advanced()) and self._sd is not None:
             em = xw.cached_stack_emission(self._sd)
             if em is not None:
                 self._show_emission(em, self._sd)

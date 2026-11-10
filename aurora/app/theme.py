@@ -667,11 +667,14 @@ QWidget#rail QToolButton#railbtn:focus {{ border: 2px solid {t['chrome_text']}; 
 QWidget#rail QToolButton#railbtn:checked:focus {{ border: 2px solid {t['on_accent']}; }}
 QFrame#card {{ background: {t['card']}; border: 1px solid {t['line']}; border-radius: 12px; }}
 QLabel#cardtitle {{ font-weight: 600; }}
-QToolButton#cardhelp {{ color: {t['muted']}; background: transparent; border: 1px solid {t['line']}; border-radius: 10px;
+QToolButton#cardhelp, QToolButton#termhelp {{ color: {t['muted']}; background: transparent; border: 1px solid {t['line']}; border-radius: 10px;
     padding: 0px 6px; font-size: {px_(12)}; font-weight: 600; }}
-QToolButton#cardhelp:hover {{ color: {t['ink']}; border-color: {t['action']}; }}
-QToolButton#cardhelp:focus {{ border: 2px solid {t['focus']}; padding: 0px 5px; }}
+QToolButton#cardhelp:hover, QToolButton#termhelp:hover {{ color: {t['ink']}; border-color: {t['action']}; }}
+QToolButton#cardhelp:focus, QToolButton#termhelp:focus {{ border: 2px solid {t['focus']}; padding: 0px 5px; }}
 QFrame#emptystate {{ background: {t['card']}; border: 1px solid {t['edge']}; border-radius: 12px; }}
+QFrame#banner {{ background: {t['warn_bg']}; border-bottom: 1px solid {t['line']}; }}
+QFrame#banner QLabel {{ color: {t['warn_fg']}; }}
+QFrame#guidestrip {{ background: {t['card']}; border: 1px solid {t['line']}; border-radius: 10px; }}
 QFrame#emptystate QLabel#emptytext {{ color: {t['ink']}; font-size: {px_(14)}; }}
 QFrame#taskbar QLabel {{ color: {t['muted']}; }}
 QLabel#h1 {{ font-size: {px_(18)}; font-weight: 600; }}

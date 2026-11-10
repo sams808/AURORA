@@ -429,6 +429,83 @@ def _n(n: int, word: str, many: str | None = None) -> str:
     return f"{n} {word if n == 1 else (many or word + 's')}"
 
 
+class Msg(str):
+    """A Check message: the plain sentence (both modes), and where its flag came from (`source`: 'sgm_report',
+    'AURORA check', a signal note), which Advanced mode appends. str(msg) is the sentence alone."""
+    source: str = ""
+
+    def __new__(cls, text: str, source: str = ""):
+        m = super().__new__(cls, text)
+        m.source = source or ""
+        return m
+
+    def full(self) -> str:
+        return f"{self} ({self.source})" if self.source else str(self)
+
+
+def full_text(m) -> str:
+    """The message with its source in parentheses (Advanced mode, files)."""
+    return m.full() if isinstance(m, Msg) else str(m)
+
+
+# The message templates of check_zone, in plain words with the expert term in parentheses (one text for both modes)
+MSG_NO_PIXEL = "the outline holds no pixel of this scan: draw it over the scan's measured area"
+MSG_FEW = "only {n} inside the outline: the spectrum will be noisy"
+MSG_PIXELS = "{n} inside the outline"
+MSG_NO_DET_DATA = "this stack has no detector counts for the {line} window"
+MSG_DET_NAN = "{det} has no valid counts: its files may be missing"
+MSG_DET_ZERO = "{det} counts nothing in the window ({window}): check the window in step 2 of Reduce"
+MSG_NO_DET = "no detector left in the sum: there is no fluorescence spectrum (the electron yield, TEY, is still made)"
+MSG_MISSING = "{n} missing (their maps were not recorded)"
+MSG_I0_ZERO = "the beam intensity (I0) is zero or missing at {n}"
+MSG_I0_VARIES = ("the beam intensity (I0) changes by a factor {f:.1f} during the scan: look at the view 'beam intensity "
+                 "(I0) and electron yield (TEY)'")
+MSG_TEY_NAN = "the electron yield (TEY) has no valid values"
+MSG_NO_BAD = "no bad energies"
+MSG_MANY_BAD = "{p:.0f} % of the energies are bad ({nb} of {nE}{low})"
+MSG_SOME_BAD = "{nb} of {nE} energies repaired (spikes replaced by the value of their neighbours)"
+MSG_SOME_LOW = "{nb} of {nE} energies bad ({nlow} with the beam intensity below {frac:.0%} of its median, left out)"
+MSG_LOW_PART = "; {nlow} with the beam intensity below {frac:.0%} of its median"
+MSG_SAT_IN_SUM = "{det} saturated (too many X-rays) and still in the sum: {its} fluorescence is not usable"
+MSG_SAT_OUT = "{det} saturated (too many X-rays): left out of the sum"
+MSG_HIGH = ("{det} counts very fast: it may miss counts (dead time); compare its shape with the electron yield (TEY)")
+MSG_I0_GOOD = "this scan's beam reading (I0) cannot be trusted: the average beam of the good scans is used instead"
+MSG_I0_BAD = ("this scan's beam reading (I0) cannot be trusted, so spectra divided by it are not meaningful. In Advanced "
+              "mode, choose the good scans in Check (I0 of the holder's scans).")
+MSG_IPFY = ("inverse yield (IPFY): the spectrum is the beam intensity ÷ the {line} counts; the detector curves dip at the "
+            "edge while the spectrum rises")
+MSG_IPFY_OTHER = ("inverse yield (IPFY): the spectrum is computed from the {line} counts and the beam intensity (an "
+                  "earlier form, named in Advanced mode); the detector curves dip at the edge while the spectrum rises")
+MSG_IPFY_LEFT = "inverse yield (IPFY): {rest}"
+NOTE_PREFIXES = ("inverse yield",)            # ok messages that head a row (Check's Messages column)
+TEMPLATES = (MSG_NO_PIXEL, MSG_FEW, MSG_PIXELS, MSG_NO_DET_DATA, MSG_DET_NAN, MSG_DET_ZERO, MSG_NO_DET, MSG_MISSING,
+             MSG_I0_ZERO, MSG_I0_VARIES, MSG_TEY_NAN, MSG_NO_BAD, MSG_MANY_BAD, MSG_SOME_BAD, MSG_SOME_LOW,
+             MSG_LOW_PART, MSG_SAT_IN_SUM, MSG_SAT_OUT, MSG_HIGH, MSG_I0_GOOD, MSG_I0_BAD, MSG_IPFY, MSG_IPFY_OTHER,
+             MSG_IPFY_LEFT)
+
+
+def det_phrase(dets) -> str:
+    """('sdd3',) -> 'detector 3 (SDD3)'; ('sdd1', 'sdd3') -> 'detectors 1 and 3 (SDD1, SDD3)'."""
+    ks = sorted({int(str(d)[3:]) for d in dets if str(d).lower().startswith("sdd") and str(d)[3:].isdigit()})
+    if not ks:
+        return "a detector"
+    if len(ks) == 1:
+        return f"detector {ks[0]} (SDD{ks[0]})"
+    nums = ", ".join(str(k) for k in ks[:-1]) + f" and {ks[-1]}"
+    return f"detectors {nums} ({', '.join(f'SDD{k}' for k in ks)})"
+
+
+def headline(messages) -> str:
+    """The row text of Check's Messages column: the first bad message, else the first check message, else the first
+    ok message that starts with one of NOTE_PREFIXES, else 'no problem found'."""
+    for level in ("bad", "warn"):
+        m = next((m for lv, m in messages or [] if lv == level), None)
+        if m is not None:
+            return str(m)
+    m = next((m for lv, m in messages or [] if lv == "ok" and str(m).startswith(NOTE_PREFIXES)), None)
+    return str(m) if m is not None else "no problem found"
+
+
 def worst(messages) -> str:
     """'bad', 'warn' or 'ok': the worst level of a message list."""
     levels = {lv for lv, _ in messages or []}
@@ -436,93 +513,102 @@ def worst(messages) -> str:
 
 
 def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | None = None) -> list[tuple[str, str]]:
-    """John Bussey's `check_reduced` for one zone x scan, on AURORA's traces: [(level, message)], level ok / warn / bad.
+    """John Bussey's `check_reduced` for one zone x scan, on AURORA's traces: [(level, Msg)], level ok / warn / bad.
 
-    Ported checks: the region's points (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values or a
+    Ported checks: the outline's pixels (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values or a
     signal zero everywhere (bad), missing energies, I0 zero or missing, I0 varying by more than I0_VARIES_FACTOR, TEY
     without finite values, and the fraction of energies flagged bad (spikes plus masked energies, BAD_POINT_FRACTION).
-    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source) and the de-spike notes.
-    `stack` (a StackData) or `n_total` gives the stack's pixel count for 'N of M points'."""
+    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source on the Msg), the
+    inverse-yield note and the de-spike notes. `stack` (a StackData) or `n_total` gives the stack's pixel count."""
     if n_total is None and stack is not None:
         n_total = getattr(stack, "n_pix", None)
     if traces is None or traces.n_pix == 0:
-        return [("bad", "region contains 0 measurement points: nothing to reduce; draw it over the scan's footprint")]
+        return [("bad", Msg(MSG_NO_PIXEL))]
     msgs: list[tuple[str, str]] = []
     st = traces.settings
     n = int(traces.n_pix)
-    of = f" of {n_total}" if n_total else ""
+    pix = f"{n} of {n_total} pixels" if n_total else _n(n, "pixel")
+    if st is not None and getattr(st, "signal", "pfy") == "ipfy":
+        from aurora.core.yields import describe
+        detail = describe(traces.line, getattr(st, "ipfy_mode", "ratio"))
+        tmpl = MSG_IPFY if getattr(st, "ipfy_mode", "ratio") == "ratio" else MSG_IPFY_OTHER
+        msgs.append(("ok", Msg(tmpl.format(line=traces.line), detail)))
     if n < FEW_POINTS:
-        msgs.append(("warn", f"only {_n(n, 'measurement point')}{of}: noisy"))
+        msgs.append(("warn", Msg(MSG_FEW.format(n=pix))))
     else:
-        msgs.append(("ok", f"region contains {n}{of} measurement points"))
+        msgs.append(("ok", Msg(MSG_PIXELS.format(n=pix))))
     E = np.asarray(traces.E, float)
     nE = len(E)
     ticked = [k for k in range(len(DETS)) if st is None or st.sdd[k]]
     if all(y is None for y in traces.det_raw):
-        msgs.append(("bad", f"no per-detector data for the line {traces.line} in this stack"))
+        msgs.append(("bad", Msg(MSG_NO_DET_DATA.format(line=traces.line))))
     else:
-        window = (lambda k: f"channels {st.roi[DETS[k]][0]}-{st.roi[DETS[k]][1] - 1}") if (st is not None and st.roi) else \
-            (lambda k: traces.line)
+        window = (lambda k: f"channels {st.roi[DETS[k]][0]} to {st.roi[DETS[k]][1] - 1}") if (st is not None and st.roi) \
+            else (lambda k: traces.line)
         for k in ticked:
             y = traces.det_raw[k]
             if y is None:
                 continue
             y = np.asarray(y, float)
             if not np.isfinite(y).any():
-                msgs.append(("bad", f"{DETS[k].upper()}: no finite values (missing files?)"))
+                msgs.append(("bad", Msg(MSG_DET_NAN.format(det=det_phrase([DETS[k]])))))
             elif np.nanmax(y) <= 0:
-                msgs.append(("bad", f"{DETS[k].upper()}: signal is zero everywhere - check its window ({window(k)})"))
+                msgs.append(("bad", Msg(MSG_DET_ZERO.format(det=det_phrase([DETS[k]]), window=window(k)))))
         if not ticked:
-            msgs.append(("warn", "no detector is ticked: no fluorescence trace"))
+            msgs.append(("warn", Msg(MSG_NO_DET)))
     sum_ok = np.ones(nE, bool)
     for k in ticked:
         if traces.det_raw[k] is not None:
             sum_ok &= np.isfinite(np.asarray(traces.det_raw[k], float))
     missing = ~sum_ok if ticked and any(traces.det_raw[k] is not None for k in ticked) else np.zeros(nE, bool)
     if missing.any() and not missing.all():
-        msgs.append(("warn", f"{_n(int(missing.sum()), 'missing energy point')}"))
+        msgs.append(("warn", Msg(MSG_MISSING.format(n=_n(int(missing.sum()), "energy", "energies")))))
     i0 = np.asarray(traces.i0_raw, float)
     zero = (~np.isfinite(i0) | (i0 <= 0)) & ~missing
     if zero.any():
-        msgs.append(("warn", f"I0 is zero or missing at {_n(int(zero.sum()), 'energy', 'energies')}"))
+        msgs.append(("warn", Msg(MSG_I0_ZERO.format(n=_n(int(zero.sum()), "energy", "energies")))))
     pos = i0[np.isfinite(i0) & (i0 > 0)]
     if pos.size and pos.max() / max(pos.min(), 1e-30) > I0_VARIES_FACTOR:
-        msgs.append(("warn", f"I0 varies by a factor {pos.max() / pos.min():.1f} over the scan"))
+        msgs.append(("warn", Msg(MSG_I0_VARIES.format(f=pos.max() / pos.min()))))
     if (st is None or st.tey) and not np.isfinite(np.asarray(traces.tey_raw, float)).any():
-        msgs.append(("warn", "TEY has no finite values"))
+        msgs.append(("warn", Msg(MSG_TEY_NAN)))
     bad = traces.bad_mask()
     nb = int(bad.sum())
     low = traces.masked.get("i0_low")
     nlow = int(np.asarray(low, bool).sum()) if low is not None else 0
     if nb == 0:
-        msgs.append(("ok", "no bad points"))
+        msgs.append(("ok", Msg(MSG_NO_BAD)))
     elif nb / max(nE, 1) > BAD_POINT_FRACTION:
-        msgs.append(("warn", f"{100 * nb / nE:.0f} % of the points flagged bad ({nb} of {nE}"
-                             + (f"; {nlow} with I0 below {I0_LOW_FRAC:.0%} of its median" if nlow else "") + ")"))
+        part = MSG_LOW_PART.format(nlow=nlow, frac=I0_LOW_FRAC) if nlow else ""
+        msgs.append(("warn", Msg(MSG_MANY_BAD.format(p=100 * nb / nE, nb=nb, nE=nE, low=part))))
+    elif nlow:
+        msgs.append(("ok", Msg(MSG_SOME_LOW.format(nb=nb, nE=nE, nlow=nlow, frac=I0_LOW_FRAC))))
     else:
-        msgs.append(("ok", f"{_n(nb, 'bad point')} of {nE}"
-                           + (f" ({nlow} with I0 below {I0_LOW_FRAC:.0%} of its median, left out)" if nlow else " interpolated")))
+        msgs.append(("ok", Msg(MSG_SOME_BAD.format(nb=nb, nE=nE))))
     for note in traces.notes:
         if "near the edge" in note:
-            msgs.append(("warn", note))
-        elif note.startswith("signal: IPFY") or note.startswith("IPFY:"):
-            msgs.append(("ok", note))
+            msgs.append(("warn", Msg(note)))
+        elif note.startswith("IPFY:"):
+            msgs.append(("ok", Msg(MSG_IPFY_LEFT.format(rest=note[len("IPFY:"):].strip()))))
     in_sum = {DETS[k] for k in ticked}
     for f in flags or []:
         src = getattr(f, "source", "")
+        dets = tuple(getattr(f, "dets", ()) or ())
         if f.kind == "sdd_saturated":
-            if set(f.dets) & in_sum:
-                msgs.append(("warn", f"{f.text} ({src}) and in the fluorescence sum: its fluorescence is not usable; "
-                                     "TEY is"))
+            if set(dets) & in_sum:
+                still = [d for d in dets if d in in_sum]
+                msgs.append(("warn", Msg(MSG_SAT_IN_SUM.format(det=det_phrase(still),
+                                                               its="its" if len(still) == 1 else "their"), src)))
             else:
-                msgs.append(("ok", f"{f.text} ({src}): left out of the sum"))
+                # saturated and out of the sum: fine, unless nothing is left in the sum (the 'no detector' headline)
+                msgs.append(("warn" if not in_sum else "ok", Msg(MSG_SAT_OUT.format(det=det_phrase(dets)), src)))
         elif f.kind == "high_rate":
-            msgs.append(("warn", f"{f.text} ({src}): dead time or pile-up likely, compare with TEY"))
+            msgs.append(("warn", Msg(MSG_HIGH.format(det=det_phrase(dets)), src)))
         elif f.kind == "i0_invalid":
             if st is not None and st.i0_source == "good":
-                msgs.append(("ok", f"I0 invalid ({src}): divided by the good-I0 mean"))
+                msgs.append(("ok", Msg(MSG_I0_GOOD, src)))
             else:
-                msgs.append(("warn", f"I0 invalid ({src}): the / I0 traces are not meaningful; use the good-I0 mean"))
+                msgs.append(("warn", Msg(MSG_I0_BAD, src)))
     return msgs
 
 

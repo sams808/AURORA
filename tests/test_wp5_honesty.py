@@ -36,7 +36,7 @@ def test_status_words():
 def test_two_peaks_on_the_demo_naf_trace(qapp, demo):
     from aurora.app.theme import TOKENS
     fit = demo.fit
-    fit.pk_trace.setCurrentText("NaF [sdd-scaled]")
+    fit.select_trace("NaF", "sdd-scaled")
     fit.pk_n.setValue(2)
     fit.pk_centres.setText("")
     fit.run_peaks()
@@ -64,7 +64,7 @@ def test_a_fit_that_did_not_converge_is_not_drawn(qapp, demo, monkeypatch):
         return replace(real(*a, **k), converged=False, message="the optimiser stopped after 20000 evaluations")
     monkeypatch.setattr(core_fit, "peak_decomposition", failing)
     fit = demo.fit
-    fit.pk_trace.setCurrentText("NaF [sdd-scaled]")
+    fit.select_trace("NaF", "sdd-scaled")
     fit.pk_n.setValue(1)
     fit.pk_centres.setText("692")
     fit.run_peaks()
@@ -109,7 +109,7 @@ def test_itfa_refuses_when_the_ticked_rows_changed(qapp, demo, excepthook_collec
     fit = demo.fit
     assert fit.mcr_result is not None and fit.mcr_result.D is not None and fit.mcr_result.labels
     assert fit.mcr_chip.text() in ("converged",) or fit.mcr_chip.text().startswith("not converged")
-    fit.itfa_sample.setCurrentText(fit.mcr_result.labels[0])
+    fit.select_key(fit.itfa_sample, fit.mcr_result.labels[0])
     fit.itfa_pct.setText("100, 0")
     fit._add_target()
     lib = demo.library
@@ -124,7 +124,7 @@ def test_itfa_refuses_when_the_ticked_rows_changed(qapp, demo, excepthook_collec
     fit.run_mcr()
     assert demo.jobs.wait_idle(30000)
     fit.targets.clear()
-    fit.itfa_sample.setCurrentText(fit.mcr_result.labels[0])
+    fit.select_key(fit.itfa_sample, fit.mcr_result.labels[0])
     fit._add_target()
     assert fit.run_itfa() is not None and demo.jobs.wait_idle(30000)
     assert fit.itfa_result is not None and fit.itfa_result.labels == fit.mcr_result.labels

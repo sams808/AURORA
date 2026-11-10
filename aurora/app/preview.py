@@ -9,6 +9,13 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QVBoxLayout, QWidget
 from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
 from aurora.core.spectra import ZoneTraces
 
+TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
+          "ipfy": "Inverse yield (IPFY) of the sample", "tey": "Electron yield (TEY): the surface",
+          "i0": "Beam intensity (I0) during the scan"}
+SUM_NAME = "sum of the detectors in use"
+SPIKES_NAME = "● repaired points (spikes)"
+BANDS_NOTE = "Grey bands: the energy ranges before and after the edge used to scale the spectrum."
+
 
 class PreviewPlot(QWidget):
     def __init__(self, parent=None):
@@ -41,18 +48,22 @@ class PreviewPlot(QWidget):
         self.low = self.gl.addPlot(row=2, col=0)
         self.mid.setXLink(self.top)
         self.low.setXLink(self.top)
-        self.top.setLabel("left", "fluorescence")
-        self.mid.setLabel("left", "TEY")
-        self.low.setLabel("left", "I0 (zone sum)")
+        for p_ in (self.top, self.mid, self.low):
+            p_.setLabel("left", "arbitrary units")
         self.low.setLabel("bottom", "energy (eV)")
         for p in (self.top, self.mid, self.low):
             p.showGrid(x=True, y=True, alpha=0.15)
             p.vb.disableAutoRange()
-        self.top.addLegend(offset=(10, 10))
+        self.top.addLegend(offset=(-10, -10))         # bottom right: never over the rise at the edge
         self.gl.ci.layout.setRowStretchFactor(0, 4)
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
+        from aurora.app.widgets import ElidedLabel as _EL
+        self.bands_note = _EL(BANDS_NOTE, Qt.ElideRight)   # what the grey bands are (shown when they are drawn)
+        self.bands_note.setObjectName("muted")
+        self.bands_note.hide()
+        lay.addWidget(self.bands_note)
         style_plot(self.gl)
         on_theme_changed(self, lambda _s: self.redraw())
         self._traces: list[tuple[str, ZoneTraces, dict]] = []
@@ -80,6 +91,9 @@ class PreviewPlot(QWidget):
         from aurora.app.widgets import set_plot_hint
         if not self._traces:
             self.top.setTitle("")
+            self.mid.setTitle("")
+            self.low.setTitle("")
+            self.bands_note.hide()
             set_plot_hint(self.top, "select a sample (zone) and a scan to see its traces")
             for p in (self.mid, self.low):
                 set_plot_hint(p, " ")                 # no bare 0..1 axes on an empty preview
@@ -88,7 +102,13 @@ class PreviewPlot(QWidget):
             set_plot_hint(p, None)
         multi = len(self._traces) > 1
         t0 = self._traces[0][1]
-        self.top.setTitle("fluorescence" + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))
+        ipfy = bool(t0.settings and getattr(t0.settings, "signal", "pfy") == "ipfy")
+        self.top.setTitle(TITLES["ipfy" if ipfy else "pfy"]
+                          + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))
+        self.mid.setTitle(TITLES["tey"])
+        self.low.setTitle(TITLES["i0"])
+        self.bands_note.setVisible(bool(t0.pre))
+        self._spike_named = False
         if t0.pre:
             for rng in (t0.pre, t0.post):
                 reg = pg.LinearRegionItem(values=list(rng), movable=False, brush=pg.mkBrush(with_alpha(pc("region"), 0.10)),
@@ -107,12 +127,12 @@ class PreviewPlot(QWidget):
                         continue
                     on = t.settings.sdd[i] if t.settings else True
                     pen = pg.mkPen(col or curve(i), width=1 if on else 0.8, style=dash(i))
-                    item = self.top.plot(t.E, y, pen=pen, connect="finite", name=(f"SDD{i + 1}" + ("" if on else " (off)")) if ti == 0 else None)
+                    item = self.top.plot(t.E, y, pen=pen, connect="finite", name=(f"SDD{i + 1}" + ("" if on else " (left out)")) if ti == 0 else None)
                     item.setOpacity(1.0 if on else 0.35)
                     self._spikes(self.top, t.E, y, t.spikes.get(f"sdd{i + 1}"))
             if self.show_sum.isChecked() and t.sum is not None:
                 self.top.plot(t.E, t.sum, pen=pg.mkPen(col or pc("sum"), width=2.2), connect="finite",
-                              name=(name + " " if multi else "") + "sum of ticked SDDs")
+                              name=(name + " " if multi else "") + SUM_NAME)
                 self._spikes(self.top, t.E, t.sum, t.spikes.get("sum"))
             if self.show_tey.isChecked():
                 self.mid.plot(t.E, t.tey, pen=pg.mkPen(col or pc("tey"), width=1.6), connect="finite")
@@ -159,7 +179,11 @@ class PreviewPlot(QWidget):
         if idx and self.show_spikes.isChecked():
             idx = [i for i in idx if np.isfinite(y[i])]
             if idx:
-                plot.addItem(pg.ScatterPlotItem(E[idx], y[idx], size=6, brush=pg.mkBrush(pc("spike")), pen=None), ignoreBounds=True)
+                sc = pg.ScatterPlotItem(E[idx], y[idx], size=6, brush=pg.mkBrush(pc("spike")), pen=None)
+                plot.addItem(sc, ignoreBounds=True)
+                if plot is self.top and not getattr(self, "_spike_named", False) and self.top.legend is not None:
+                    self.top.legend.addItem(sc, SPIKES_NAME)      # the red dots say what they are
+                    self._spike_named = True
 
     def _moved(self, pos) -> None:
         if not self._traces or not self.top.sceneBoundingRect().contains(pos):
