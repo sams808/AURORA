@@ -435,3 +435,36 @@ def test_real_windows_reproduce_the_sgm_report_bins(real_project):
     ok = np.isfinite(ref).all(axis=1)
     assert ok.sum() >= sd.n_energies - 1
     np.testing.assert_array_equal(s[ok], ref[ok])
+
+
+def test_without_roi_bins_easy_offers_johns_window_and_says_what_total_xrf_is(qapp, fake_project):
+    """A folder without config/roi_bins.json (John Bussey's own layout) reduces to the total XRF only. Step 2 then says
+    that the total XRF holds every emission line, not the PFY of the edge's line, and offers John Bussey's default
+    window (60:83 on every detector, F Kα at 676.8 eV is channel 67.7 at the nominal 10 eV / channel)."""
+    from wp3_helpers import close, open_window, pump
+    assert xw.john_default_windows(("F", "K")) == ("F Kα", {d: [60, 83] for d in DETS})
+    assert xw.john_default_windows(("O", "K")) is None                   # O Kα, 524.9 eV: channel 52, outside 60:83
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
+        assert items == ["total XRF (fixed bins)", "John Bussey's 60:83 (F Kα)", "custom"]
+        assert wc.preset.currentText() == "total XRF (fixed bins)"
+        assert "total XRF holds every emission line, not only the F Kα of the edge" in wc.ev_label.text()
+        assert "John Bussey's GUI started with 60:83" in wc.ev_label.text()
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        wc.preset.setCurrentIndex(1)
+        pump(qapp)
+        st = ses.zone().settings[sid]
+        assert st.line == "F Kα" and st.roi == {d: [60, 83] for d in DETS}
+        assert wc.preset.currentText() == "John Bussey's 60:83 (F Kα)" and "every emission line" not in wc.ev_label.text()
+        # the preset combo takes the card's width (the label keeps its own), so its text is not cut at 1500 x 940
+        win.resize(1500, 940)
+        pump(qapp)
+        plab = wc.preset.parentWidget().layout().itemAt(0).widget()
+        assert plab.text() == "preset" and plab.width() <= plab.sizeHint().width() + 2
+        assert wc.preset.width() >= wc.preset.fontMetrics().horizontalAdvance(wc.preset.currentText()) + 16
+    finally:
+        close(win)

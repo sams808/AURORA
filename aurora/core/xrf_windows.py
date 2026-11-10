@@ -38,6 +38,7 @@ log = logging.getLogger("aurora.xrf_windows")
 SIGMA_CH_TYPICAL = 3.5
 TOTAL_LABEL = "total XRF"
 TOTAL_BOUNDS = (5, 200)                 # aurora.core.stack.TOTAL_BOUNDS (channels 5:200)
+JOHN_DEFAULT = (60, 83)                 # John Bussey's GUI, step 2: every detector 60:83 (channels 60 to 82)
 WINDOW_LABEL = "XRF window"             # the line name of a window map (StackData view)
 EMISSION_FILE = "_emission_cache.npz"
 WINDOWS_DIR = "_xrf_windows"
@@ -174,6 +175,21 @@ def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
     windows = {d: [int(a), int(b)] for d in DETS for a, b in [calibration.bounds(d, ev - half, ev + half)]}
     return EdgeLine(label=label, line_ev=ev, windows=normalise_windows(windows), sigma_ch=sig, n_sigma=n_sigma,
                     sigma_source=src)
+
+
+def john_default_windows(edge) -> tuple[str, dict[str, list[int]]] | None:
+    """John Bussey's default step-2 window, JOHN_DEFAULT on every detector, and the resonant line of the edge it holds
+    at the nominal 10 eV per channel (F K: F Kα, 676.8 eV, channel 67.7): (line label, windows). None when the window
+    does not hold that line (O Kα, 524.9 eV, is channel 52)."""
+    if edge is None:
+        return None
+    from aurora.core.constants import UNCALIBRATED_EV_PER_CH
+    from aurora.core.lines import resonant_line
+    label = resonant_line(*edge)
+    ev = emission_line_ev(label)
+    if ev is None or not JOHN_DEFAULT[0] * UNCALIBRATED_EV_PER_CH <= ev < JOHN_DEFAULT[1] * UNCALIBRATED_EV_PER_CH:
+        return None
+    return label, {d: list(JOHN_DEFAULT) for d in DETS}
 
 
 def channel_ev(calibration, det: str, ch: float) -> float:

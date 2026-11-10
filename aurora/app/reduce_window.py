@@ -1,7 +1,8 @@
 """Reduce step 2, the XRF window (John Bussey's step 2): the emission spectrum of the stack, the survey or the region
 (log y), one draggable window per SDD in the series colours with their dashes, lo / hi spin boxes in channels with
 the eV equivalent, and the presets (every fixed line of roi_bins.json, the line of the edge when a calibration
-exists, custom).
+exists, John Bussey's default 60:83 when neither gives the edge's line, custom). The total XRF is said to hold every
+emission line, so that it is not taken for the PFY of the edge's line.
 
 The card shows a choice {'line': label, 'roi': windows or None}: a fixed line keeps roi None (the reduced stack's own
 bins); the line of the edge and custom windows set ScanSettings.roi. Linked edits (Easy mode, where one lo / hi pair
@@ -15,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSizePolicy, QSpinBox, QWidget
 
 from aurora.app import jobs
 from aurora.app.help_text import explain_all, labelled
@@ -48,11 +49,15 @@ class XrfWindowCard(Card):
         self._updating = False
         self._spectrum = None                # (4, 256) shown, or None
         self._edge_line = None               # xw.EdgeLine when offered
+        self._john = None                    # (line, windows): John Bussey's default window when offered
         # presets row
         self.preset = QComboBox()
         self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.preset.setMinimumContentsLength(10)
-        self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset))
+        self.preset.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)     # the label keeps its width only
+        plab = labelled("preset", self.preset, "reduce.window.preset")
+        plab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.body.addWidget(pair(plab, self.preset))
         # the spectrum
         self.plot = make_plot(x="channel", y="counts")
         self.plot.setMinimumHeight(100)
@@ -140,6 +145,12 @@ class XrfWindowCard(Card):
             if self._edge_line is not None:
                 self.preset.addItem(f"line of the edge: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV",
                                     ("edge", self._edge_line.label))
+            # no fixed bins nor calibration for the edge's line (John Bussey's own folders): his default window
+            john = xw.john_default_windows(getattr(sd, "edge", None)) if sd is not None else None
+            self._john = john if (john is not None and john[0] not in labs and self._edge_line is None) else None
+            if self._john is not None:
+                lo, hi = xw.JOHN_DEFAULT
+                self.preset.addItem(f"John Bussey's {lo}:{hi} ({self._john[0]})", ("john", self._john[0]))
             self.preset.addItem(CUSTOM, ("custom", ""))
         finally:
             self._updating = False
@@ -186,6 +197,8 @@ class XrfWindowCard(Card):
                 return i                                # a roi_bins line the stack was not reduced with
             if self._custom and kind == "edge" and self._edge_line is not None and xw.same(self._windows, self._edge_line.windows):
                 return i
+            if self._custom and kind == "john" and self._john is not None and xw.same(self._windows, self._john[1]):
+                return i
         return max(0, self.preset.count() - 1)          # custom
 
     def choice(self) -> dict:
@@ -214,6 +227,9 @@ class XrfWindowCard(Card):
         elif kind == "edge" and self._edge_line is not None:
             self._line, self._custom = self._edge_line.label, True
             self._windows = dict(self._edge_line.windows)
+        elif kind == "john" and self._john is not None:
+            self._line, self._custom = self._john[0], True
+            self._windows = xw.normalise_windows(self._john[1])
         else:
             self._custom = True
         self._updating = True
@@ -344,6 +360,11 @@ class XrfWindowCard(Card):
         if self._linked() and not same:                 # one lo / hi pair, four different windows: name them all
             others = " · " + ", ".join(f"{DET_LABELS[j]} {self._windows[d][0]}:{self._windows[d][1]}"
                                        for j, d in enumerate(DETS) if j != k) + " move with it"
+        if xw.same(self._windows, xw.bins_windows(None, xw.TOTAL_LABEL)) and getattr(self._sd, "edge", None):
+            from aurora.core.lines import resonant_line
+            others += (f" · total XRF holds every emission line, not only the {resonant_line(*self._sd.edge)} of the edge"
+                       + (f" (John Bussey's GUI started with {xw.JOHN_DEFAULT[0]}:{xw.JOHN_DEFAULT[1]})"
+                          if self._john is not None else ""))
         self.ev_label.setText(f"{who}: channels {lo}:{hi} = {a:.0f}–{b:.0f} eV"
                               + (" (10 eV/ch nominal)" if nominal else " (calibrated)") + others)
 
