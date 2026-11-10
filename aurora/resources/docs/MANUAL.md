@@ -87,6 +87,9 @@ size** is **Normal**, **Large** or **Larger** (13, 15 or 17 px); both apply at o
 in Settings. The map area, the rail and the top bar stay navy in both schemes, so colour maps look the same in both. A
 curve keeps its colour when the scheme changes, and every curve also has its own dash, so colour is never the only
 cue. Status cells show an icon with a word (*✓ ok*, *! check*, *✗ bad*). A focused control shows a 2 px outline.
+Every intensity map (Survey, Reduce, Maps) has its colour scale beside it, named by its quantity (*counts / I0*,
+*log10(counts / I0 + 1)*). Footprint and zone outlines sit on a dark edge and a light rim of their own hue, so
+they read on every tone of the colour map.
 
 *Long tasks* (reading a project, loading stacks, reading XRF windows, running the checks, fits, loading a
 hypercube, clustering, exports, building the report) run in the background behind a progress strip: the bar, the

@@ -252,7 +252,9 @@ class MapView(pg.GraphicsLayoutWidget):
         self.plot.setAspectLocked(True)
         self.plot.setLabel("bottom", "x (mm)")
         self.plot.setLabel("left", "y (mm)")
-        style_plot(self, "map")                                  # navy in both schemes, light axes
+        self.bar = colour_bar()                                  # the colour scale of the map, beside it
+        self.addItem(self.bar, row=0, col=1)
+        style_plot(self, "map")                                  # navy in both schemes, light axes (the bar's too)
         for ax in ("bottom", "left"):
             self.plot.getAxis(ax).enableAutoSIPrefix(False)      # never "x (mm) (x0.001)"
         self.plot.showGrid(False, False)
@@ -369,6 +371,7 @@ class MapView(pg.GraphicsLayoutWidget):
             self._cmap = pg.colormap.get(name)
         except Exception:                                        # an unknown name in the settings: keep viridis
             self._cmap = pg.colormap.get("viridis")
+        self.bar.setColorMap(self._cmap)
         if not self._fixed_lut:
             self.image.setLookupTable(self._cmap.getLookupTable(nPts=256))
 
@@ -381,9 +384,22 @@ class MapView(pg.GraphicsLayoutWidget):
         return getattr(self._cmap, "name", "") or ""
 
     def set_lookup(self, lut) -> None:
-        """A fixed lookup table (categorical clusters) or None (RGB images): the colour-map setting no longer applies."""
+        """A fixed lookup table (categorical clusters) or None (RGB images): the colour-map setting no longer applies,
+        and the map has no colour scale (the cluster list is its legend)."""
         self._fixed_lut = True
         self.image.setLookupTable(lut)
+        if self.bar in self.ci.items:
+            self.ci.removeItem(self.bar)
+
+    def set_scale_label(self, text: str) -> None:
+        """The quantity of the map on its colour scale ('counts / I0', see scale_label)."""
+        ax = self.bar.getAxis("left")
+        if ax.labelText != text:                     # every slider step draws the map: no relayout for the same text
+            ax.setLabel(text)
+
+    def scale_levels(self) -> tuple[float, float] | None:
+        """The values at the two ends of the colour scale (None for a map without one)."""
+        return tuple(float(v) for v in self.bar.levels()) if self.bar in self.ci.items else None
 
     def set_grid(self, g: Grid | None) -> None:
         if g is None or g.img.size == 0:
@@ -395,6 +411,7 @@ class MapView(pg.GraphicsLayoutWidget):
         if hi <= lo:
             hi = lo + 1.0
         self.image.setImage(img, levels=(lo, hi), autoLevels=False)
+        self.bar.setLevels((lo, hi))
         dx = g.dx if np.isfinite(g.dx) else 0.1
         dy = g.dy if np.isfinite(g.dy) else dx
         self._data_rect = QRectF(float(g.xs[0]) - dx / 2, float(g.ys[0]) - dy / 2, len(g.xs) * dx, len(g.ys) * dy)
@@ -551,3 +568,17 @@ def _union(rects, polys, squares) -> QPainterPath:
         hx, hy = s[2] * PAINT_TOL, s[3] * PAINT_TOL
         path.addRect(QRectF(s[0] - hx, s[1] - hy, 2 * hx, 2 * hy))
     return path.simplified() if path.elementCount() else path
+
+
+def colour_bar(levels=(0.0, 1.0), cmap=None) -> pg.ColorBarItem:
+    """A slim, fixed colour scale for an intensity map (its levels follow the image; the user cannot drag them)."""
+    bar = pg.ColorBarItem(values=tuple(float(v) for v in levels), width=12, colorMap=cmap, interactive=False)
+    bar.getAxis("right").enableAutoSIPrefix(False)
+    return bar
+
+
+def scale_label(what: str = "counts", per_i0: bool = False, log: bool = False, inverted: bool = False) -> str:
+    """The quantity an intensity map shows, for its colour scale: 'counts', 'counts / I0', 'log10(counts / I0 + 1)'."""
+    q = f"{what} / I0" if per_i0 else what
+    q = f"log10({q} + 1)" if log else q
+    return q + (", inverted" if inverted else "")

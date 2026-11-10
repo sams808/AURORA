@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleS
 
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import MapView
+from aurora.app.mapview import MapView, colour_bar, scale_label
 from aurora.app.session import Session
 from aurora.app.theme import (MAP_OVERLAY, TOKENS, categorical, composite, curve, dash, make_plot, on_theme_changed,
                               pc, restyle_plot, role_pen, set_tone, style_plot, swatch_icon, with_alpha)
@@ -123,6 +123,7 @@ class MapsPerspective(QWidget):
         self._dirty = False                          # a zone changed while Maps was hidden
         self._flagged: dict[int, str] = {}           # SDD index -> 'flagged saturated (source)'
         self._load_note = ""
+        self._el_label = ""                          # the quantity of the elemental maps (their colour scales)
         self._i0_low_text = ""                       # the low-I0 energies of the cube, for the line under the map
         self.stats = {"redraws": 0, "maps": 0, "spectra": 0, "xanes": 0}
         self._map_cache = _LRU(CACHE_ENTRIES)
@@ -790,6 +791,7 @@ class MapsPerspective(QWidget):
             with np.errstate(all="ignore"):
                 g = replace(g, img=np.log10(np.maximum(g.img, 0) + 1.0))
         self.map.set_grid(g)
+        self.map.set_scale_label(scale_label(per_i0=self.per_i0.isChecked(), log=self.log.isChecked()))
         rk = (self._gen, self._roi_k)
         if rk != self._roi_drawn:                    # the ROI outline changes only with the ROI
             self.map.clear_overlays()
@@ -918,6 +920,7 @@ class MapsPerspective(QWidget):
         if not dets:
             self.status.setText(NO_SDD); return
         ei, per_i0, gen = self._ei(), self.per_i0.isChecked(), self._gen
+        self._el_label = scale_label(per_i0=per_i0)
 
         def work(cb):
             out = []
@@ -943,12 +946,17 @@ class MapsPerspective(QWidget):
         except Exception:
             cmap = pg.colormap.get("viridis")
         for i, (lab, g) in enumerate(out):
-            p = self.el_layout.addPlot(row=i // 4, col=i % 4, title=lab)
+            cell = self.el_layout.addLayout(row=i // 4, col=i % 4)            # the map and its own colour scale
+            p = cell.addPlot(row=0, col=0, title=lab)
             p.setAspectLocked(True); p.hideAxis("left"); p.hideAxis("bottom")
             img = pg.ImageItem(g.img, axisOrder="row-major"); img.setLookupTable(cmap.getLookupTable(nPts=256))
             fin = np.isfinite(g.img)
+            levels = (float(np.nanmin(g.img)), float(np.nanmax(g.img)) or 1.0) if fin.any() else (0.0, 1.0)
             if fin.any():
-                img.setLevels((float(np.nanmin(g.img)), float(np.nanmax(g.img)) or 1.0))
+                img.setLevels(levels)
+            bar = colour_bar(levels, cmap)
+            bar.getAxis("left").setLabel(self._el_label)
+            cell.addItem(bar, row=0, col=1)
             img.setRect(pg.QtCore.QRectF(float(g.xs[0]) - g.dx / 2, float(g.ys[0]) - g.dy / 2, len(g.xs) * g.dx, len(g.ys) * g.dy))
             p.addItem(img)
             p.getViewBox().setRange(xRange=(float(g.xs[0]) - g.dx, float(g.xs[-1]) + g.dx), yRange=(float(g.ys[0]) - g.dy, float(g.ys[-1]) + g.dy), padding=0, disableAutoRange=True)

@@ -147,3 +147,38 @@ def test_a_zone_from_clusters_goes_only_to_the_holder_of_the_cube(qapp, tmp_path
     assert not ses.holder_zones("N6").zones and not ses.holder_zones("N5").zones
     assert "N5" in mp.status.text()
     _close(win)
+
+
+def test_every_intensity_map_has_a_colour_scale(qapp, fake_project):
+    """Survey, Reduce, Maps Explore and each elemental map show their colour scale: the image's own levels, the colour
+    map of the Settings and the quantity ('log10(counts / I0 + 1)'); the cluster and RGB maps (no colour map) have none."""
+    import pyqtgraph as pg
+    (fake_project / "config" / "roi_bins.json").write_text(json.dumps({
+        "F Kα": {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]},
+        "O Kα": {"sdd1": [46, 58], "sdd2": [46, 58], "sdd3": [46, 58], "sdd4": [46, 58]}}), encoding="utf-8")
+    win = _window(qapp, fake_project)
+    ses, sv, rd, mp = win.session, win.survey, win.reduce, win.maps
+    sid = rd.scan_list.item(0).data(0x0100)
+    ses.stack(sid); ses.touch(); ses.select_stack(sid)
+    qapp.processEvents()
+    proj = ses.project
+    mp.set_hypercube(Hypercube.load(proj, proj.find(testdata.STACK)))
+
+    def label(view):
+        return view.bar.getAxis("left").labelText
+
+    for view, text in ((sv.map, "log10(counts / I0 + 1)"), (rd.map, "counts / I0"), (mp.map, "counts / I0")):
+        assert view.scale_levels() == pytest.approx(tuple(view.image.levels)), text
+        assert label(view) == text and view.bar.colorMap().name == view.colormap_name()
+    mp.log.setChecked(True)
+    assert label(mp.map) == "log10(counts / I0 + 1)" and mp.map.scale_levels() == pytest.approx(tuple(mp.map.image.levels))
+    assert mp.cluster_map.scale_levels() is None and mp.rgb_view.scale_levels() is None
+    mp.draw_elements()
+    assert win.jobs.wait_idle(20000)
+    cells = list(mp.el_layout.ci.items)
+    assert len(cells) == 2
+    for cell in cells:
+        img = next(it for it in cell.items if isinstance(it, pg.PlotItem) and not isinstance(it, pg.ColorBarItem)).items[0]
+        bar = next(it for it in cell.items if isinstance(it, pg.ColorBarItem))
+        assert bar.levels() == pytest.approx(tuple(img.levels)) and bar.getAxis("left").labelText == "counts / I0"
+    _close(win)
