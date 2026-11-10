@@ -67,7 +67,10 @@ def test_the_os_account_name_from_the_perspective(qapp, tmp_path, monkeypatch):
     assert get("report_author") == ""
     proj = project(tmp_path)
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
-    assert win.report.author_line.text() == "Author: Test User, from the system account"
+    from aurora.app import mode
+    assert win.report.author_line.text() == ("Author: Test User, from the system account" if mode.is_advanced() else
+                                             "Author: Test User (from your computer account; change it in Settings > "
+                                             "report author)")
     res, b = _build(qapp, win)
     assert not asked and res is not None
     assert b.footers and all(" · Test User · " in f for f in b.footers)
@@ -111,7 +114,9 @@ def test_a_name_typed_in_the_prompt_is_kept(qapp, tmp_path, monkeypatch):
     res, b = _build(qapp, win)
     assert b.author == "Typed Name" and get("report_author") == "Typed Name"
     assert "/Author (Typed Name)" in _pdf_meta(res.pdf)
-    assert win.report.author_line.text() == "Author: Typed Name, from Settings"
+    from aurora.app import mode
+    assert win.report.author_line.text() == ("Author: Typed Name, from Settings" if mode.is_advanced() else
+                                             "Author: Typed Name (Settings > report author)")
     close(win)
 
 

@@ -38,6 +38,16 @@ def wait(qapp, s: float = 0.3) -> None:
         qapp.processEvents()
 
 
+def dispose(w) -> None:
+    """A parentless widget made by a test: deleted and its Python garbage collected here, on the GUI thread (left to
+    the automatic collector, a worker thread of a later test could delete the widget there)."""
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
+    w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+
+
 def close(win) -> None:
     import shiboken6
     if not shiboken6.isValid(win):                          # a module-scoped window the conftest already destroyed
@@ -258,7 +268,7 @@ def test_home_links_open_the_glossary_and_the_guide(qapp, monkeypatch):
     h.on_link(QUrl("aurora:help:USER_GUIDE.md#quick-start-for-non-specialists"))
     assert seen == [("GLOSSARY.md", glossary.term("i0").anchor), ("GLOSSARY.md", None),
                     ("USER_GUIDE.md", "quick-start-for-non-specialists")]
-    h.deleteLater()
+    dispose(h)
 
 
 def test_term_label_links(qapp, monkeypatch):
@@ -273,7 +283,7 @@ def test_term_label_links(qapp, monkeypatch):
     lab.linkActivated.emit("glossary:i0")
     assert seen == [("GLOSSARY.md", glossary.term("i0").anchor)]
     assert lab.accessibleDescription() == lab.plain_text()
-    lab.deleteLater()
+    dispose(lab)
 
 
 def test_term_buttons_and_the_help_menu(qapp, monkeypatch):
@@ -282,7 +292,7 @@ def test_term_buttons_and_the_help_menu(qapp, monkeypatch):
     b = term_button("xrf-window")
     assert b.text() == "?" and b.property("aurora_help_button") and b.accessibleName() == "What is the emission window?"
     assert b.toolTip().startswith(glossary.what_is("xrf-window"))
-    b.deleteLater()
+    dispose(b)
     for adv in (False, True):
         mode.set_advanced(adv)
         win = MainWindow()
@@ -444,7 +454,7 @@ def test_compare_easy_unscaled_rows(qapp, tmp_path):
         assert not cmp_.plot.listDataItems()
     finally:
         mode.set_advanced(False)
-        cmp_.deleteLater()
+        dispose(cmp_)
 
 
 def test_signal_words(qapp, easy_demo):

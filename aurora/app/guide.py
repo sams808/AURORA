@@ -153,9 +153,10 @@ FOLDER_PICTURE = (
 def getting_started_html(advanced: bool, tokens: dict | None = None) -> str:
     """The right panel of Home while no project is open: Getting started in Easy mode, the list of what opens in
     Advanced mode. No lab, person or folder name of any real beamtime."""
-    t = tokens or {}
-    muted = t.get("muted", "#4E5D7A")
-    link = t.get("link", "#0A6A5B")
+    if tokens is None:
+        from aurora.app.theme import TOKENS as tokens
+    muted = tokens["muted"]
+    link = tokens["link"]
     e = html.escape
     if advanced:
         return ("<h3>No project open</h3>"
@@ -179,8 +180,9 @@ def getting_started_html(advanced: bool, tokens: dict | None = None) -> str:
             "and builds a report.</p>"
             "<h4>What a beamtime folder looks like</h4>"
             f"<pre style='color:{muted}'>{e(FOLDER_PICTURE)}</pre>"
-            "<p>AURORA never writes into <code>raw</code>. Your outlines and spectra are kept next to it "
-            "(<code>.aurora/</code> and <code>processed/</code>).</p>"
+            "<p>A day folder or one scan folder opens too (that day alone), and a scan's <code>.h5</code> file when "
+            "it is dropped on the window or given on the command line. AURORA never writes into <code>raw</code>. "
+            "Your outlines and spectra are kept next to it (<code>.aurora/</code> and <code>processed/</code>).</p>"
             "<h4>The steps (the pages on the left, in order)</h4>"
             f"<ol>{steps}</ol>"
             f"<p><b>New to X-ray absorption?</b> The <a href='glossary:' {a}>glossary</a> explains every word AURORA "

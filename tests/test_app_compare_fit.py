@@ -7,6 +7,8 @@ import pytest
 pytest.importorskip("pyqtgraph")
 from PySide6.QtCore import Qt  # noqa: E402
 
+from aurora.app import mode  # noqa: E402
+
 
 def _edge(E, e0=690.0, width=1.0, white=0.6, slope=0.002):
     return 0.2 + slope * (E - E[0]) + 1.0 / (1 + np.exp(-(E - e0) / width)) + white * np.exp(-((E - e0 - 2) / 1.5) ** 2)
@@ -38,7 +40,7 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     assert len(added) == 6 and cmp_.table.rowCount() == 6                       # sdd-scaled + TEY per sample
     assert [r.norm for r in lib.requests] == ["larch"] * 6
     qapp.processEvents()
-    assert "6 traces plotted" in cmp_.status.text()
+    assert ("6 traces plotted" if mode.is_advanced() else "6 spectra plotted") in cmp_.status.text()
     # table edits propagate: hide the TEY rows, tick Fit on the sdd rows, shift one
     for i, r in enumerate(lib.requests):
         if r.signal == "TEY":
@@ -48,9 +50,9 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     cmp_.table.item(0, cmp_.col("Shift eV")).setText("0.5")
     qapp.processEvents()
     assert lib.requests[0].shift == 0.5 and sum(r.show for r in lib.requests) == 3 and sum(r.fit for r in lib.requests) == 3
-    assert "3 traces plotted" in cmp_.status.text()
+    assert ("3 traces plotted" if mode.is_advanced() else "3 spectra plotted") in cmp_.status.text()
     cmp_.table.selectRow(0); cmp_.show_peaks.setChecked(True); qapp.processEvents()
-    assert "E0" in cmp_.diag.plotItem.titleLabel.text and "peak maxima" in cmp_.peaks_label.text()
+    assert ("E0" if mode.is_advanced() else "edge at") in cmp_.diag.plotItem.titleLabel.text and "peak maxima" in cmp_.peaks_label.text()
     out = cmp_.export(tmp_path / "comparison.csv")
     assert (tmp_path / "comparison.csv").exists() and (tmp_path / "comparison_config.json").exists()
     # LCF: target M from A and B

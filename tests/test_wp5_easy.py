@@ -10,6 +10,8 @@ pytest.importorskip("pyqtgraph")
 from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFileDialog,  # noqa: E402
                                QLineEdit, QSlider, QTabBar, QWidget)
 
+from PySide6.QtCore import Qt  # noqa: E402
+
 from aurora.app import mode  # noqa: E402
 
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider)
@@ -143,14 +145,17 @@ def test_advanced_shows_every_column_with_the_same_rows(qapp, demo):
     from demo_window import pump
     win = demo
     t = win.compare.table
-    before = [[(t.item(r, c).text() if t.item(r, c) else "", t.item(r, c).checkState() if t.item(r, c) else None)
-               for c in range(t.columnCount())] for r in range(t.rowCount())]
+    def cell(r, c):                     # the Signal cell shows words by mode; its data is the file's signal code
+        it = t.item(r, c)
+        if it is None:
+            return ("", None)
+        return (it.data(Qt.UserRole) if it.data(Qt.UserRole) else it.text(), it.checkState())
+    before = [[cell(r, c) for c in range(t.columnCount())] for r in range(t.rowCount())]
     reqs = [r.to_json() for r in win.library.requests]
     mode.set_advanced(True)
     pump(qapp, 3)
     assert not any(t.isColumnHidden(c) for c in range(t.columnCount()))
-    after = [[(t.item(r, c).text() if t.item(r, c) else "", t.item(r, c).checkState() if t.item(r, c) else None)
-              for c in range(t.columnCount())] for r in range(t.rowCount())]
+    after = [[cell(r, c) for c in range(t.columnCount())] for r in range(t.rowCount())]
     assert after == before and [r.to_json() for r in win.library.requests] == reqs
     mode.set_advanced(False)
     pump(qapp)

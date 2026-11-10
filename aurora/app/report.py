@@ -356,7 +356,7 @@ class ReportPerspective(QWidget):
         self.scope_line.setText(f"The report will hold one page per sample group ({groups}, {holders}) with the spectra "
                                 f"ticked Looks OK, then {then}. Figures at {quality} ({self.dpi.value()} dpi). Compare "
                                 "and Fit results are not in it: use Export… in Compare and Fit.")
-        QTimer.singleShot(0, self.fit_options)
+        QTimer.singleShot(0, self, self.fit_options)
 
     def fit_options(self) -> None:
         """The Options card as tall as its wrapped lines at its width (the splitter ignores word wrap)."""
@@ -365,7 +365,7 @@ class ReportPerspective(QWidget):
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
-        QTimer.singleShot(0, self.fit_options)
+        QTimer.singleShot(0, self, self.fit_options)
 
     def _project_changed(self, project) -> None:
         self.out_dir.setText(str(project.root / "reports" / "aurora"))

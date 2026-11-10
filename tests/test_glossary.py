@@ -136,7 +136,11 @@ def test_what_is_lines():
     assert lab.statusTip() == HELP["home.col.flags"][0].split("\n")[0]
     wt = lab.whatsThis()
     assert "Glossary: saturated detector, I0" in wt and wt.endswith("More: manual §2")
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
     lab.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
 
 
 def test_jargon_guard():

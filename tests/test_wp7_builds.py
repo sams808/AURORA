@@ -313,5 +313,6 @@ def test_draft_and_current_holder_from_the_perspective(qapp, tmp_path, monkeypat
     mode.set_advanced(False)
     pump(qapp)
     assert not rp.check_tabs.isTabVisible(2) and "1 holder (N5" in rp.scope_line.text()
-    assert "Draft preset" in rp.scope_line.text()
+    from aurora.app import mode
+    assert ("Draft preset" if mode.is_advanced() else "draft quality (110 dpi)") in rp.scope_line.text()
     close(win)

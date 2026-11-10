@@ -653,7 +653,7 @@ class MainWindow(QMainWindow):
         for sig in (ses.project_changed, ses.zones_changed, ses.check_queue_changed, ses.save_state,
                     self.library.changed, self.home.opening_changed, self.check.saved, self.report.built,
                     self.fit.fitted):
-            sig.connect(lambda *_a: self.schedule_guide())
+            sig.connect(self.schedule_guide)          # a bound method: disconnected with the window (never a lambda)
         self.report.built.connect(self._built)
         self.fit.fitted.connect(self._fitted)
         ses.project_changed.connect(self._project_for_guide)
@@ -670,15 +670,20 @@ class MainWindow(QMainWindow):
 
     def _project_for_guide(self, _project) -> None:
         """A new project starts the guide again (the pages seen, the build and the fit belong to the last one)."""
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
         self._visited = {self.current_key()} if self.session.project is not None else set()
         self._report_folder = ""
         self._fit_ran = False
         self.check.n_saved = 0
         self.schedule_guide()
 
-    def schedule_guide(self) -> None:
+    def schedule_guide(self, *_args) -> None:
+        """Refresh the guide 100 ms after the last change (any signal's arguments are ignored)."""
+        import shiboken6
         t = getattr(self, "_guide_timer", None)
-        if t is not None:
+        if t is not None and shiboken6.isValid(self) and shiboken6.isValid(t):
             t.start()
 
     def guide_state(self):

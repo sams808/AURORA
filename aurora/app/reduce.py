@@ -574,7 +574,7 @@ class ReducePerspective(QWidget):
         super().resizeEvent(ev)
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self.fit_cards)
-        QTimer.singleShot(0, self._relabel_scans)
+        QTimer.singleShot(0, self, self._relabel_scans)
 
     def step_titles(self) -> list[str]:
         """The titles of the numbered step cards as shown ('1 · Scans of holder N5', ...), Easy mode."""
@@ -1554,7 +1554,8 @@ class ReducePerspective(QWidget):
                 dets = f"{det_words([f'sdd{i + 1}' for i in used])} ({'; '.join(outs)})"
             else:
                 dets = "the four {{sdd|detectors}}"
-            text = (f"The spectrum is the {line} X-rays counted in the step-2 window, added over the outlined pixels "
+            what = "all the X-rays" if line == "all X-rays" else f"the {line} X-rays"
+            text = (f"The spectrum is {what} counted in the step-2 window, added over the outlined pixels "
                     f"and {dets}, {norm}.{spikes}"
                     + (" An {{tey|electron-yield spectrum (TEY)}} is made the same way." if st.tey else ""))
             still = sorted(i for i in used if i in sat)

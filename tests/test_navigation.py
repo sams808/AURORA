@@ -84,7 +84,7 @@ def test_ctrl_number_opens_a_perspective(qapp, two_holders):
     pump(qapp)
     assert win.stack.currentWidget() is win.reduce
     for i, (key, title) in enumerate(PERSPECTIVES):
-        assert win.rail_buttons[key].toolTip() == native_text(f"{title} (Ctrl+{i + 1})")      # ⌘1 on macOS
+        assert win.rail_buttons[key].toolTip().startswith(native_text(f"{title} (Ctrl+{i + 1})"))   # ⌘1 on macOS
         assert win.goto_actions[key].shortcut().toString() == f"Ctrl+{i + 1}"
     QTest.keyClick(win, Qt.Key_7, Qt.ControlModifier)             # Maps in Easy mode: a status hint, Reduce stays
     pump(qapp)

@@ -235,10 +235,11 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc = rd.window_card
         sd = ses.stack_loaded(sid)
         assert [wc.preset.itemText(i) for i in range(wc.preset.count())] == [
-            "F Kα (fixed bins)", "O Kα (fixed bins)", "total XRF (fixed bins)", "custom"]   # no calibration: no edge line
-        assert wc.preset.currentText() == "F Kα (fixed bins)" and wc.choice() == {"line": "F Kα", "roi": None}
+            "F Kα (fixed window)", "O Kα (fixed window)", "all X-rays (total XRF)",
+            "custom (drag the band on the plot)"]                                           # no calibration: no edge line
+        assert wc.preset.currentText() == "F Kα (fixed window)" and wc.choice() == {"line": "F Kα", "roi": None}
         assert [tuple(r.getRegion()) for r in wc.regions] == [(60, 74), (61, 75), (62, 76), (63, 77)]
-        assert "10 eV/ch nominal" in wc.ev_label.text()
+        assert "10 eV per channel, not calibrated" in wc.ev_label.text()      # Easy words (Advanced: 10 eV/ch nominal)
         x0, x1, y0, y1 = sd.bbox
         rd.map.rect_drawn.emit(x0, x1, y0, y1)
         pump(qapp)
@@ -249,7 +250,7 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc.regions[1].setRegion((50, 70))
         pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(50, 70)] * 4
-        assert (wc.lo.value(), wc.hi.value()) == (50, 70) and wc.preset.currentText() == "custom"
+        assert (wc.lo.value(), wc.hi.value()) == (50, 70) and wc.preset.currentData() == ("custom", "")
         wc.commit_now()
         pump(qapp)
         st = z.settings[sid]
@@ -291,8 +292,8 @@ def test_line_of_the_edge_offered_with_a_calibration(qapp, fake_project):
     try:
         wc = win.reduce.window_card
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items[0] == "total XRF (fixed bins)" and items[1].startswith("line of the edge: F Kα 676.8 eV")
-        assert "(calibrated)" in wc.ev_label.text()
+        assert items[0] == "all X-rays (total XRF)" and items[1].startswith("line of the edge element: F Kα 676.8 eV")
+        assert "calibrated)" in wc.ev_label.text() and "not calibrated" not in wc.ev_label.text()
         wc.preset.setCurrentIndex(1)
         st = None
         z = win.session.zone()
@@ -333,14 +334,14 @@ def test_a_roi_bins_line_the_stack_lacks_is_read_from_the_raw_spectra(qapp, fake
         sd = ses.stack_loaded(sid)
         assert sd.labels == ["total XRF"] and sd.source.startswith("sgm_report cache ") and not sd.window_note
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items == ["total XRF (fixed bins)", "F Kα (fixed bins)", "custom"]
+        assert items == ["all X-rays (total XRF)", "F Kα (fixed window)", "custom (drag the band on the plot)"]
         rd.map.rect_drawn.emit(*sd.bbox)
         pump(qapp)
         wc.preset.setCurrentIndex(1)
         pump(qapp)
         st = ses.zone().settings[sid]
         assert st.line == "F Kα" and st.roi == {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]}
-        assert wc.preset.currentText() == "F Kα (fixed bins)"
+        assert wc.preset.currentText() == "F Kα (fixed window)"
         win.jobs.wait_idle(30000)
         pump(qapp)
         rd.update_preview()

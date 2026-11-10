@@ -41,18 +41,21 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
     assert 0 < len(ws) <= 18, [type(w).__name__ for w in ws]
     titles = rd.step_titles()
     assert [t[:3] for t in titles] == ["1 ·", "2 ·", "3 ·", "4 ·"], titles
-    assert titles[0] == "1 · Scans of holder N5" and titles[1] == "2 · XRF window"
-    assert titles[2] == "3 · Region" and titles[3] == "4 · Reduce"
+    assert titles[0] == "1 · Scans of holder N5" and titles[1] == "2 · Which X-rays to count"
+    assert titles[2] == "3 · Outline the sample" and titles[3] == "4 · Send to Check"
     # step 3: navigate / rectangle / lasso, Clear, New sample, Delete, the sample label
     shown = {t for t, b in rd.tool_buttons.items() if b.isVisible()}
     assert shown == {"navigate", "rect+", "lasso+"}
     for w in (rd.clear_btn, rd.new_zone_btn, rd.del_zone_btn, rd.z_label, rd.region_caption):
         assert w.isVisible()
-    assert rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 points of ")
+    assert rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 pixels of ")
     # step 4: the read-only line and the primary 'Add to Check'; the preview keeps one toggle
     assert rd.step4_line.isVisible() and rd.add_check_btn.isVisible() and rd.add_check_btn.objectName() == "primary"
-    assert rd.step4_line.text().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum")
-    assert "de-spike k = 6" in rd.step4_line.text() and rd.step4_line.text().endswith("SDD1-4")
+    # the Easy sentence says how the spectrum is made; its tooltip keeps the exact settings line
+    assert "divided by the beam intensity (I0)" in rd.step4_line.plain_text()
+    assert not any(w in rd.step4_line.plain_text() for w in ("mcc", "Au mesh", "k =", "SDD1-4"))
+    assert rd.step4_line.toolTip().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum")
+    assert "de-spike k = 6" in rd.step4_line.toolTip() and rd.step4_line.toolTip().endswith("SDD1-4 · PFY F Kα")
     assert rd.preview.all_scans.isVisible() and rd.preview.all_scans.text() == "all scans of the sample"
     assert not rd.preview.toggles.isVisible()
     # step 2: preset, spectrum, lo / hi
@@ -114,7 +117,8 @@ def test_a_saturated_sdd_is_off_and_named(qapp, fake_project):
         rd.add_to_check()
         st = ses.zone().settings[sid]
         assert st.sdd == [True, True, False, True]
-        assert "SDD1-4 (SDD3 saturated, left out)" in rd.step4_line.text()
+        assert "SDD1-4 (SDD3 saturated, left out)" in rd.step4_line.toolTip()
+        assert "detectors 1, 2 and 4 (detector 3 saturated: left out)" in rd.step4_line.plain_text()
         assert not rd.chip_box.isVisible()                      # the saturated SDD off is the Easy default
     finally:
         close(win)
@@ -128,8 +132,8 @@ def test_nothing_selected_away_from_the_footprint(qapp, fake_project):
         x0, x1, y0, y1 = sd.bbox
         rd.map.rect_drawn.emit(x1 + 2.0, x1 + 3.0, y1 + 2.0, y1 + 3.0)
         pump(qapp)
-        assert ses.zone() is not None and "nothing selected" in rd.region_caption.text()
-        assert not rd.add_check_btn.isEnabled() and "draw over the stack footprint" in rd.add_check_btn.toolTip()
+        assert ses.zone() is not None and "Nothing outlined yet" in rd.region_caption.text()
+        assert not rd.add_check_btn.isEnabled() and "drag over the map around your sample" in rd.add_check_btn.toolTip()
         assert rd.add_to_check() == 0 and not ses.check_queue
     finally:
         close(win)

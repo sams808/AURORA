@@ -31,30 +31,30 @@ def test_check_zone_ports_johns_messages():
     # a 0-pixel zone
     assert build_traces(sums(n_pix=0), st) is None
     msgs = check_zone(None, n_total=12)
-    assert worst(msgs) == "bad" and "contains 0 measurement points" in levels(msgs, "bad")[0]
+    assert worst(msgs) == "bad" and "holds no pixel of this scan" in levels(msgs, "bad")[0]
     # a clean zone: ok only
     ok = check_zone(build_traces(sums(), st), n_total=12)
-    assert worst(ok) == "ok" and "region contains 4 of 12 measurement points" in levels(ok, "ok")
+    assert worst(ok) == "ok" and "4 of 12 pixels inside the outline" in levels(ok, "ok")
     # I0 = 0 at one energy
     i0 = np.full(len(E), 10.0); i0[20] = 0.0
     msgs = check_zone(build_traces(sums(i0=i0), st), n_total=12)
-    assert "I0 is zero or missing at 1 energy" in levels(msgs, "warn")
+    assert "the beam intensity (I0) is zero or missing at 1 energy" in levels(msgs, "warn")
     # a window with zero counts in one detector
     det = sums().det["F Kα"].copy(); det[:, 2] = 0.0
     msgs = check_zone(build_traces(sums(det=det), st), n_total=12)
     bad = levels(msgs, "bad")
-    assert len(bad) == 1 and bad[0].startswith("SDD3: signal is zero everywhere - check its window")
+    assert len(bad) == 1 and bad[0].startswith("detector 3 (SDD3) counts nothing in the window")
     # an unticked detector is not checked
     assert worst(check_zone(build_traces(sums(det=det), ScanSettings(line="F Kα", sdd=[True, True, False, True])))) == "ok"
     # few points, no finite values, missing energies, I0 varying, TEY without values
-    assert levels(check_zone(build_traces(sums(n_pix=FEW_POINTS - 1), st)), "warn")[0].endswith(": noisy")
+    assert levels(check_zone(build_traces(sums(n_pix=FEW_POINTS - 1), st)), "warn")[0].endswith(": the spectrum will be noisy")
     det2 = sums().det["F Kα"].copy(); det2[:, 0] = np.nan
-    assert "SDD1: no finite values (missing files?)" in levels(check_zone(build_traces(sums(det=det2), st)), "bad")
+    assert "detector 1 (SDD1) has no valid counts: its files may be missing" in levels(check_zone(build_traces(sums(det=det2), st)), "bad")
     det3 = sums().det["F Kα"].copy(); det3[[5, 6], :] = np.nan
-    assert "2 missing energy points" in levels(check_zone(build_traces(sums(det=det3), st)), "warn")
+    assert "2 energies missing (their maps were not recorded)" in levels(check_zone(build_traces(sums(det=det3), st)), "warn")
     i0v = np.linspace(2.0, 2.0 * (I0_VARIES_FACTOR + 1), len(E))
-    assert any(m.startswith("I0 varies by a factor 4.0") for m in levels(check_zone(build_traces(sums(i0=i0v), st)), "warn"))
-    assert "TEY has no finite values" in levels(check_zone(build_traces(sums(tey=np.full(len(E), np.nan)), st)), "warn")
+    assert any(m.startswith("the beam intensity (I0) changes by a factor 4.0") for m in levels(check_zone(build_traces(sums(i0=i0v), st)), "warn"))
+    assert "the electron yield (TEY) has no valid values" in levels(check_zone(build_traces(sums(tey=np.full(len(E), np.nan)), st)), "warn")
 
 
 def test_bad_point_fraction_and_flags():
@@ -64,17 +64,20 @@ def test_bad_point_fraction_and_flags():
     i0[3:3 + n_low] = 0.3                                   # beam loss: below 20 % of the median
     t = build_traces(sums(i0=i0), st)
     msgs = check_zone(t)
-    assert any(m.startswith(f"{round(100 * n_low / len(E))} % of the points flagged bad") for m in levels(msgs, "warn"))
+    assert any(m.startswith(f"{round(100 * n_low / len(E))} % of the energies are bad") for m in levels(msgs, "warn"))
     sat = Flag("SDD saturated: SDD2", "sdd_saturated", CHECK_SOURCE, ("sdd2",))
     inv = Flag("I0 invalid", "i0_invalid", "sgm_report")
     t2 = build_traces(sums(), st)
     msgs = check_zone(t2, flags=[sat, inv])
-    assert any("SDD saturated: SDD2 (AURORA check) and in the fluorescence sum" in m for m in levels(msgs, "warn"))
-    assert any(m.startswith("I0 invalid (sgm_report)") for m in levels(msgs, "warn"))
+    sat_msg = next(m for m in levels(msgs, "warn") if "still in the sum" in m)
+    assert str(sat_msg).startswith("detector 2 (SDD2) saturated") and sat_msg.source == "AURORA check"
+    inv_msg = next(m for m in levels(msgs, "warn") if "beam reading (I0) cannot be trusted" in m)
+    assert inv_msg.source == "sgm_report" and inv_msg.full().endswith("(sgm_report)")
     st2 = ScanSettings(line="F Kα", sdd=[True, False, True, True], i0_source="good")
     msgs = check_zone(build_traces(sums(), st2, good_curve=np.full(len(E), 2.5)), flags=[sat, inv])
-    assert "SDD saturated: SDD2 (AURORA check): left out of the sum" in levels(msgs, "ok")
-    assert "I0 invalid (sgm_report): divided by the good-I0 mean" in levels(msgs, "ok")
+    assert "detector 2 (SDD2) saturated (too many X-rays): left out of the sum" in levels(msgs, "ok")
+    assert ("this scan's beam reading (I0) cannot be trusted: the average beam of the good scans is used instead"
+            in levels(msgs, "ok"))
 
 
 # ----------------------------------------------------------------------------- the page on the demo
@@ -163,7 +166,7 @@ def test_the_queue_on_the_demo(qapp, demo):
         ck.view_combo.setCurrentIndex(i)
         pump(qapp)
         assert ck.qplot.getPlotItem().listDataItems(), ck.view_combo.currentText()
-    assert "region contains 12 of 12 measurement points" in ck.msg_label.text()
+    assert "12 of 12 pixels inside the outline" in ck.msg_label.text()
     # Looks OK = ScanSettings.include, through session.edit; Tick all / Untick all
     descs = []
     orig = win.session.edit

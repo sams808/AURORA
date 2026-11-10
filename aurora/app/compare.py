@@ -1046,7 +1046,7 @@ class ComparePerspective(QWidget):
         how = {"deriv": "derivative", "half": "half step", "table": "tabulated", "fixed": "fixed"}.get(
             r.e0_mode, f"as {r.e0_mode[4:]}" if r.e0_mode.startswith("row:") else r.e0_mode)
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self._fit_diag)
+        QTimer.singleShot(0, self, self._fit_diag)
         if not mode.is_advanced():
             self.diag.setTitle(self.diag_title_easy(r, nr))
             self.diag_note.setText(self.diag_note_easy(r, nr, s, edge_ev))
@@ -1057,13 +1057,21 @@ class ComparePerspective(QWidget):
                                                       nr.note, nr.e0_note) if x))
 
     def _fit_diag(self) -> None:
+        """Easy: the scaling card as tall as its wrapped note (so the note never covers the plot). Advanced keeps the
+        fixed minimum: its plot options need the height above."""
+        import shiboken6
+        if not shiboken6.isValid(self.diag_card):
+            return
+        if mode.is_advanced():
+            self.diag_card.setMinimumHeight(200)
+            return
         from aurora.app.widgets import fit_to_content
         fit_to_content(self.diag_card, 200)
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self._fit_diag)
+        QTimer.singleShot(0, self, self._fit_diag)
 
     @staticmethod
     def diag_title_easy(r, nr) -> str:

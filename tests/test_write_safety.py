@@ -304,7 +304,7 @@ def test_labels_that_differ_only_in_case_keep_their_own_files(qapp, demo):
     zones = sorted(next(h for h in p.read_text(encoding="utf-8").splitlines() if h.startswith("# zone: "))[8:15]
                    for p in csvs)
     assert zones == ["1 ALPHA", "1 alpha"] and not asked
-    assert "2 spectrum(s) saved" in ck.queue_note.text()
+    assert "2 spectra saved" in ck.queue_note.text()
 
 
 def test_a_held_file_on_save_ticked_is_one_calm_message(qapp, demo, monkeypatch, warnings_shown, error_dialogs):
@@ -346,7 +346,9 @@ def test_a_held_file_on_save_ticked_is_one_calm_message(qapp, demo, monkeypatch,
     ck.save_btn.click()
     assert win.jobs.wait_idle(60000)
     pump(qapp)
-    assert error_dialogs == [] and len(warnings_shown) == 1 and "never writes here" in warnings_shown[0]
+    # (plain spec 5.9) a folder AURORA may not write: no dialog, the note says so and offers Compare without files
+    assert error_dialogs == [] and warnings_shown == [], warnings_shown
+    assert "AURORA never writes there" in ck.queue_note.text() and ck.unsaved_btn.isVisible()
     assert not folder.exists()
 
 

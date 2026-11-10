@@ -44,6 +44,12 @@ def test_about_dialog(qapp):
     d = AboutDialog()
     assert "John Bussey" in CREDITS and "James J. Dynes" in CREDITS and "Sami Soudani" in CREDITS
     assert d.windowTitle().startswith("About")
+    import gc                       # its Python wrapper is cyclic garbage owning a live dialog: collect it here, on the
+    d.deleteLater()                 # GUI thread, not later on a job's worker thread (an abort in the next test)
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    del d
+    gc.collect()
 
 
 def test_home_opens_project_in_worker(qapp, fake_project):

@@ -510,15 +510,18 @@ class FitPerspective(QWidget):
         origin = getattr(self, "_lcf_origin", "")
         if r is None:
             return
+        _t, comps = self._lcf_names
+        fixed = ", sum fixed to 1" if self.sum_one.isChecked() else ""
+        full = (f"χ²ν {r.redchi:.3g} = χ² {r.chi2:.4g} / (N {r.n_points} − p {r.n_params} free: "
+                f"{plural(len(comps), 'reference')}{fixed}) · R-factor {r.r_factor:.3g} · sum of "
+                f"coefficients {r.total:.3f} · {r.E[0]:.1f}–{r.E[-1]:.1f} eV ({origin})")
         if is_advanced():
-            _t, comps = self._lcf_names
-            fixed = ", sum fixed to 1" if self.sum_one.isChecked() else ""
-            self.lcf_info.setText(f"χ²ν {r.redchi:.3g} = χ² {r.chi2:.4g} / (N {r.n_points} − p {r.n_params} free: "
-                                  f"{plural(len(comps), 'reference')}{fixed}) · R-factor {r.r_factor:.3g} · sum of "
-                                  f"coefficients {r.total:.3f} · {r.E[0]:.1f}–{r.E[-1]:.1f} eV ({origin})")
-        else:
+            self.lcf_info.setText(full)
+            self.lcf_info.setToolTip("")
+        else:                                   # plain words; the full statistics stay in the tooltip
             self.lcf_info.setText(f"R-factor {r.r_factor:.2g} (smaller = closer fit) · coefficients sum to {r.total:.3f} · "
-                                  f"fitted over {r.E[0]:.1f}–{r.E[-1]:.1f} eV")
+                                  f"fitted over {r.E[0]:.1f}–{r.E[-1]:.1f} eV ({origin})")
+            self.lcf_info.setToolTip(full)
         self.lcf_meaning.set_markup(LCF_MEANING.format(n=r.n_draws) if r.n_draws else LCF_MEANING_COV)
 
     def _fill_lcf_table(self) -> None:

@@ -347,7 +347,9 @@ def test_open_path_h5_and_last_project_without_a_gui_stat(qapp, fake_project, mo
     assert opened == [(gone, True)]
     wait_home(qapp, win)
     assert main_stats == [] and win.home.project is None
-    assert "could not be opened" in win.home.path_label.text() and "No project open" in win.home.details.toPlainText()
+    from aurora.app import mode
+    welcome = "No project open" if mode.is_advanced() else "Getting started"      # the panel before a project is open
+    assert "could not be opened" in win.home.path_label.text() and welcome in win.home.details.toPlainText()
     # the command-line folder wins; with the setting off nothing opens
     opened.clear()
     open_at_start(win, fake_project)
