@@ -817,14 +817,14 @@ class ComparePerspective(QWidget):
 
     def export(self, path: Path, opts=None) -> list[Path]:
         """The wide CSV of the shown traces as processed (the quantity the figure shows: the first derivative when it
-        is ticked, '<label>-d/dE <signal>' columns; without the offsets), the figure at the chosen size (PNG / SVG /
-        PDF, drawn again with matplotlib, offsets and x range as on screen), and the config JSON (+ its sidecar of
-        arrays)."""
+        is ticked, '<label>-d/dE <signal>' columns; without the offsets and without Scale, which is plot only as in
+        John Bussey's GUI), the figure at the chosen size (PNG / SVG / PDF, drawn again with matplotlib, offsets,
+        scales and x range as on screen), and the config JSON (+ its sidecar of arrays)."""
         from aurora.app.figure_export import current_options, export_colour, styled
         from aurora.core.figures import FigureTrace, compare_figure, save_figure
         path = Path(path)
         traces = self.plot_traces()
-        export_wide_csv(path, [(t.r, t.E, t.base) for t in traces], quantity="d/dE " if self.deriv.isChecked() else "")
+        export_wide_csv(path, [(t.r, t.E, t.value) for t in traces], quantity="d/dE " if self.deriv.isChecked() else "")
         out = [path]
         xr = self._xrange()
         o = styled(opts or current_options(), x_range=tuple(xr) if xr else None, ylabel=self._ylabel(units=True),
@@ -871,9 +871,9 @@ class ComparePerspective(QWidget):
         for (r, s, nr), off in zip(items, offsets):
             i = rows.get(id(r), 0)                      # the table row: same colour and dash as its swatch
             E = s.E + r.shift
-            base = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
-            base = base * r.scale                       # plot only: Fit, Difference and the CSV read nr.y
-            out.append(SimpleNamespace(r=r, s=s, nr=nr, i=i, E=E, base=base, y=base + off, off=off,
+            value = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
+            base = value * r.scale                      # plot only: Fit, Difference and the CSV read the unscaled value
+            out.append(SimpleNamespace(r=r, s=s, nr=nr, i=i, E=E, value=value, base=base, y=base + off, off=off,
                                        colour=r.colour or curve(i),
                                        text=r.label + (f" ({r.signal})" if self.signal_in_label.isChecked() else "")))
         return out
