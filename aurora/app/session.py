@@ -760,7 +760,10 @@ class Session(QObject):
     def set_holder(self, key: str) -> None:
         if key not in self.holder_keys or key == self.current_holder:
             return
-        self.current_holder = key
+        prev, self.current_holder = self.current_holder, key
+        for k, sv in self._surveys.items():         # per-point spectra: the current and the previous holder only
+            if k not in (key, prev):
+                sv.release_spectra()
         self.current_zone = None
         self.current_stack = None
         self.holder_changed.emit(key)

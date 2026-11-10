@@ -166,6 +166,7 @@ class SurveyPerspective(QWidget):
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(lambda z: self._highlight_zone())
+        self._map_dirty = False                         # a zone changed while Survey was hidden: redraw when shown
         on_theme_changed(self, lambda _s: self.redraw_map())
         # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
         mark_advanced(self.options_row, self.import_btn, self.export_btn, self.grid_btn)
@@ -231,6 +232,7 @@ class SurveyPerspective(QWidget):
 
     # ------------------------------------------------------------------ drawing
     def redraw_map(self) -> None:
+        self._map_dirty = False
         sv = self._survey
         self.map.clear_overlays()
         if sv is None:
@@ -287,15 +289,28 @@ class SurveyPerspective(QWidget):
             x0, x1, y0, y1 = sd.bbox
         return (min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
 
+    def _redraw_when_shown(self) -> None:
+        """Redraw the plate map now when the page is shown, else when it is shown next: a zone edit in Reduce (every
+        stroke is one) must not redraw a hidden survey of thousands of points."""
+        if self.isVisible():
+            self.redraw_map()
+        else:
+            self._map_dirty = True
+
+    def showEvent(self, ev) -> None:
+        super().showEvent(ev)
+        if self._map_dirty:
+            self.redraw_map()
+
     def _highlight_zone(self) -> None:
-        self.redraw_map()
+        self._redraw_when_shown()
         zid = self.session.current_zone
         for r in range(self.zone_table.rowCount()):
             if self.zone_table.item(r, 0).data(Qt.UserRole) == zid:
                 self.zone_table.blockSignals(True); self.zone_table.selectRow(r); self.zone_table.blockSignals(False)
 
     def _zones_changed(self) -> None:
-        self._fill_zone_table(); self.redraw_map()
+        self._fill_zone_table(); self._redraw_when_shown()
 
     def _fill_zone_table(self) -> None:
         hz = self.session.holder_zones(create=False)

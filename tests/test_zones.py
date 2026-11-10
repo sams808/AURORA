@@ -307,6 +307,27 @@ def test_spectra_vectorised_equal(monkeypatch, tmp_path):
     assert slow / fast >= 10, f"build_traces (coherent): {fast * 1e3:.1f} ms against {slow * 1e3:.1f} ms with the loops"
 
 
+def test_survey_keeps_its_per_point_spectra(tmp_path):
+    from aurora.core.io.raw import read_point_dir
+    root = testdata.make_fake_project(tmp_path / "bt", n_holders=3)
+    proj = Project.discover(root)
+    scan = proj.find(testdata.SURVEY)
+    sv = SurveyData.load(scan, proj.roi_bins)
+    assert sv.has_spectra and sv.per_point.shape == (48, 4, 256) and sv.per_point.dtype == np.float32
+    raw = read_point_dir(scan.path)
+    pix = np.array([0, 5, 7, 30])
+    want = np.stack([s[pix].sum(axis=0) for s in raw.sdd]).astype(float)
+    assert np.array_equal(sv.zone_spectrum(pix), want)
+    assert np.allclose(sv.zone_spectrum(pix), sv.per_point[pix].sum(axis=0))
+    assert np.array_equal(sv.zone_spectrum(np.arange(sv.n)), sv.spec.astype(float))      # the whole plate
+    assert np.array_equal(sv.zone_spectrum([]), np.zeros((4, 256)))
+    sv.release_spectra()
+    with pytest.raises(ValueError, match="not in memory"):
+        sv.zone_spectrum(pix)
+    assert sv.reload_spectra() and np.array_equal(sv.zone_spectrum(pix), want)
+    assert SurveyData.load(scan, proj.roi_bins, keep_spectra=False).per_point is None
+
+
 def test_normalise_modes():
     E = np.linspace(680, 730, 101)
     i0 = np.full(101, 2.0)

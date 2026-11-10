@@ -1,4 +1,8 @@
-"""Preview of a zone's traces: fluorescence (four SDDs + sum), TEY, I0 in three linked panels, spikes marked."""
+"""Preview of a zone's traces: fluorescence (four SDDs + sum), TEY, I0 in three linked panels, spikes marked.
+
+A redraw whose traces have the structure of those drawn (one trace, the same detectors, settings, toggles and scheme)
+moves the existing curves with setData instead of rebuilding the plots (update_traces, and set_traces, which goes the
+same way): a zone being drawn redraws the preview at every stroke."""
 from __future__ import annotations
 
 import numpy as np
@@ -73,6 +77,10 @@ class PreviewPlot(QWidget):
         self.redraw()
 
     def redraw(self) -> None:
+        if self._update_in_place():
+            return
+        self._items: dict = {}                          # role -> plot item (one trace), for update_traces
+        self._sig = None
         for p in (self.top, self.mid, self.low):
             p.clear()
         if self.top.legend is not None:
@@ -95,6 +103,7 @@ class PreviewPlot(QWidget):
                                           pen=pg.mkPen(None))
                 reg.setZValue(-20)
                 self.top.addItem(reg, ignoreBounds=True)
+                self._items["pre" if rng is t0.pre else "post"] = reg
         for ti, (name, t, meta) in enumerate(self._traces):
             col = curve(ti) if multi else None
             if meta.get("edge_ev") and t.E[0] <= meta["edge_ev"] <= t.E[-1]:
@@ -109,21 +118,28 @@ class PreviewPlot(QWidget):
                     pen = pg.mkPen(col or curve(i), width=1 if on else 0.8, style=dash(i))
                     item = self.top.plot(t.E, y, pen=pen, connect="finite", name=(f"SDD{i + 1}" + ("" if on else " (off)")) if ti == 0 else None)
                     item.setOpacity(1.0 if on else 0.35)
-                    self._spikes(self.top, t.E, y, t.spikes.get(f"sdd{i + 1}"))
+                    self._items[f"sdd{i}"] = item
+                    self._spikes(self.top, t.E, y, t.spikes.get(f"sdd{i + 1}"), None if multi else f"spk:sdd{i}")
             if self.show_sum.isChecked() and t.sum is not None:
-                self.top.plot(t.E, t.sum, pen=pg.mkPen(col or pc("sum"), width=2.2), connect="finite",
-                              name=(name + " " if multi else "") + "sum of ticked SDDs")
-                self._spikes(self.top, t.E, t.sum, t.spikes.get("sum"))
+                self._items["sum"] = self.top.plot(t.E, t.sum, pen=pg.mkPen(col or pc("sum"), width=2.2), connect="finite",
+                                                   name=(name + " " if multi else "") + "sum of ticked SDDs")
+                self._spikes(self.top, t.E, t.sum, t.spikes.get("sum"), None if multi else "spk:sum")
             if self.show_tey.isChecked():
-                self.mid.plot(t.E, t.tey, pen=pg.mkPen(col or pc("tey"), width=1.6), connect="finite")
-                self._spikes(self.mid, t.E, t.tey, t.spikes.get("tey"))
+                self._items["tey"] = self.mid.plot(t.E, t.tey, pen=pg.mkPen(col or pc("tey"), width=1.6), connect="finite")
+                self._spikes(self.mid, t.E, t.tey, t.spikes.get("tey"), None if multi else "spk:tey")
             if self.show_i0.isChecked():
-                self.low.plot(t.E, t.i0, pen=pg.mkPen(col or pc("i0"), width=1.2), connect="finite")
+                self._items["i0"] = self.low.plot(t.E, t.i0, pen=pg.mkPen(col or pc("i0"), width=1.2), connect="finite")
                 if t.settings and t.settings.i0_source == "good":
-                    self.low.plot(t.E, t.i0_used, pen=role_pen("good", 1.4), connect="finite")
+                    self._items["i0_used"] = self.low.plot(t.E, t.i0_used, pen=role_pen("good", 1.4), connect="finite")
                 sp = t.spikes.get("i0")
-                if sp and self.show_spikes.isChecked():
-                    self.low.addItem(pg.ScatterPlotItem(t.E[sp], t.i0_raw[sp], size=6, brush=pg.mkBrush(pc("spike")), pen=None), ignoreBounds=True)
+                if self.show_spikes.isChecked() and (sp or not multi):
+                    sp = list(sp or [])
+                    it = pg.ScatterPlotItem(t.E[sp], t.i0_raw[sp], size=6, brush=pg.mkBrush(pc("spike")), pen=None)
+                    self.low.addItem(it, ignoreBounds=True)
+                    self._items["spk:i0"] = it
+        if multi:
+            self._items = {}
+        self._sig = self._signature(self._traces)
         self._set_ranges()
 
     def _set_ranges(self) -> None:
@@ -155,11 +171,70 @@ class PreviewPlot(QWidget):
                 lo, hi = 0.0, 1.0
             plot.vb.setRange(xRange=(x0, x1), yRange=(lo, hi), padding=0.05, disableAutoRange=True)
 
-    def _spikes(self, plot, E, y, idx) -> None:
-        if idx and self.show_spikes.isChecked():
-            idx = [i for i in idx if np.isfinite(y[i])]
-            if idx:
-                plot.addItem(pg.ScatterPlotItem(E[idx], y[idx], size=6, brush=pg.mkBrush(pc("spike")), pen=None), ignoreBounds=True)
+    def _spikes(self, plot, E, y, idx, role: str | None = None) -> None:
+        """The spikes of a curve as dots. With a role (one trace drawn), the dots exist even without a spike, so
+        update_traces can move them."""
+        if not self.show_spikes.isChecked() or not (idx or role):
+            return
+        idx = [i for i in (idx or []) if np.isfinite(y[i])]
+        if idx or role:
+            it = pg.ScatterPlotItem(E[idx], y[idx], size=6, brush=pg.mkBrush(pc("spike")), pen=None)
+            plot.addItem(it, ignoreBounds=True)
+            if role:
+                self._items[role] = it
+
+    # ------------------------------------------------------------------ updates in place
+    def _signature(self, traces) -> tuple | None:
+        """What the plot items of a redraw depend on: equal signatures draw the same items, only the data move."""
+        if len(traces) != 1:
+            return None
+        from aurora.app.theme import scheme, text_px
+        name, t, meta = traces[0]
+        st = t.settings
+        edge = meta.get("edge_ev")
+        return (name, scheme(), text_px(), self.show_sdd.isChecked(), self.show_sum.isChecked(), self.show_tey.isChecked(),
+                self.show_i0.isChecked(), self.show_spikes.isChecked(), tuple(y is None for y in t.det),
+                t.sum is None, tuple(st.sdd) if st else None, st.i0_source if st else None,
+                st.fluo_norm if st else None, bool(t.pre), edge, meta.get("edge", ""),
+                bool(edge and t.E[0] <= edge <= t.E[-1]))
+
+    def update_traces(self, traces: list[tuple[str, ZoneTraces, dict]]) -> None:
+        """set_traces for a preview that changes quickly (a zone being drawn): when the traces have the structure of
+        those drawn, the existing curves get the new data (setData, about ten times faster than a rebuild); otherwise
+        a full redraw."""
+        self.set_traces(traces)
+
+    def _update_in_place(self) -> bool:
+        """redraw() through setData when the structure is unchanged (see _signature). False: a rebuild is needed."""
+        items = getattr(self, "_items", None)
+        if not items or not self._traces or getattr(self, "_sig", None) is None or \
+                self._signature(self._traces) != self._sig:
+            return False
+        import shiboken6
+        if not all(shiboken6.isValid(it) for it in items.values()):
+            return False
+        _name, t, _meta = self._traces[0]
+        for i, y in enumerate(t.det):
+            if f"sdd{i}" in items:
+                items[f"sdd{i}"].setData(t.E, y)
+        series = {"sum": t.sum, "tey": t.tey, "i0": t.i0, "i0_used": t.i0_used}
+        for role, y in series.items():
+            if role in items and y is not None:
+                items[role].setData(t.E, y)
+        spikes = {**{f"spk:sdd{i}": (y, t.spikes.get(f"sdd{i + 1}")) for i, y in enumerate(t.det)},
+                  "spk:sum": (t.sum, t.spikes.get("sum")), "spk:tey": (t.tey, t.spikes.get("tey"))}
+        for role, (y, idx) in spikes.items():
+            if role in items and y is not None:
+                idx = [i for i in (idx or []) if np.isfinite(y[i])]
+                items[role].setData(t.E[idx], y[idx])
+        if "spk:i0" in items:
+            sp = list(t.spikes.get("i0") or [])
+            items["spk:i0"].setData(t.E[sp], t.i0_raw[sp])
+        for role, rng in (("pre", t.pre), ("post", t.post)):
+            if role in items and rng:
+                items[role].setRegion(list(rng))
+        self._set_ranges()
+        return True
 
     def _moved(self, pos) -> None:
         if not self._traces or not self.top.sceneBoundingRect().contains(pos):

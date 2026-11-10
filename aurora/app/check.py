@@ -41,7 +41,8 @@ from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
 from aurora.core.names import short_time, split_stack_id
 from aurora.core.qc import CountRate, QcResult, i0_candidates, sdd_consistency, spike_summary
-from aurora.core.zones import GEOMETRY_KEYS, members, zone_traces
+from aurora.app.trace_cache import zone_traces_cached
+from aurora.core.zones import GEOMETRY_KEYS, members
 
 log = logging.getLogger("aurora.check")
 
@@ -276,7 +277,7 @@ class CheckPerspective(QWidget):
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda z: self._update_sdd())
         session.stack_selected.connect(lambda sd: self._update_sdd())
-        session.zones_changed.connect(self._update_sdd)
+        session.zones_changed.connect(self._sdd_zones_changed)
         session.zones_changed.connect(self._zones_changed)
         session.check_queue_changed.connect(self._refresh_queue)
         # AURORA's own verdicts reach new zones' defaults (saturated SDDs off, good-I0 for an invalid I0), and new
@@ -664,6 +665,7 @@ class CheckPerspective(QWidget):
 
     # ------------------------------------------------------------------ SDD agreement
     def _update_sdd(self) -> None:
+        self._sdd_dirty = False
         self.sdd_plot.clear()
         if self.sdd_plot.plotItem.legend is not None:
             self.sdd_plot.plotItem.legend.clear()
@@ -679,7 +681,7 @@ class CheckPerspective(QWidget):
         pix = members(z, sd.x, sd.y, sd.pitch)
         st = z.settings[sid]
         good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
-        t = zone_traces(sd, pix, st, good)
+        t = zone_traces_cached(sd, pix, st, good)
         if t is None:
             self.sdd_note.setText("no pixel of this scan inside the zone")
             return
@@ -725,8 +727,18 @@ class CheckPerspective(QWidget):
         if self._queue_dirty:
             self._refresh_queue()
 
+    def _sdd_zones_changed(self) -> None:
+        """A zone edit: the four detectors are recomputed now when the page is shown, else when it is shown next
+        (every stroke in Reduce is an edit; the traces come from the cache Reduce's preview fills)."""
+        self._sdd_dirty = not self.isVisible()
+        if not self._sdd_dirty:
+            self._update_sdd()
+
     def showEvent(self, e) -> None:
         super().showEvent(e)
+        if getattr(self, "_sdd_dirty", False):
+            self._sdd_dirty = False
+            self._update_sdd()
         if self._queue_dirty:
             self._refresh_queue()
 

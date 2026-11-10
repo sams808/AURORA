@@ -25,6 +25,7 @@ from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import CheckItem, Session
 from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
+from aurora.app.trace_cache import zone_traces_cached
 from aurora.app.zone_tools import ZoneEditor
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair,
@@ -35,7 +36,7 @@ from aurora.core.io.config import ScanSettings, Zone
 from aurora.core.model import ScanInfo
 from aurora.core.names import pretty_edge, short_time, split_stack_id
 from aurora.core.spectra import NORM_MODES
-from aurora.core.zones import Stroke, geometry, members, set_geometry, shape_text, zone_bbox, zone_traces
+from aurora.core.zones import Stroke, geometry, members, set_geometry, shape_text, zone_bbox
 
 NO_PROJECT = "open a project first"
 GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy geometry'
@@ -1640,7 +1641,7 @@ class ReducePerspective(QWidget):
                 continue
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
-            t = zone_traces(sd, pix, st, good)
+            t = zone_traces_cached(sd, pix, st, good)
             if t is None:
                 continue
             label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {short_time(sid) or sd.name}"
@@ -1674,7 +1675,7 @@ class ReducePerspective(QWidget):
                 continue                                # drawn when the windows are read
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
-            t = zone_traces(sd, pix, st, good)
+            t = zone_traces_cached(sd, pix, st, good)
             if t is not None:
                 traces.append((short_time(sid) or sd.name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text}))
         self.preview.set_traces(traces)

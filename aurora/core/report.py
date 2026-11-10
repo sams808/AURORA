@@ -1285,7 +1285,7 @@ class ReportBuilder:
                 ax.set_title(f"holder {es[0].holder} · {es[0].day}" + (f" · survey {surv.name}" if surv else ""), fontsize=8)
                 if surv is not None:
                     try:
-                        sv = SurveyData.load(surv, self.project.roi_bins)
+                        sv = SurveyData.load(surv, self.project.roi_bins, keep_spectra=False)
                         ch = next((l for l in sv.lines if l == es[0].stack.main), "total")
                         g = sv.grid(sv.values(ch, per_i0=True, log10=True))
                         dx, dy = g.dx, g.dy

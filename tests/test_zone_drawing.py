@@ -364,3 +364,74 @@ def test_legacy_signals_are_emitted_once_and_never_edit_twice(qapp, win):
     rd.map.rect_drawn.emit(x0, x1, y0, y1)                 # emitted by code: an edit, as before
     pump(qapp)
     assert len(z.rects) == 2 and ses.undo_stack.count() == 2
+
+
+# ----------------------------------------------------------------------------- caches and hidden views
+def test_trace_cache_shared(qapp, win, monkeypatch):
+    """After a stroke, with Reduce shown and Check hidden, the zone's traces are computed once (Reduce's preview);
+    showing Check reuses them. A hidden Check or Survey does nothing on a zone edit until it is shown."""
+    import aurora.core.zones as zmod
+    from aurora.app import trace_cache
+    rd, ses, ck, sv = win.reduce, win.session, win.check, win.survey
+    sd = ses.stack_loaded(win.sid)
+    calls, sdd, maps = [], [], []
+    real = zmod.zone_traces
+    monkeypatch.setattr(zmod, "zone_traces", lambda *a, **k: (calls.append(a[0].id), real(*a, **k))[1])
+    real_sdd, real_redraw = ck._update_sdd, sv.redraw_map
+    monkeypatch.setattr(ck, "_update_sdd", lambda: (sdd.append(1), real_sdd())[1])
+    monkeypatch.setattr(sv, "redraw_map", lambda: (maps.append(1), real_redraw())[1])
+    trace_cache.clear()
+    rd.set_tool("rect+")
+    qdrag(qapp, rd.map, _box_path(*inner_box(sd, 0.05)))
+    z = ses.zone()
+    assert z is not None and not ck.isVisible() and not sv.isVisible()
+    assert calls == [win.sid] and maps == []
+    sdd.clear()
+    rd.set_tool("rect-")                                   # an edit of the selected zone: Check stays idle
+    qdrag(qapp, rd.map, _around(sd, np.array([0])))
+    assert len(calls) == 2 and sdd == [] and maps == []
+    win.show_perspective("check"); pump(qapp)
+    assert sdd and len(calls) == 2                          # drawn from the cache, with the zone as it is now
+    assert ck.sdd_note.text().startswith(f"{z.label} · {testdata.STACK} · {len(z.members[win.sid])} px")
+    win.show_perspective("survey"); pump(qapp)
+    assert maps == [1] and sv.zone_table.rowCount() == 1
+    # a reloaded stack is a new object: the cache misses
+    hits = trace_cache.stats["hits"]
+    win.show_perspective("reduce"); pump(qapp)
+    rd.update_preview()
+    assert trace_cache.stats["hits"] > hits and len(calls) == 2
+
+
+def test_survey_spectra_kept_for_two_holders(qapp, tmp_path):
+    from aurora.app.session import Session
+    proj = Project.discover(testdata.make_fake_project(tmp_path / "bt", n_holders=3))
+    ses = Session()
+    ses.set_project(proj)
+    keys = list(ses.holder_keys)
+    assert len(keys) == 3
+    for k in keys:
+        ses.set_holder(k)
+        assert ses.survey(k).has_spectra
+    assert [ses.survey(k).has_spectra for k in keys] == [False, True, True]
+    ses._save_timer.stop()
+
+
+def test_preview_moves_its_curves_in_place(qapp, win):
+    rd, ses = win.reduce, win.session
+    sd = ses.stack_loaded(win.sid)
+    rd.set_tool("rect+")
+    qdrag(qapp, rd.map, _box_path(*inner_box(sd, 0.05)))
+    pv = rd.preview
+    (name, t, meta), = pv._traces
+    items = dict(pv._items)
+    assert {"sdd0", "sum", "tey", "i0"} <= set(items)
+    from aurora.core.zones import zone_traces
+    pix = members(ses.zone(), sd.x, sd.y, sd.pitch)[:3]
+    t2 = zone_traces(sd, pix, ses.zone().settings[win.sid])
+    pv.update_traces([(name, t2, meta)])
+    assert pv._items == items                               # the same curves ...
+    assert np.array_equal(items["sum"].getData()[1], t2.sum, equal_nan=True)     # ... with the new data
+    assert np.array_equal(items["sdd1"].getData()[1], t2.det[1], equal_nan=True)
+    pv.show_sdd.setChecked(False)                           # another structure: rebuilt
+    assert "sdd0" not in pv._items and pv._items["sum"] is not items["sum"]
+    pv.show_sdd.setChecked(True)
