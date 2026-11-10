@@ -228,3 +228,21 @@ def test_many_findings_fill_in_one_batch_and_a_tick_moves_one_row(qapp, tmp_path
     assert lst.topLevelItem(0) is first and first.data(0, Qt.ForegroundRole) is None
     assert rp.totals.text().endswith("250 warnings")
     close(win)
+
+
+def test_a_cancelled_build_says_so(qapp, tmp_path, monkeypatch):
+    """The status line next to Build says 'report cancelled' after a Cancel (it kept 'building …', threads-10)."""
+    from aurora.core import report as core_report
+    monkeypatch.setattr(core_report, "os_full_name", lambda: "Test User")
+    quick(monkeypatch)
+    proj = project(tmp_path)
+    win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
+    rp = win.report
+    rp.out_dir.setText(str(tmp_path / "reports"))
+    rp.build()
+    assert rp.status.text() == "building …" and win.jobs.cancel("report")
+    assert win.jobs.wait_idle(60000)
+    pump(qapp)
+    assert rp.status.text() == "report cancelled: nothing half-written is kept" and rp._result is None
+    assert not any(p.name.startswith(core_report.BUILDING_PREFIX) for p in (tmp_path / "reports").glob("*"))
+    close(win)
