@@ -35,8 +35,8 @@ from aurora.app.session import ALL_HOLDERS, DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS, plural
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, page_scroll,
-                                set_enabled, held_file, set_plot_hint, write_error_text)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, fit_height, notify_saved, overlay_host,
+                                page_scroll, set_enabled, held_file, set_plot_hint, write_error_text)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
@@ -232,7 +232,7 @@ class CheckPerspective(QWidget):
         sddc.body.addWidget(self.sdd_plot, 1)
         self.spike_note = QLabel(""); self.spike_note.setObjectName("muted"); self.spike_note.setWordWrap(True)
         sddc.body.addWidget(self.spike_note)
-        bottom.addWidget(sddc)
+        bottom.addWidget(fit_height(sddc))             # its wrapped zone/scan/line note keeps its lines at Larger
         i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)",
                    help_anchor="52-the-holder-checks-advanced")
         xrow = QHBoxLayout()

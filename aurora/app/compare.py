@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetricsF
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
                                QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
@@ -1006,7 +1006,9 @@ class ComparePerspective(QWidget):
         for ti, x, y in sorted(items, key=lambda it: -vb.mapViewToScene(QPointF(it[1], it[2])).y()):
             p = vb.mapViewToScene(QPointF(x, y))
             w = ti.textItem.boundingRect().width()
-            h = QFontMetricsF(ti.textItem.font()).height()     # the glyphs, not the text item's margins
+            # its line as laid out (the font's height plus leading), not the text item's margins: with the bare font
+            # height two stacked labels shared a pixel row
+            h = ti.textItem.boundingRect().height() - 2 * ti.textItem.document().documentMargin()
             bottom = p.y()
             moved = True
             while moved:                                # anchor (1, 1): the label's bottom right sits on the point
