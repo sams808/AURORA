@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QListWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QMenu, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -28,7 +28,8 @@ from aurora.app.mode import is_advanced, mark_advanced_column, on_mode_changed
 from aurora.app.settings import recent_projects, remember_project, settings
 from aurora.app.theme import MONO_FONT, TOKENS, on_theme_changed, refill_tones, set_item_tone, tone_of
 from aurora.app.vocab import plural
-from aurora.app.widgets import Card, ElidedLabel, EmptyState, TaskBar, default_dir, remember_dir, set_enabled
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, TaskBar, default_dir, fit_columns, remember_dir,
+                                set_enabled)
 from aurora.core import overview
 from aurora.core.constants import sdd_geometry
 from aurora.core.model import Project, ScanInfo
@@ -264,10 +265,7 @@ class HomePerspective(QWidget):
         # every column in view at 1200 px: the Scan column takes the width the others leave and elides long names
         # in the middle (the full name is its tooltip); a fixed 360 px pushed Energies, Points and Flags off-screen
         self.tree.setTextElideMode(Qt.ElideMiddle)
-        self.tree.header().setStretchLastSection(False)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        for i in range(1, len(COLS)):
-            self.tree.header().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        self._columns = fit_columns(self.tree, first_chars=16)
         self.tree.currentItemChanged.connect(self._on_select)
         self.tree.itemDoubleClicked.connect(self._activated)
         left.body.addWidget(self.tree, 1)
@@ -299,6 +297,7 @@ class HomePerspective(QWidget):
         on_theme_changed(self, lambda _s: self._theme_changed())
         # Easy mode: the Kind column, the full h5 attribute table, the SDD geometry and the sgm_report notes are Advanced
         mark_advanced_column(self.tree, KIND_COL)
+        on_mode_changed(self, lambda _advanced: self._columns.schedule())      # Kind shown or hidden
         on_mode_changed(self, lambda _adv: self._render_details(), call_now=False)
         self.fill_recent()
         self.fill_recent_menu()
@@ -617,6 +616,7 @@ class HomePerspective(QWidget):
             d_item.setExpanded(True)
             for i in range(d_item.childCount()):
                 d_item.child(i).setExpanded(True)
+        self._columns.refit()
 
     def _scan_item(self, s: ScanInfo) -> QTreeWidgetItem:
         when = f"{s.time} {later_note(s.day, s.continues)}" if s.continues else s.time

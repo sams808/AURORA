@@ -646,6 +646,71 @@ def fit_height(panel: QWidget) -> QWidget:
     return panel
 
 
+class _FitColumns(QObject):
+    """Keeps every column of a tree view in view (see fit_columns)."""
+
+    def __init__(self, tree, first_chars: int):
+        super().__init__(tree)
+        self.first_chars = first_chars
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(0)
+        self._timer.timeout.connect(self.refit)
+        tree.installEventFilter(self)
+        tree.viewport().installEventFilter(self)
+        tree.header().sectionCountChanged.connect(lambda *_a: self._timer.start())
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() in (QEvent.Resize, QEvent.FontChange, QEvent.Show, QEvent.StyleChange):
+            self._timer.start()                     # deferred: never re-enter the layout pass that sent the event
+        return False
+
+    def schedule(self) -> None:
+        """Refit at the next event-loop pass (after a column was hidden or shown)."""
+        self._timer.start()
+
+    def refit(self) -> None:
+        tree = self.parent()
+        head = tree.header()
+        cols = [i for i in range(1, head.count()) if not head.isSectionHidden(i)]
+        width = tree.viewport().width()
+        if not cols or width <= 0:
+            return
+        digit = tree.fontMetrics().horizontalAdvance("0")
+        want = {i: max(tree.sizeHintForColumn(i), head.sectionSizeHint(i)) for i in cols}
+        floor = {i: min(want[i], head.sectionSizeHint(i)) for i in cols}       # the header word stays readable
+        room = width - self.first_chars * digit - 3 * tree.indentation()       # days > holders > scans
+        total = sum(want.values())
+        if total > room > 0:                        # shrink the wide columns first, never below their header word
+            spare = sum(want[i] - floor[i] for i in cols)
+            cut = min(1.0, (total - room) / spare) if spare else 0.0
+            want = {i: int(want[i] - cut * (want[i] - floor[i])) for i in cols}
+        for i in cols:
+            head.resizeSection(i, want[i])
+
+
+def fit_columns(tree, first_chars: int = 16):
+    """Every column of `tree` in view: the first column stretches and keeps room for `first_chars` characters at its
+    deepest level; the others take their content width, cut in proportion when the tree is narrow (their text elides
+    with the tree's elide mode). Wider fonts (DejaVu Sans on Linux) left the Scan column 36 px with ResizeToContents.
+    Call keeper.refit() after filling the tree. Returns the keeper."""
+    from PySide6.QtWidgets import QHeaderView
+    head = tree.header()
+    head.setStretchLastSection(False)
+    head.setSectionResizeMode(0, QHeaderView.Stretch)
+    for i in range(1, head.count()):
+        head.setSectionResizeMode(i, QHeaderView.Interactive)
+    keeper = next((ch for ch in tree.children() if isinstance(ch, _FitColumns)), None) or _FitColumns(tree, first_chars)
+    keeper.first_chars = first_chars
+    return keeper
+
+
+def breakable(name: str) -> str:
+    """A file or scan name that may wrap after its underscores (a zero-width space after each): a word-wrapped label
+    never breaks '120000_sample_name_f_k_stack', so its width alone set the page's minimum width."""
+    return name.replace("_", "_​")
+
+
 def flow_row(*widgets: QWidget, spacing: int = 6) -> QWidget:
     """A QWidget holding the widgets in a FlowLayout (a wrapping control row)."""
     w = QWidget()

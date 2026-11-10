@@ -67,6 +67,11 @@ def _cut_by_a_panel(w: QWidget, top: QWidget) -> bool:
     return False
 
 
+# event-loop passes before a page is measured: a wrapped label that grows refits its card (fit_height, deferred), and
+# the new minimum climbs one widget level per pass to the scrolling page (about seven levels in Fit)
+SETTLE = 25
+
+
 def clipped(page: QWidget) -> list[str]:
     from aurora.app.widgets import ElidedLabel
     bad = []
@@ -127,7 +132,7 @@ def test_nothing_clipped(qapp, demo, size, advanced):
     win = demo
     mode.set_advanced(advanced)
     win.resize(*size)
-    pump(qapp, 5)
+    pump(qapp, SETTLE)
     problems = []
     for key, _t in PERSPECTIVES:
         if mode.perspective_hidden(key):
@@ -136,7 +141,7 @@ def test_nothing_clipped(qapp, demo, size, advanced):
             win.show_perspective(key)
             if tab is not None:
                 win.pages[key].tabs.setCurrentIndex(tab)
-            pump(qapp, 5)
+            pump(qapp, SETTLE)
             problems += [f"{key}[{tab}] {p}" for p in clipped(win.pages[key])]
     if advanced and win.reduce._cards:                  # the per-scan card is a two-column grid that fits 420 px
         # 420 px with Segoe UI / SF Pro; DejaVu Sans (Linux) is about 5 % wider (423 px measured on ubuntu-24.04)
@@ -157,7 +162,7 @@ def test_nothing_clipped_at_the_larger_text_size(qapp, demo):
         for advanced in (False, True):
             mode.set_advanced(advanced)
             win.resize(1200, 760)
-            pump(qapp, 5)
+            pump(qapp, SETTLE)
             for key, _t in PERSPECTIVES:
                 if mode.perspective_hidden(key):
                     continue
@@ -165,7 +170,7 @@ def test_nothing_clipped_at_the_larger_text_size(qapp, demo):
                     win.show_perspective(key)
                     if tab is not None:
                         win.pages[key].tabs.setCurrentIndex(tab)
-                    pump(qapp, 5)
+                    pump(qapp, SETTLE)
                     problems += [f"{'adv' if advanced else 'easy'} {key}[{tab}] {p}" for p in clipped(win.pages[key])]
     finally:
         win.set_text_size("normal")

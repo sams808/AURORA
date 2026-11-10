@@ -43,7 +43,7 @@ jobs:
           - {os: macos-15, python: "3.11"}
           - {os: macos-15, python: "3.13"}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45                  # the suite takes 25 min on macos-15-intel, 20 on windows-latest
+    timeout-minutes: 75                  # 808 tests: over 41 min on macos-15-intel (cut at 88 % by a 45-min limit), 34 on windows
     env:
       QT_QPA_PLATFORM: offscreen
     steps:

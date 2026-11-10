@@ -35,8 +35,8 @@ from aurora.app.session import ALL_HOLDERS, DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS, plural
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, fit_height, notify_saved, overlay_host,
-                                page_scroll, set_enabled, held_file, set_plot_hint, write_error_text)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, breakable, fit_height, notify_saved,
+                                overlay_host, page_scroll, set_enabled, held_file, set_plot_hint, write_error_text)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
@@ -163,6 +163,8 @@ class CheckPerspective(QWidget):
         self.preview_card = pcard = Card("Preview of the selected spectrum", help_anchor="51-spectra-to-check")
         vrow = QHBoxLayout()
         self.view_combo = QComboBox()
+        self.view_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)   # the longest view name
+        self.view_combo.setMinimumContentsLength(16)                                           # set the page width
         for key, text in VIEWS:
             self.view_combo.addItem(text, key)
         self.view_combo.currentIndexChanged.connect(lambda _i: self._draw_preview())
@@ -456,11 +458,11 @@ class CheckPerspective(QWidget):
             self.x_note.setText("no mcc data read"); return
         r = c.ratio[np.isfinite(c.ratio)]
         if r.size:
-            self.x_note.setText(f"{scan.name}: mesh level {np.nanmedian(c.mesh):.3g}, diode level {np.nanmedian(c.diode):.3g}; diode/mesh spans "
+            self.x_note.setText(f"{breakable(scan.name)}: mesh level {np.nanmedian(c.mesh):.3g}, diode level {np.nanmedian(c.diode):.3g}; diode/mesh spans "
                                 f"{r.min():.3f}-{r.max():.3f} over the scan"
                                 + (" (the mesh has its own spectral response: consider the diode or a good-I0 mean)" if r.max() - r.min() > 0.05 else ""))
         else:
-            self.x_note.setText(f"{scan.name}: no finite ratio")
+            self.x_note.setText(f"{breakable(scan.name)}: no finite ratio")
 
     def _draw_x(self) -> None:
         """The I0 explorer curves, with their colours read now (they follow a theme change)."""
@@ -700,7 +702,7 @@ class CheckPerspective(QWidget):
         scan = self.session.scan_of(sid)                  # None for a stitched stack
         sat = list(res.saturated) if res is not None else (((scan.summary or {}) if scan is not None else {}).get("sdd_saturated") or [])
         c = sdd_consistency(t, sat)
-        self.sdd_note.setText(f"{z.label} · {split_stack_id(sid)[1]} · {t.n_pix} px, line {t.line}: {c.note}")
+        self.sdd_note.setText(f"{z.label} · {breakable(split_stack_id(sid)[1])} · {t.n_pix} px, line {t.line}: {c.note}")
         if c.normalised is not None:
             xs = (float(c.energies[0]), float(c.energies[-1]))
             for k in range(4):

@@ -330,7 +330,7 @@ def test_ci_is_callable_and_bounded():
     assert "workflow_call" in on and "tags" not in (on.get("push") or {})       # tags go through release.yml only
     for name, job in wf["jobs"].items():
         # the test suite takes 25 min on macos-15-intel: 45 there, 30 everywhere else
-        assert job.get("timeout-minutes") == (45 if name == "tests" else 30), name
+        assert job.get("timeout-minutes") == (75 if name == "tests" else 30), name
         for step in job.get("steps", []):
             run = step.get("run", "")
             if re.search(r"aurora-cli\.exe|\\AURORA\.exe|MacOS/AURORA|\$BIN|open -W", run) and "pyinstaller" not in run:

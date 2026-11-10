@@ -534,6 +534,11 @@ class ComparePerspective(QWidget):
             explain(b, "compare.colour")
             b.clicked.connect(lambda _c=False, bb=b: self._choose_colour_at(bb.property("aurora_row")))
             self.table.setCellWidget(i, COL["colour"], b)
+            vh = self.table.verticalHeader()          # rows as tall as the button (macOS rows are 29 px, the button 36)
+            if vh.defaultSectionSize() < b.minimumSizeHint().height():
+                vh.setDefaultSectionSize(b.minimumSizeHint().height())
+                for row in range(self.table.rowCount()):
+                    self.table.setRowHeight(row, vh.defaultSectionSize())
         b.setProperty("aurora_row", i)
         b.setIcon(swatch_icon(r.colour or curve(i), dash(i), 14))
         b.setAccessibleName(f"colour of {r.key}: {colour_name(r.colour or curve(i))}")
