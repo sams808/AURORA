@@ -92,9 +92,16 @@ class GridDialog(QDialog):
                  ("columns", self.cols, "survey.grid.cols"), ("cell fill", self.fill, "survey.grid.fill"),
                  ("rotation", self.rotation, "survey.grid.rotation"), ("labels from", self.labels, "survey.grid.labels"),
                  ("first sheet row", self.first_row, "survey.grid.first_row")]
+        self.row_labels = {}
         for r, (text, w, key) in enumerate(rows_):
-            grid.addWidget(labelled(text, w, key), r, 0)
+            self.row_labels[text] = lab = labelled(text, w, key)
+            grid.addWidget(lab, r, 0)
             grid.addWidget(w, r, 1)
+        # optional inputs: a row with nothing to offer is not shown (no plate layout group, no sheet row here)
+        for text, w, absent in (("layout group", self.layout_combo, not self.groups),
+                                ("first sheet row", self.first_row, not self.sheet)):
+            self.row_labels[text].setVisible(not absent)
+            w.setVisible(not absent)
         grid.addWidget(self.snap, len(rows_), 0, 1, 2)
         grid.setColumnStretch(1, 1)
         explain(self.snap, "survey.grid.snap")

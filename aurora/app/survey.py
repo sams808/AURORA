@@ -1,15 +1,23 @@
 """Survey perspective: the plate map of a holder with scan footprints and the zones, the sketch, the sample sheet.
 
+The first view of a holder holds the survey map and every footprint and zone (a note counts what lies outside the
+map). The sketch is optional: its card is shown only when the holder has one (aurora.core.sketches: .aurora/sketches/,
+sketches/, zones_html/sketches/); 'Load a sketch…' (next to the holder, and in the map's right-click menu) copies an
+image into .aurora/sketches/, 'Remove the sketch' removes that copy. The sample card collapses to one line when the
+sheet has no row for the holder, or when there is no sheet.
+
 Advanced: 'Grid of zones…' arms the rect+ tool; the rectangle dragged over a block of pads opens the GridDialog, whose
 zones show dashed on the map until Accept adds them in one session edit."""
 from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
-                               QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from aurora.app import nav
 from aurora.app.help_text import explain, explain_all, labelled
@@ -18,9 +26,14 @@ from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
 from aurora.app.theme import FOOTPRINTS, MAP_OVERLAY, curve, on_theme_changed, swatch_icon
 from aurora.app.vocab import det_items, plural, unit_suffix
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_path, guarded_write, notify_saved,
-                                overlay_host, pair, remember_dir, set_enabled)
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path, guarded_write,
+                                notify_saved, overlay_host, pair, remember_dir, set_enabled)
+from aurora.core import sketches
 from aurora.core.model import ScanInfo
+from aurora.core.zones import zone_bbox
+
+SHEET_ANCHOR = "24-the-sample-sheet"             # MANUAL.md: what a sample sheet holds and where it goes
+NO_SHEET_TEXT = "No sample sheet: names are typed by hand."
 
 FOOTPRINT_LABELS = {"complete": "complete", "aborted": "aborted", "in_progress": "in progress", "test": "test"}
 
@@ -50,6 +63,33 @@ class FootprintLegend(QWidget):
             ic.setPixmap(swatch_icon(colour, style, 12).pixmap(12, 12))
 
 
+class SketchLabel(QLabel):
+    """The holder's sketch, scaled to the card (aspect kept) whenever the card is resized; it never widens the column."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._image = QPixmap()
+        self.setAlignment(Qt.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+
+    def set_image(self, pm: QPixmap) -> None:
+        self._image = QPixmap(pm)
+        self._fit()
+
+    def image(self) -> QPixmap:
+        return self._image
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self._fit()
+
+    def _fit(self) -> None:
+        if self._image.isNull() or self.width() < 2 or self.height() < 2:
+            self.setPixmap(QPixmap())
+            return
+        self.setPixmap(self._image.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+
 class SurveyPerspective(QWidget):
     open_requested = Signal(object)       # a complete stack's footprint was clicked: open it in Reduce
 
@@ -74,6 +114,10 @@ class SurveyPerspective(QWidget):
         self.holder_combo.currentIndexChanged.connect(self._holder_picked)
         head.addWidget(labelled("Holder", self.holder_combo, "survey.holder"))
         head.addWidget(self.holder_combo)
+        self.sketch_btn = QPushButton("Load a sketch…")        # optional: a drawing or photo of the holder
+        self.sketch_btn.setFlat(True)
+        self.sketch_btn.clicked.connect(lambda: self.load_sketch())
+        head.addWidget(self.sketch_btn)
         self.import_btn = QPushButton("Import zones…")
         self.import_btn.clicked.connect(self._import)
         self.export_btn = QPushButton("Export zones…")
@@ -109,6 +153,9 @@ class SurveyPerspective(QWidget):
         self.map.hovered.connect(self._hover)
         self.map.clicked.connect(self._clicked)
         self.map.rect_drawn.connect(self._rect_drawn)
+        self.map.set_context_menus(True)                 # right-click: Fit view and the sketch entries (map_menu)
+        self.map.context_requested.connect(self._context)
+        self.last_menu = None
         left.body.addWidget(self.map, 1)
         self.hint = ElidedLabel("", Qt.ElideRight); self.hint.setObjectName("muted")
         left.body.addWidget(self.hint)
@@ -127,15 +174,27 @@ class SurveyPerspective(QWidget):
         self.zone_table.itemSelectionChanged.connect(self._zone_row_selected)
         zc.body.addWidget(self.zone_table, 1)
         right.addWidget(zc)
-        sc = Card("Sketch", help_anchor="3-survey")
-        self.sketch = QLabel("no sketch for this holder (zones_html/sketches/<holder>.png)")
-        self.sketch.setObjectName("muted")
-        self.sketch.setWordWrap(True)
-        self.sketch.setAlignment(Qt.AlignCenter)
-        self.sketch.setMinimumHeight(160)
+        # the sketch is optional: the card exists only for a holder that has one (_load_sketch shows or hides it)
+        self.sketch_card = sc = Card("Sketch", help_anchor="3-survey")
+        self.sketch_path: Path | None = None
+        self.remove_sketch_btn = QPushButton("Remove the sketch")
+        self.remove_sketch_btn.setFlat(True)
+        self.remove_sketch_btn.clicked.connect(lambda: self.remove_sketch())
+        sc.header.addWidget(self.remove_sketch_btn)
+        self.sketch = SketchLabel()
+        self.sketch.setAccessibleName("sketch of the holder")
+        self.sketch.setMinimumHeight(120)
         sc.body.addWidget(self.sketch, 1)
+        sc.setVisible(False)
         right.addWidget(sc)
         self.samples_card = tc = Card("Samples on the holder (sample sheet)", help_anchor="3-survey")
+        self.sheet_note = QLabel()                    # one line instead of an empty table (no sheet, no row here)
+        self.sheet_note.setObjectName("muted")
+        self.sheet_note.setWordWrap(True)
+        self.sheet_note.setTextFormat(Qt.RichText)
+        self.sheet_note.linkActivated.connect(self._sheet_link)
+        self.sheet_note.setVisible(False)
+        tc.body.addWidget(self.sheet_note)
         self.sheet_table = QTableWidget(0, 4)
         self.sheet_table.setHorizontalHeaderLabels(["Sample", "Group", "Composition", "Edges"])
         self.sheet_table.setAccessibleName("samples of the holder")
@@ -143,6 +202,7 @@ class SurveyPerspective(QWidget):
         self.sheet_table.setEditTriggers(QTableWidget.NoEditTriggers)
         tc.body.addWidget(self.sheet_table, 1)
         right.addWidget(tc)
+        self.right = right
         split.addWidget(right)
         split.setStretchFactor(0, 3); split.setStretchFactor(1, 2)
         self.body = overlay_host(split)
@@ -162,6 +222,8 @@ class SurveyPerspective(QWidget):
                      (self.show_footprints, "survey.footprints"), (self.show_zones, "survey.zones"),
                      (self.import_btn, "survey.import"), (self.export_btn, "survey.export")])
         explain(self.grid_btn, "survey.grid")
+        explain(self.sketch_btn, "survey.sketch_load")
+        explain(self.remove_sketch_btn, "survey.sketch_remove")
         session.project_changed.connect(self._project_changed)
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
@@ -181,6 +243,15 @@ class SurveyPerspective(QWidget):
             self.grid_btn.setChecked(False)
         self.empty_state.set_shown(not has)
         h = self.session.holder()
+        if not has:
+            self.sketch_path = None
+            self.sketch_card.setVisible(False)
+        self.sketch_btn.setVisible(has and h is not None)
+        why = self._sketch_refusal()
+        set_enabled(self.sketch_btn, has and h is not None and not why, why or "open a project first")
+        own = has and h is not None and sketches.is_own(self.session.project.root, self.sketch_path)
+        set_enabled(self.remove_sketch_btn, own and not why,
+                    why or "this sketch is a file of the beamtime folder: AURORA removes only the copy it made")
         self.zones_card.set_title(f"Zones of holder {h.name}" if h else "Zones of the holder")
         self.samples_card.set_title(f"Samples on holder {h.name} (sample sheet)" if h else "Samples on the holder (sample sheet)")
 
@@ -220,7 +291,7 @@ class SurveyPerspective(QWidget):
             if main in self._survey.channels:
                 self.channel.setCurrentText(main)
         self.channel.blockSignals(False)
-        self.redraw_map(); self.map.autorange()
+        self.redraw_map(); self.fit_view()
         self._fill_zone_table(); self._fill_sheet(); self._load_sketch()
 
     def _main_line_guess(self) -> str:
@@ -265,9 +336,71 @@ class SurveyPerspective(QWidget):
             for cell, _why in skipped:
                 x0, x1, y0, y1 = cell.cell
                 self.map.add_rect(x0, x1, y0, y1, off, 1.0, z=12, style=Qt.DotLine)
-        note = "; ".join(sv.notes)
+        notes = list(sv.notes)
+        outside = self._outside_text()
+        if outside:
+            notes.append(outside)
+        note = "; ".join(notes)
         self.hint.setText(f"{plural(sv.n, 'point')} at {sv.energy:.1f} eV, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm"
                           + (f" · {note}" if note else "") + (f" · {self._grid_note}" if self._grid_note else ""))
+
+    # ------------------------------------------------------------------ the first view (PM-02)
+    def _survey_rect(self):
+        """(x0, x1, y0, y1) mm of the survey map's pixels (centres +- half a pitch), or None."""
+        sv = self._survey
+        if sv is None or not len(sv.x):
+            return None
+        px, py = sv.pitch
+        return (float(np.min(sv.x)) - px / 2, float(np.max(sv.x)) + px / 2,
+                float(np.min(sv.y)) - py / 2, float(np.max(sv.y)) + py / 2)
+
+    def _overlay_boxes(self) -> list[tuple[str, tuple[float, float, float, float]]]:
+        """('footprint' | 'zone', box) of every footprint and zone of the holder."""
+        out = [("footprint", b) for b in (self._bbox(s) for s in self._footprints()) if b is not None]
+        hz = self.session.holder_zones(create=False)
+        for z in (hz.zones if hz else []):
+            b = zone_bbox(z)
+            if b is not None:
+                out.append(("zone", b))
+        return out
+
+    def outside_counts(self) -> tuple[int, int]:
+        """(footprints, zones) of the holder that are not entirely on the survey map."""
+        r = self._survey_rect()
+        if r is None:
+            return 0, 0
+        tol = 1e-6
+        out = [k for k, (x0, x1, y0, y1) in self._overlay_boxes()
+               if x0 < r[0] - tol or x1 > r[1] + tol or y0 < r[2] - tol or y1 > r[3] + tol]
+        return out.count("footprint"), out.count("zone")
+
+    def _outside_text(self) -> str:
+        nf, nz = self.outside_counts()
+        parts = ([plural(nf, "measured area")] if nf else []) + ([plural(nz, "zone")] if nz else [])
+        if not parts:
+            return ""
+        verb = "lies" if nf + nz == 1 else "lie"
+        return f"{' and '.join(parts)} {verb} outside the survey map"
+
+    def fit_view(self) -> None:
+        """Show the survey map and every footprint and zone of the holder (the map alone when they all lie on it)."""
+        r = self._survey_rect()
+        boxes = [b for _k, b in self._overlay_boxes()]
+        if r is None and not boxes:
+            self.map.autorange()
+            return
+        allb = ([r] if r is not None else []) + boxes
+        x0, x1 = min(b[0] for b in allb), max(b[1] for b in allb)
+        y0, y1 = min(b[2] for b in allb), max(b[3] for b in allb)
+        if r is not None and (x0, x1, y0, y1) == r:
+            self.map.autorange()
+            return
+        self.map.zoom_to(x0, x1, y0, y1, margin=0.04)
+
+    def view_rect(self) -> tuple[float, float, float, float]:
+        """The map's visible range (x0, x1, y0, y1) in mm."""
+        (x0, x1), (y0, y1) = self.map.vb.viewRange()
+        return float(x0), float(x1), float(y0), float(y1)
 
     def _footprints(self) -> list[ScanInfo]:
         h = self.session.holder()
@@ -314,22 +447,129 @@ class SurveyPerspective(QWidget):
 
     def _fill_sheet(self) -> None:
         h = self.session.holder()
-        rows = [r for r in self.session.sheet_rows if h and r.plate.strip().lower() == h.name.lower()]
+        all_rows = list(self.session.sheet_rows)
+        rows = [r for r in all_rows if h and r.plate.strip().lower() == h.name.lower()]
         self.sheet_table.setRowCount(len(rows))
         for r, row in enumerate(rows):
             for c, v in enumerate((row.sample_id, row.group, row.composition, " ".join(x for x in (row.f_k_edge, row.other_edges) if x))):
                 self.sheet_table.setItem(r, c, QTableWidgetItem(v))
+        if rows or h is None:
+            note = ""
+        elif not all_rows:                            # optional: one line and the way to add one, never a path
+            note = f'{NO_SHEET_TEXT} <a href="help">How to add one</a>'
+        else:
+            names = sorted({r.plate.strip() for r in all_rows if r.plate.strip()}, key=str.lower)
+            listed = ", ".join(names[:5]) + (" …" if len(names) > 5 else "")
+            note = (f"The sample sheet lists no sample on holder {h.name}"
+                    + (f" (its holders: {listed})." if names else " (it has no holder column)."))
+        self._collapse_samples(note)
+
+    def _collapse_samples(self, note: str) -> None:
+        """A sample card with rows shows its table; without, one line and the card shrinks to it."""
+        self.sheet_note.setText(note)
+        self.sheet_note.setVisible(bool(note))
+        self.sheet_table.setVisible(not note)
+        if note:
+            self.samples_card.setMaximumHeight(self.samples_card.sizeHint().height())
+        else:
+            self.samples_card.setMaximumHeight(16777215)
+
+    def _sheet_link(self, _href: str) -> None:
+        from aurora.app.help import open_help
+        open_help(self, "MANUAL.md", SHEET_ANCHOR)
 
     def _load_sketch(self) -> None:
+        """Show the holder's sketch in its card, or hide the card: a holder without one shows no sketch at all."""
         h = self.session.holder()
-        p = self.session.project.root / "zones_html" / "sketches" / f"{h.name}.png" if h else None
-        if p and p.exists():
-            pm = QPixmap(str(p))
-            self.sketch.setPixmap(pm.scaledToWidth(min(420, pm.width()), Qt.SmoothTransformation))
-            self.sketch.setText("")
+        root = self.session.project.root if self.session.project is not None else None
+        p = sketches.find_sketch(root, h.name) if h is not None and root is not None else None
+        pm = QPixmap(str(p)) if p is not None else QPixmap()
+        if p is not None and pm.isNull():
+            self.hint.setText(f"the sketch {p.name} could not be read as an image")
+            p = None
+        self.sketch_path = p
+        if p is None:
+            self.sketch.set_image(QPixmap())
+            self.sketch.setToolTip("")
+            self.sketch_card.setVisible(False)
         else:
-            self.sketch.setPixmap(QPixmap())
-            self.sketch.setText("no sketch for this holder (zones_html/sketches/<holder>.png)")
+            self.sketch.set_image(pm)
+            try:
+                shown = p.relative_to(root).as_posix()
+            except ValueError:
+                shown = str(p)
+            self.sketch.setToolTip(f"{shown} ({pm.width()} × {pm.height()} px)")
+            self.sketch_card.setVisible(True)
+        self.update_actions()
+
+    def _sketch_refusal(self) -> str:
+        """Why no sketch can be added or removed here ('' when it can): a protected (read-only) beamtime."""
+        from aurora.core.io.safety import is_protected
+        proj = self.session.project
+        if proj is None:
+            return ""
+        return ("this beamtime folder is protected (read-only): AURORA keeps no copy in it"
+                if is_protected(proj.root / sketches.OWN_DIR[0] / sketches.OWN_DIR[1] / "x.png") else "")
+
+    def load_sketch(self, path: str | Path | None = None) -> Path | None:
+        """Load a sketch…: copy an image (PNG or JPEG) of the holder to .aurora/sketches/<holder>.<ext> and show it.
+        `path` None asks for the file. Returns the copy, or None when nothing was loaded."""
+        h = self.session.holder()
+        if self.session.project is None or h is None:
+            return None
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, f"Load a sketch of holder {h.name}",
+                                                  default_dir("sketch", self.session), sketches.IMAGE_FILTER)
+            if not path:
+                return None
+            remember_dir("sketch", path)
+        path = Path(path)
+        if QPixmap(str(path)).isNull():
+            QMessageBox.warning(self, "Load a sketch", f"{path.name} could not be read as an image (PNG or JPEG).")
+            return None
+        out = None
+        with guarded_write(self, f"the sketch of holder {h.name}") as g:
+            out = sketches.add_sketch(self.session.project.root, h.name, path)
+        if not g.ok:
+            return None
+        self._load_sketch()
+        self.session.status.emit(f"sketch of holder {h.name}: {path.name} copied to "
+                                 f"{out.relative_to(self.session.project.root).as_posix()}")
+        return out
+
+    def remove_sketch(self) -> list[Path]:
+        """Remove the sketch: delete AURORA's copy of the holder's sketch (never a file of the user's own folders)."""
+        h = self.session.holder()
+        if self.session.project is None or h is None:
+            return []
+        gone: list[Path] = []
+        with guarded_write(self, f"the sketch of holder {h.name}") as g:
+            gone = sketches.remove_sketch(self.session.project.root, h.name)
+        if g.ok and gone:
+            self.session.status.emit(f"sketch of holder {h.name} removed (AURORA's copy; the original image is kept)")
+        self._load_sketch()
+        return gone
+
+    def sketch_actions(self, menu: QMenu) -> None:
+        """Add 'Load a sketch…' and 'Remove the sketch' to a menu of the Survey map."""
+        h = self.session.holder()
+        why = self._sketch_refusal()
+        a = menu.addAction("Load a sketch…", lambda: self.load_sketch())
+        a.setEnabled(self.session.project is not None and h is not None and not why)
+        r = menu.addAction("Remove the sketch", lambda: self.remove_sketch())
+        r.setEnabled(self.remove_sketch_btn.isEnabled())
+
+    def map_menu(self, x: float, y: float) -> QMenu:
+        """The right-click menu of the Survey map: Fit view, Load a sketch…, Remove the sketch."""
+        m = QMenu(self)
+        m.addAction("Fit view", self.fit_view)
+        m.addSeparator()
+        self.sketch_actions(m)
+        return m
+
+    def _context(self, x: float, y: float, _zid) -> None:
+        from aurora.app.reduce import popup
+        self.last_menu = popup(self.map_menu(x, y), QCursor.pos())
 
     # ------------------------------------------------------------------ interaction
     def _hover(self, x: float, y: float) -> None:

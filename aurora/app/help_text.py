@@ -83,6 +83,11 @@ HELP: dict[str, tuple[str, str, str]] = {
     "survey.footprints": ("Show the stacks of the holder as rectangles: click a complete one to open it in Reduce.",
                           "show the scan footprints", "3-survey"),
     "survey.zones": ("Show the zones of the holder with their labels.", "show the zones", "3-survey"),
+    "survey.sketch_load": ("Optional: a drawing or photo of the holder (PNG or JPEG), shown beside the map. AURORA "
+                           "keeps a copy with the beamtime (in its .aurora folder); loading another one replaces it. "
+                           "Nothing else depends on a sketch.", "Load a sketch", "3-survey"),
+    "survey.sketch_remove": ("Delete AURORA's copy of the holder's sketch (the original image is kept).",
+                             "Remove the sketch", "3-survey"),
     "survey.import": ("Read a zones_all.json written by the browser zone tool or by another AURORA.", "Import zones",
                       "3-survey"),
     "survey.export": ("Write the zones of every holder as zones_all.json (the browser zone tool's format).",
