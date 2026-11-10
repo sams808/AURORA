@@ -18,7 +18,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 PRIVATE = ("CLAUDE.md", "docs/BRAINSTORM.md", "docs/HANDOFF.md", "docs/sources/x.txt", "legacy/sgm_report_v2.5/x.json",
-           "legacy/CLS_GUI_JohnBussey/x", "legacy/SGM_Beamline_Analysis/x", "tests/local_paths.json")
+           "legacy/CLS_GUI_JohnBussey/x", "legacy/SGM_Beamline_Analysis/x", "tests/local_paths.json",
+           "aurora_expectations.json", "tests/aurora_expectations.json", "blank_denylist.txt")
 # an account's home folder; placeholders (<you>), the CI runner (RUNNER~1, runner) and the shared folders are not
 HOME = re.compile(r"[A-Za-z]:[\\/]+Users[\\/]+(?!<|RUNNER~1\b|Public\b|runneradmin\b)[A-Za-z0-9._-]+[\\/]"
                   r"|/Users/(?!<|Shared/|runner/)[A-Za-z0-9._-]+/|/home/(?!<|runner/)[A-Za-z0-9._-]+/")

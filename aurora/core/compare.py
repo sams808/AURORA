@@ -77,7 +77,7 @@ _ZONE_SOURCE = re.compile(r"^zone (\d+) of (.+)$")
 
 
 def parse_zone_source(source: str) -> tuple[int, str] | None:
-    """'zone 3 of 2026-11-05_092758_x_stack' (the source Reduce gives a zone trace) -> (3, sid); None otherwise."""
+    """'zone 3 of 2025-03-14_092758_x_stack' (the source Reduce gives a zone trace) -> (3, sid); None otherwise."""
     m = _ZONE_SOURCE.match(str(source or ""))
     return (int(m.group(1)), m.group(2)) if m else None
 

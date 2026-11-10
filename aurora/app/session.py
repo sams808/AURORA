@@ -1502,9 +1502,9 @@ class Session(QObject):
         'ask' shows the per-holder dialog when the session is in a window (otherwise merge); a dict gives one policy
         per holder key. A holder of the file is matched to a holder of this project by its key, else by its holder name
         and day, else by its name alone when only one holder has it (zones exported from a one-day project, keyed
-        'N5', land on 'N5_2026-11-05' here); the zones of a holder that matches none are kept under their own key and
-        counted apart. The pending autosave is written and a snapshot saved first; the import is one edit (one undo
-        step). A file that cannot be read changes nothing, never raises, and says so. Returns the zones imported."""
+        'holderA', land on 'holderA_2025-03-14' here); the zones of a holder that matches none are kept under their own
+        key and counted apart. The pending autosave is written and a snapshot saved first; the import is one edit (one
+        undo step). A file that cannot be read changes nothing, never raises, and says so. Returns the zones imported."""
         path = Path(path)
         self.last_import = res = ImportResult()
         try:

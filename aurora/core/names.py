@@ -1,4 +1,4 @@
-"""Scan-name conventions of the Nov 2026 beamtime: `<HHMMSS>_<holder>_<group>_<edge>_<plan>`.
+"""Scan-name conventions of the SGM beamline: `<HHMMSS>_<name>_<plan>`, for example `092758_alpha_beta_f_k_stack`.
 
 Ported from sgm_report.py v2.5 (`strip_scan_suffix`, `Survey.holder`, `Stack.target_edge`, `time_label`).
 """
@@ -40,8 +40,8 @@ _ISO_DAY_ID = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.+)$")
 
 
 def split_stack_id(sid: str) -> tuple[str, str]:
-    """'<day>_<scan folder>' -> (day, scan folder), for day keys of any length: '2026-11-05_092758_alpha_beta_..._stack' ->
-    ('2026-11-05', '092758_alpha_beta_..._stack'); '_092758_x_stack' (a loose folder without a day) -> ('', '092758_x_stack');
+    """'<day>_<scan folder>' -> (day, scan folder), for day keys of any length: '2025-03-14_092758_x_stack' ->
+    ('2025-03-14', '092758_x_stack'); '_092758_x_stack' (a loose folder without a day) -> ('', '092758_x_stack');
     'CLS GUI_092758_x_stack' -> ('CLS GUI', '092758_x_stack'). Ids that are not '<day>_<scan>' (stitched stacks,
     'stitched_<id>') come back as ('', sid), so a project lookup of the scan part finds nothing."""
     sid = str(sid)
@@ -59,12 +59,12 @@ def split_stack_id(sid: str) -> tuple[str, str]:
 
 
 def short_time(sid: str) -> str:
-    """'HH:MM' of a stack id or scan folder name ('2026-11-05_092758_alpha_beta_...' -> '09:27'); '' when it has none."""
+    """'HH:MM' of a stack id or scan folder name ('2025-03-14_092758_alpha_beta_...' -> '09:27'); '' when it has none."""
     return time_label(split_stack_id(sid)[1])
 
 
 def strip_scan_suffix(name: str) -> str:
-    """'095242_sampleA_f_k_u_n45_stack' -> 'sampleA'; '150255_UF4_u_n45coarse_1_stack' -> 'UF4'."""
+    """'095242_sampleA_f_k_u_n45_stack' -> 'sampleA'; '150255_sampleB_u_n45coarse_1_stack' -> 'sampleB'."""
     s = re.sub(r"^\d{6}_", "", name)
     s = re.sub(r"_(stack|survey)$", "", s)
     m = _scan_tokens().search(s)
@@ -74,13 +74,13 @@ def strip_scan_suffix(name: str) -> str:
 
 
 def holder_from_survey(name: str) -> str:
-    """'010013_holderA_survey' -> 'N5'; 'N7_plate_survey' -> 'N7'; 'R2_survey_survey' -> 'R2'."""
+    """'010013_holderA_survey' -> 'holderA'; 'holderC_plate_survey' -> 'holderC'; 'R2_survey_survey' -> 'R2'."""
     base = strip_scan_suffix(name)
     return re.sub(r"(?i)^plate_?|_?plate$|_survey", "", base) or base
 
 
 def short_label(label: str, holder: str | None) -> str:
-    """Drop the holder tag from a label ('holderB_quartz_grains' on holder N2 -> 'quartz_grains')."""
+    """Drop the holder tag from a label ('holderB_quartz_grains' on holder holderB -> 'quartz_grains')."""
     if holder:
         s = re.sub(rf"(?i)^(plate_?)?{re.escape(holder)}_", "", label)
         if s:
@@ -123,15 +123,15 @@ def pretty_edge(edge: tuple[str, str] | None) -> str:
 
 _DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
-# ctime form of the bluesky files' `file_creation_timestamp_iso` root attribute: 'Thu Nov  5 09:27:59 2026'. Parsed
+# ctime form of the bluesky files' `file_creation_timestamp_iso` root attribute: 'Fri Mar 14 09:27:59 2025'. Parsed
 # with a fixed English month table, never strptime: %b depends on the locale Qt sets at start.
 _CTIME = re.compile(r"(?i)^\s*(?:[a-z]{3,9}\.?,?\s+)?(" + "|".join(_MONTHS) + r")[a-z]*\.?\s+(\d{1,2}),?\s+"
                     r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s+(\d{4})\s*$")
 
 
 def parse_timestamp(text) -> dt.datetime | None:
-    """A timestamp in ISO 8601 form ('2026-11-05T09:27:59', '2026-11-05 09:27:59.12+00:00', '2026-11-05') or in
-    ctime form ('Thu Nov  5 09:27:59 2026', the CLS h5 files); None when it is neither."""
+    """A timestamp in ISO 8601 form ('2025-03-14T09:27:59', '2025-03-14 09:27:59.12+00:00', '2025-03-14') or in
+    ctime form ('Fri Mar 14 09:27:59 2025', the CLS h5 files); None when it is neither."""
     if isinstance(text, bytes):
         text = text.decode(errors="replace")
     s = str(text or "").strip()

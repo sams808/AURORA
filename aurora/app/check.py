@@ -514,7 +514,7 @@ class CheckPerspective(QWidget):
         self.update_actions()
 
     def run_checks(self) -> None:
-        """'Run the checks on holder N5': probe and load every stack of the current holder."""
+        """'Run the checks on holder holderA': probe and load every stack of the current holder."""
         if self.session.project is None or not self.session.stacks_of():
             return
         self._probe([self.session.current_holder], f"check:{self.session.current_holder}", load=True)

@@ -652,7 +652,7 @@ class ReportBuilder:
         return out
 
     def scope_slug(self) -> str:
-        """The scope part of the build folder name: 'all', 'N5', 'N5+N6', '2026-11-05', ... plus '_draft'."""
+        """The scope part of the build folder name: 'all', 'holderA', 'holderA+holderB', '2025-03-14', ... plus '_draft'."""
         parts = []
         for vals, n in ((self.holders, 3), (self.days, 2), (self.groups, 2)):
             if vals:
@@ -1102,7 +1102,7 @@ class ReportBuilder:
         return float(np.mean(fin[-5:])) if fin.size else 0.0
 
     def scope_text(self) -> str:
-        """'Scope: holders N5; all groups; Draft preset (figures at 110 dpi, no Appendix A or B)'."""
+        """'Scope: holders holderA; all groups; Draft preset (figures at 110 dpi, no Appendix A or B)'."""
         parts = [f"holders {', '.join(self.holders)}" if self.holders else "every holder"]
         if self.days:
             parts.append(f"days {', '.join(self.days)}")

@@ -1,7 +1,7 @@
 """Beamline constants of the SGM ambxas endstation (bluesky acquisition, 2026).
 
 Everything the readers and checks assume about the raw data lives here, with the date switches, so that a change at the
-beamline is one edit. Values come from sgm_report.py v2.5 (Nov 2026 beamtime) and the CLS SGM_Beamline_Analysis loader.
+beamline is one edit. Values come from sgm_report.py v2.5 and the CLS SGM_Beamline_Analysis loader.
 """
 import datetime as dt
 

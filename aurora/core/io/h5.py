@@ -68,8 +68,8 @@ def root_attrs(path: Path) -> dict[str, str]:
 
 def file_day(path: Path | str) -> str:
     """'YYYY-MM-DD' the scan file was written: the date of its `file_creation_timestamp_iso` root attribute (ISO or
-    ctime form, 'Thu Nov  5 09:27:59 2026'), else the date in the file name ('2026-11-05_092759_stack_data.h5',
-    'holderA_survey_2026-11-05_010013_695.00eV.h5'), else ''. A file that cannot be opened falls back to its name."""
+    ctime form, 'Fri Mar 14 09:27:59 2025'), else the date in the file name ('2025-03-14_092759_stack_data.h5',
+    'holderA_survey_2025-03-14_010013_695.00eV.h5'), else ''. A file that cannot be opened falls back to its name."""
     from aurora.core.names import date_in_text, parse_timestamp
     try:
         ts = parse_timestamp(root_attrs(Path(path)).get("file_creation_timestamp_iso", ""))
