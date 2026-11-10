@@ -175,6 +175,22 @@ def test_twelve_clusters_keep_their_own_colours(maps, qapp):
     assert len(set(categorical(20))) == 20
 
 
+def test_the_cluster_under_the_mouse_is_named(maps, qapp):
+    """Colour is not the only cue on the cluster map: hovering a pixel names its cluster under the map."""
+    win, mp, hc = maps
+    labels = np.arange(hc.n_pix) % 3
+    cr, M = _result(hc, labels)
+    mp.show_clusters(cr, M, {"scan": hc.name})
+    _tick(mp, {0, 1})
+    i = 5
+    mp.cluster_map.hovered.emit(float(hc.x[i]) + 0.2 * hc.pitch[0], float(hc.y[i]))
+    assert mp.cluster_at.full_text() == f"cluster {labels[i] + 1} · 4 px · not ticked"
+    mp.cluster_map.hovered.emit(float(hc.x[0]), float(hc.y[0]))
+    assert mp.cluster_at.full_text() == "cluster 1 · 4 px · ticked"
+    mp.cluster_map.hovered.emit(float(hc.x.max()) + 5 * hc.pitch[0], float(hc.y[0]))      # off the map
+    assert mp.cluster_at.full_text() == ""
+
+
 def test_export_writes_the_csv_and_the_map(maps, qapp, tmp_path):
     win, mp, hc = maps
     cr, M = _result(hc, np.arange(hc.n_pix) % 2)

@@ -420,7 +420,10 @@ class MapsPerspective(QWidget):
         left.body.addWidget(row_box)
         self.cluster_map = MapView(); self.cluster_map.set_tool("navigate")
         self.cluster_map.set_lookup(self._cluster_lut(self.n_k.value()))       # categorical colours, one per cluster
+        self.cluster_map.hovered.connect(self._cluster_hover)
         left.body.addWidget(self.cluster_map, 1)
+        self.cluster_at = ElidedLabel("", Qt.ElideRight); self.cluster_at.setObjectName("muted")   # not colour alone
+        left.body.addWidget(self.cluster_at)
         self.cluster_info = QLabel(""); self.cluster_info.setObjectName("muted"); self.cluster_info.setWordWrap(True); left.body.addWidget(self.cluster_info)
         w.addWidget(left)
         right = Card("Clusters: tick to merge", help_anchor="84-clusters")
@@ -485,7 +488,7 @@ class MapsPerspective(QWidget):
         self._cluster = None; self._cluster_M = None; self._cluster_meta = {}
         self.cluster_list.blockSignals(True); self.cluster_list.clear(); self.cluster_list.blockSignals(False)
         self.cluster_map.clear_overlays(); self.cluster_map.set_grid(None)
-        self.cluster_info.setText("")
+        self.cluster_info.setText(""); self.cluster_at.setText("")
         self._draw_clusters()
         self.element_grids = []
         self.map.clear_overlays(); self.map.set_grid(None)
@@ -1050,6 +1053,21 @@ class MapsPerspective(QWidget):
         self.cluster_map.set_grid(self._label_grid(cr.labels))
         self.cluster_map.set_lookup(self._cluster_lut(n_k, set(self.ticked_clusters())))
         self.cluster_map.image.setLevels((0, max(n_k - 1, 1)))      # label k -> LUT entry k
+
+    def _cluster_hover(self, x: float, y: float) -> None:
+        """The cluster under the mouse in words under the map ('cluster 3 · 340 px · ticked'): the colour is not the only
+        cue for telling twenty clusters apart."""
+        cr, hc = self._cluster, self.hc
+        if cr is None or hc is None:
+            return
+        px, py = hc.pitch
+        hit = np.where((np.abs(hc.x - x) <= px / 2) & (np.abs(hc.y - y) <= py / 2))[0]
+        k = int(cr.labels[hit[np.argmin((hc.x[hit] - x) ** 2 + (hc.y[hit] - y) ** 2)]]) if hit.size else -1
+        if k < 0:
+            self.cluster_at.setText("no cluster here" if hit.size else "")
+            return
+        n = int((cr.labels == k).sum())
+        self.cluster_at.setText(f"cluster {k + 1} · {n} px · " + ("ticked" if k in self.ticked_clusters() else "not ticked"))
 
     def _cluster_ticks_changed(self) -> None:
         self._show_cluster_map()

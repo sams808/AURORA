@@ -842,7 +842,8 @@ in the background with progress and **Cancel**; a cancel keeps the previous clus
 and `average`.
 
 **Clusters: tick to merge** lists every cluster with its colour and pixel count (*cluster 2 · 340 px*); the list is the
-legend of the map and of the spectra. Each cluster has its own categorical colour (up to 20). Tick the clusters to
+legend of the map and of the spectra. Each cluster has its own categorical colour (up to 20), and the line under the
+map names the cluster under the mouse (*cluster 3 · 340 px · ticked*). Tick the clusters to
 merge: the plot *cluster mean* shows the mean spectrum of every cluster and the merged mean of the ticked ones, the plot
 *ticked sum* their summed spectrum; unticked clusters are dimmed on the map.
 

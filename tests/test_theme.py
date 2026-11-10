@@ -150,6 +150,18 @@ def test_categorical_colours():
     assert theme.categorical(3) == theme.CURVES[:3]
     assert all(QColor(c).isValid() for c in c20)
     assert theme.categorical(25)[20] == c20[0]
+    # twenty clusters (the k-means maximum): each reads on the map and on both plot backgrounds (its mean spectrum),
+    # and no two are near-twins (0.3's hues at other lightnesses gave cluster 19 ~ cluster 1 at 0.074 in OKLab)
+    import math
+    for c in c20:
+        for bg in (theme.LIGHT["map_bg"], theme.LIGHT["plot_bg"], theme.DARK["plot_bg"]):
+            assert theme.contrast(c, bg) >= 3.0, (c, bg, round(theme.contrast(c, bg), 2))
+
+    def lab(c):
+        L, C, h = theme._to_oklch(c)
+        return L, C * math.cos(h), C * math.sin(h)
+    near = min((math.dist(lab(a), lab(b)), a, b) for i, a in enumerate(c20) for b in c20[i + 1:])
+    assert near[0] >= 0.10, near
 
 
 def test_export_tokens_are_light_on_white(qapp):
