@@ -102,6 +102,7 @@ def test_reduce_left_drag_draws_one_step(qapp, win):
     assert len(members(zs[0], sd.x, sd.y, sd.pitch)) > 0 and ses.undo_stack.count() == n + 1
     assert ses.undo_stack.text(n) == "add a rectangle to a new zone"
     assert rd.preview._traces and rd.map.hint_text() == idle_hint("rect+")       # back to what a drag does
+    assert rd.z_info.full_text().startswith(f"zone {zs[0].id}: 1 rect, ")       # the info line counts the stroke
     win.activateWindow()
     QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier)
     pump(qapp)

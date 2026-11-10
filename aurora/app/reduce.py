@@ -1339,6 +1339,7 @@ class ReducePerspective(QWidget):
 
     def _zones_changed(self) -> None:
         self._fill_zone_list()
+        self._fill_zone_info(self.session.zone())
         self._show_choice()
         self.redraw_map()
         z = self.session.zone()
@@ -1377,15 +1378,22 @@ class ReducePerspective(QWidget):
         self.z_group.addItems(sorted({r.group for r in self.session.sheet_rows if r.group}))
         if z is None:
             self.z_label.setEditText(""); self.z_group.setEditText(""); self.z_comment.setText("")
-            self.z_info.setText("no zone selected: choose Draw and drag on the map to create one")
         else:
             self.z_label.setEditText(z.label); self.z_group.setEditText(z.group); self.z_comment.setText(z.comment)
+        self._fill_zone_info(z)
+        for w in (self.z_label, self.z_group, self.z_comment):
+            w.blockSignals(False)
+
+    def _fill_zone_info(self, z: Zone | None) -> None:
+        """The zone card's info line (Advanced): what the zone is drawn of. Refreshed on every edit too: a stroke that
+        creates its zone selects it before its shape is written."""
+        if z is None:
+            self.z_info.setText("no zone selected: choose Draw and drag on the map to create one")
+        else:
             self.z_info.setText(f"zone {z.id}: {plural(len(z.rects), 'rect')}, {plural(len(z.polys), 'polygon')}, "
                                 f"{plural(len(z.erects), 'erase rect')}, {plural(len(z.epolys), 'erase outline')}, "
                                 f"{len(z.paint)} painted px, {len(z.erase)} erased px "
                                 f"· covered by {plural(len(z.members), 'loaded scan')}")
-        for w in (self.z_label, self.z_group, self.z_comment):
-            w.blockSignals(False)
 
     def _zone_edited(self) -> None:
         z = self.session.zone()
