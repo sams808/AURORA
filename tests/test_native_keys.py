@@ -89,3 +89,33 @@ def test_the_help_window_shows_macos_keys_on_a_mac(qapp, monkeypatch):
     text = b.toPlainText()
     assert "<Ctrl+Shift+A>" in text and "Ctrl+Shift+A" not in text.replace("<Ctrl+Shift+A>", "")
     b.deleteLater()
+
+
+def test_full_screen_and_holder_keys_work_on_a_mac(qapp, monkeypatch):
+    """F11 is Mission Control's 'Show Desktop' on macOS and MacBooks have no PgUp / PgDown: the native keys there."""
+    monkeypatch.setattr(shortcuts.sys, "platform", "darwin")
+    assert [k.toString() for k in shortcuts.fullscreen_keys()] == [QKeySequence("Ctrl+Meta+F").toString()]
+    assert [k.toString() for k in shortcuts.holder_keys(-1)] == ["Ctrl+PgUp", "Ctrl+Alt+Up"]
+    assert [k.toString() for k in shortcuts.holder_keys(1)] == ["Ctrl+PgDown", "Ctrl+Alt+Down"]
+    monkeypatch.setattr(shortcuts.sys, "platform", "win32")
+    assert [k.toString() for k in shortcuts.fullscreen_keys()] == ["F11"]
+    assert [k.toString() for k in shortcuts.holder_keys(1)] == ["Ctrl+PgDown"]       # Ctrl+Alt+arrow rotates screens
+    monkeypatch.undo()
+    from aurora.app.main import MainWindow
+    win = MainWindow()
+    try:
+        assert win.fullscreen_action.shortcuts() == shortcuts.fullscreen_keys()
+        assert win.next_holder_action.shortcuts() == shortcuts.holder_keys(1)
+    finally:
+        win.close()
+
+
+def test_no_missing_font_family_comes_first(qapp):
+    """A missing family at the head of a font list costs a font-alias scan at every start (macOS: 80-250 ms)."""
+    from PySide6.QtGui import QFontDatabase
+    from aurora.app import theme
+    assert "Inter" not in qapp.font().families() and "JetBrains" not in theme.MONO_FONT
+    installed = set(QFontDatabase.families())
+    if sys.platform == "win32" and installed:
+        assert qapp.font().families()[0] in installed
+        assert theme.MONO_FONT.split(",")[0].strip("' ") in installed

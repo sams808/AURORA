@@ -165,7 +165,7 @@ a recognisable edge are listed without one and never filtered out.
 
 1. Report: leave the title and the output folder. Look at **Check before building**: with the two zones of Tutorial 2
    it reads *2 zones · 2 spectra · 0 warnings*. Delete zone 2 in Reduce and come back: it reads *1 zone · 1 spectrum ·
-   1 warning*, with the finding *Sample '2 beta' of N5 (sample sheet) has no zone.* Click **Show** to open N5 in
+   0 warnings · 1 note*, with the finding *Sample '2 beta' of N5 (sample sheet) has no zone.* Click **Show** to open N5 in
    Reduce, or tick **Ignore**; **Ctrl+Z** in Reduce brings zone 2 back.
 2. **Build the report**. Browse the pages with **◀** **▶**, then **Open folder**: `reports/aurora/<date>_<time>_all/`
    holds the PDF, `figures/`, `csv/` (each CSV with its `.json` sidecar), `pages/` and `report_manifest.json`;

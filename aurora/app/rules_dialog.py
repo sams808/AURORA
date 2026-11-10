@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
 
 from aurora.app.help_text import explain, explain_all, explain_buttons, header_tips, labelled
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, plural, unit_suffix
-from aurora.app.widgets import ElidedLabel, FlowLayout
+from aurora.app.widgets import ElidedLabel, FlowLayout, fit_screen, page_scroll
 from aurora.core import rules as rl
 from aurora.core.constants import DETS
 from aurora.core.names import short_time, split_stack_id
@@ -60,7 +60,7 @@ class RulesDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings rules")
         self.setObjectName("rules_dialog")
-        self.resize(1100, 720)
+        fit_screen(self, 1100, 720)
         self.session = session
         self.rules: list[rl.Rule] = rl.rules_from_json(session.zones.rules)
         self._loading = False
@@ -168,7 +168,7 @@ class RulesDialog(QDialog):
         self.problem = ElidedLabel("", Qt.ElideRight)
         self.problem.setProperty("tone", "warn")
         form.addRow(self.problem)
-        split.addWidget(ed)
+        split.addWidget(page_scroll(ed))           # the editor scrolls: Apply now and Close stay on screen
         split.setSizes([260, 820])
         root.addWidget(split, 3)
         # ---- what would change

@@ -38,7 +38,8 @@ Contents
 - **Top bar**: the AURORA mark, the crumb *project ▸ day ▸ holder ▾*, the save indicator and the mode button
   (**Easy mode** or **Advanced mode**). Click the holder part of the crumb to choose another holder of the project;
   each entry reads like *N5 · 2026-11-05 · 1 stack · 2 zones*. **Ctrl+PgUp** and **Ctrl+PgDown** step to the previous
-  and next holder, wrapping around. The save indicator reads *unsaved* while a change waits for the autosave (it is
+  and next holder, wrapping around (on macOS also **Ctrl+Alt+Up** / **Ctrl+Alt+Down**, for keyboards without PgUp).
+  The save indicator reads *unsaved* while a change waits for the autosave (it is
   written within a second), *saved 12:03* once it is on disk, and *read-only* when the session cannot be saved (a
   session.json written by a newer AURORA, the project open in another AURORA, a folder that cannot be written); it is empty until the project has a session file.
 - *Rail* (left): the eight perspectives, **Home** to **Report**, in the order of a normal workflow; **Ctrl+1** …
@@ -76,7 +77,7 @@ in Report, and the same chip over the Compare library).
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
 | Fit | the **LCF** tab with its fixed options stated; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
 | Maps | not shown (**Ctrl+7** says *Maps is part of Advanced mode (Ctrl+Shift+A)*) | the whole perspective |
-| Report | **Options** (title, output, author, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab |
+| Report | **Options** (title, output, author, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab, the page **zoom** |
 | Menus | every entry except those on the right | **File > Restore zones from a backup…**, **File > Re-reduce the stack with the project ROI bins**, **Edit > History…** (and **View > Go to > Maps**) |
 | Settings | appearance, text size, report author, the last project at start, advanced mode, the update check | the de-spike threshold, the two default normalisations, the map colour map, the reference spectra folder |
 
@@ -84,7 +85,9 @@ in Report, and the same chip over the Compare library).
 
 **Appearance and text size.** **View > Appearance** is **Follow the system**, **Light** or **Dark**; **View > Text
 size** is **Normal**, **Large** or **Larger** (13, 15 or 17 px); both apply at once, without a restart, and are also
-in Settings. The map area, the rail and the top bar stay navy in both schemes, so colour maps look the same in both. A
+in Settings. A page that needs more height than the window has (the smallest window, a larger text size) scrolls
+vertically, so its plots keep a readable height and no control is cut. The map area, the rail and the top bar stay
+navy in both schemes, so colour maps look the same in both. A
 curve keeps its colour when the scheme changes, and every curve also has its own dash, so colour is never the only
 cue. Status cells show an icon with a word (*✓ ok*, *! check*, *✗ bad*). A focused control shows a 2 px outline.
 Every intensity map (Survey, Reduce, Maps) has its colour scale beside it, named by its quantity (*counts / I0*,
@@ -115,7 +118,7 @@ program, no permission) gives one calm dialog that names it.
   goes back to that point.
 - **View**: **Advanced mode** (**Ctrl+Shift+A**), **Appearance**, **Text size**, **Previous holder** (**Ctrl+PgUp**),
   **Next holder** (**Ctrl+PgDown**), **Go to** (**Ctrl+1** … **Ctrl+8**; Maps only in Advanced mode), **Full screen**
-  (**F11**).
+  (**F11**; Control-Command-F on macOS, where F11 shows the desktop).
 - **Help**: **User guide**, **Manual**, **Tutorials**, **Installation and sharing**; **Help on this page** (**F1**);
   **Keyboard shortcuts** (**Ctrl+/**, generated from the window, so it always lists every shortcut); **What's this?**
   (**Shift+F1**, then click a control to read what it does); **Open the demo beamtime**; **Run self-test…** (checks
@@ -132,7 +135,7 @@ key also deletes a sample, and the Help window, tooltips and messages show the M
 
 | Section | Keys |
 |---|---|
-| File, Edit, View | **Ctrl+O** open, **F5** reload, **Ctrl+Z** undo, **Ctrl+Y** / **Ctrl+Shift+Z** redo, **Ctrl+Shift+A** Advanced mode, **Ctrl+PgUp** / **Ctrl+PgDown** previous / next holder, **F11** full screen |
+| File, Edit, View | **Ctrl+O** open, **F5** reload, **Ctrl+Z** undo, **Ctrl+Y** / **Ctrl+Shift+Z** redo, **Ctrl+Shift+A** Advanced mode, **Ctrl+PgUp** / **Ctrl+PgDown** previous / next holder (also **Ctrl+Alt+Up** / **Ctrl+Alt+Down** on macOS), **F11** full screen (Control-Command-F on macOS) |
 | Go to | **Ctrl+1** Home, **Ctrl+2** Survey, **Ctrl+3** Reduce, **Ctrl+4** Check, **Ctrl+5** Compare, **Ctrl+6** Fit, **Ctrl+7** Maps (Advanced), **Ctrl+8** Report |
 | Help | **F1** help on this page, **Ctrl+/** keyboard shortcuts, **Shift+F1** what's this |
 | General | **Esc** cancel the running task, **Ctrl+Return** the main action of the page |
@@ -946,8 +949,8 @@ three cards: **Options**, **Check before building** and **Pages**.
 ### 9.2 Check before building
 
 **Check before building** runs by itself whenever the zones or the scope change while the Report perspective is shown.
-Its first line counts what the next build contains, for example *14 zones · 31 spectra · 3 warnings* (ignored findings
-are not counted). Three tabs:
+Its first line counts what the next build contains, for example *14 zones · 31 spectra · 3 warnings · 1 note* (ignored
+findings are not counted; a note, shown with the muted dot, drops no data and is counted apart). Three tabs:
 
 - **Findings** (the number of open findings in the tab title). Each row has an icon, the Finding, an **Ignore** tick
   and a **Show** button that opens Reduce on that holder and zone (and selects the scan when the finding names one).
@@ -974,8 +977,10 @@ are not counted). Three tabs:
 
 ### 9.3 What a build writes
 
-**Pages**: the pages are previewed with **◀** **▶**; **Open folder** opens the folder of the last build, **Open PDF**
-its PDF. The status line under **Build the report** names the build folder, the pages, spectra, CSVs and figures,
+**Pages**: the pages are previewed with **◀** **▶** at the width of the card; **zoom** (Advanced) sets 100, 150 or
+200 % of the page image instead (Ctrl+wheel steps through them); **Open folder** opens the folder of the last
+build, **Open PDF** its PDF.
+The status line under **Build the report** names the build folder, the pages, spectra, CSVs and figures,
 what changed since the previous build, and anything the build had to work around (a locked file).
 
 Each build is written into `<output>/.building-<time>-<pid>-<token>/` and renamed, once complete, to

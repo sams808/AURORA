@@ -858,7 +858,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         kinds = sorted(f.kind for f in found)
         assert kinds == ["no_included", "uncovered_stack", "ungrouped"], kinds
         p = plan(proj, zf)
-        assert p.totals() == "2 zones · 2 spectra · 3 warnings", p.totals()
+        assert p.totals() == "2 zones · 2 spectra · 2 warnings · 1 note", p.totals()
         out = base / "plan reports"
         draft = ReportBuilder(proj, zf, out, preset="draft")
         assert draft.png_dpi == 110 and not draft.appendix and not draft.maps
@@ -1480,7 +1480,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         pump(5)
         lst = rp.preflight_list
         total = rp.totals.text()
-        assert re.fullmatch(r"\d+ zones? · \d+ spectr(um|a) · \d+ warnings?", total), total
+        assert re.fullmatch(r"\d+ zones? · \d+ spectr(um|a) · \d+ warnings?( · \d+ notes?)?", total), total
         n = lst.topLevelItemCount()
         if n:
             rp.show_delegate.click(lst.topLevelItem(0))

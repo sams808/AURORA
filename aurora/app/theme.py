@@ -17,6 +17,7 @@ constants):
     make_plot / style_plot      create or theme a pyqtgraph widget now and on every change
     swatch_icon, status_brush, status_text, status_icon, set_item_tone, refill_tones, set_tone
     on_theme_changed(owner, fn) call fn(scheme) after every theme change while `owner` lives
+    min_height(widget, base)    a minimum height of px(base), kept through Text size changes (plots)
     export_tokens()             LIGHT plus CURVES on white: figures that leave the screen
     apply_theme(app)            AuroraStyle + palette + style sheet + pyqtgraph defaults, then notify
 """
@@ -24,10 +25,11 @@ from __future__ import annotations
 
 import colorsys
 import math
+import sys
 
 from PySide6.QtCore import QCoreApplication, QObject, QPointF, QRectF, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
-from PySide6.QtWidgets import QProxyStyle, QStyle, QStyleFactory
+from PySide6.QtWidgets import QAbstractSpinBox, QLineEdit, QProxyStyle, QStyle, QStyleFactory
 
 # ----------------------------------------------------------------------------- tokens
 # Ratios (WCAG 2.1) are listed in docs of the 0.4 foundation and checked by tests/test_theme.py.
@@ -118,8 +120,12 @@ STATUS_TEXT = {"ok": ("✓", "ok"), "warn": ("!", "check"), "bad": ("✗", "bad"
 TONE_ROLE = int(Qt.UserRole) + 0x7A0          # item data role holding the tone of a status / flag cell
 TONE_ICON_ROLE = TONE_ROLE + 1                # ... and whether the cell carries the tone's icon
 
-UI_FONT = "Inter, 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif"
-MONO_FONT = "'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace"
+# fonts: an installed family first on each platform. Inter and JetBrains Mono are not bundled, and a missing family
+# at the head of a list costs a font-alias scan at start (80-250 ms on macOS) for nothing
+UI_FAMILIES = {"win32": ["Segoe UI", "Arial"], "darwin": ["Helvetica Neue", "Arial"]}.get(sys.platform, ["DejaVu Sans"])
+UI_FONT = ", ".join(f"'{f}'" for f in UI_FAMILIES) + ", sans-serif"
+MONO_FONT = {"win32": "Consolas, monospace", "darwin": "Menlo, monospace"}.get(sys.platform,
+                                                                              "'DejaVu Sans Mono', monospace")
 
 
 # ----------------------------------------------------------------------------- colour maths
@@ -365,6 +371,13 @@ def on_theme_changed(owner: QObject, fn) -> None:
         n.changed.connect(_Hook(owner, fn).fire)
 
 
+def min_height(widget, base: float) -> None:
+    """widget.setMinimumHeight(px(base)) now and after every Text size change: a plot keeps room for its axes, ticks
+    and a readable data area at every text size (a scrolling page then gives it that height)."""
+    widget.setMinimumHeight(px(base))
+    on_theme_changed(widget, lambda _s, w=widget, b=base: w.setMinimumHeight(px(b)))
+
+
 # ----------------------------------------------------------------------------- cells: swatches, status, tones
 def _pixmap(px_: int) -> tuple[QPixmap, QPainter]:
     pm = QPixmap(px_ * 2, px_ * 2)
@@ -508,8 +521,9 @@ def set_tone(widget, tone: str | None) -> None:
 # ----------------------------------------------------------------------------- style (indicators)
 class AuroraStyle(QProxyStyle):
     """Fusion with AURORA's own check boxes, radio buttons and item-view check indicators, drawn from the tokens at
-    paint time: card fill with an edge border, action fill with an on_action tick, a dash for partial, alt fill with
-    a line border when disabled. Checkable list rows therefore always show a box in both schemes.
+    paint time: card fill with an edge border, action fill with an on_action tick, a dash for partial, and when
+    disabled the fill of a disabled field with the same edge border (>= 3:1, so an unticked disabled box still reads
+    as a box). Checkable list rows therefore always show a box in both schemes.
 
     No Python pixelMetric: Qt asks for pixel metrics hundreds of thousands of times while it lays out and restyles
     the window, and each call into Python doubled the time of a theme or text-size switch on a real beamtime. Check
@@ -519,6 +533,16 @@ class AuroraStyle(QProxyStyle):
     def __init__(self):
         super().__init__(QStyleFactory.create("Fusion"))
         self.setObjectName("aurora_style")
+
+    def polish(self, arg):
+        out = super().polish(arg)
+        if isinstance(arg, QAbstractSpinBox):
+            # the style sheet cannot pad a spin box's own line edit: its value sat on the border, where a line edit
+            # has its 1 px border and 8 px padding; the same 9 px inset here
+            edit = arg.findChild(QLineEdit)
+            if edit is not None:
+                edit.setTextMargins(9, 0, 0, 0)            # the padding is not scaled with Text size either
+        return out
 
     def drawPrimitive(self, element, option, painter, widget=None):
         if element in (QStyle.PE_IndicatorCheckBox, QStyle.PE_IndicatorItemViewItemCheck):
@@ -543,7 +567,7 @@ class AuroraStyle(QProxyStyle):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         if not enabled:
-            fill, border, mark = t["alt"], t["line"], t["disabled"]
+            fill, border, mark = t["action_disabled_bg"], t["edge"], t["disabled"]
         elif on or partial:
             fill, border, mark = t["action"], t["action"], t["on_action"]
         else:
@@ -580,7 +604,7 @@ class AuroraStyle(QProxyStyle):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         if not enabled:
-            fill, border, mark = t["alt"], t["line"], t["disabled"]
+            fill, border, mark = t["action_disabled_bg"], t["edge"], t["disabled"]
         elif on:
             fill, border, mark = t["action"], t["action"], t["on_action"]
         else:
@@ -724,10 +748,10 @@ QCheckBox, QRadioButton {{ color: {t['ink']}; spacing: 6px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: {px_(16)}; height: {px_(16)}; }}
 QCheckBox:disabled, QRadioButton:disabled {{ color: {t['disabled']}; }}
 QSpinBox, QDoubleSpinBox {{ padding-right: 20px; }}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 18px;
-    border-left: 1px solid {t['line']}; border-top-right-radius: 8px; background: {t['alt']}; }}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
-    border-left: 1px solid {t['line']}; border-bottom-right-radius: 8px; background: {t['alt']}; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: padding; subcontrol-position: top right; width: 18px;
+    border-left: 1px solid {t['line']}; border-top-right-radius: 7px; background: {t['alt']}; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: padding; subcontrol-position: bottom right;
+    width: 18px; border-left: 1px solid {t['line']}; border-bottom-right-radius: 7px; background: {t['alt']}; }}
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover,
 QDoubleSpinBox::down-button:hover {{ background: {t['select']}; }}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
