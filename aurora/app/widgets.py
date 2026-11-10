@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import html
 import logging
+import os
 import time
 import traceback
 from contextlib import contextmanager
@@ -649,7 +650,10 @@ def notify_saved(widget: QWidget | None, paths) -> str:
     ps = [Path(p) for p in paths if p]
     if not ps:
         return ""
-    folder = ps[0].parent
+    try:                                        # files in several folders (one per sample): the folder holding them all
+        folder = Path(os.path.commonpath([str(p.parent) for p in ps]))
+    except ValueError:                          # different drives
+        folder = ps[0].parent
     plain = f"wrote {', '.join(p.name for p in ps)} → {folder}"
     if isinstance(widget, ElidedLabel):
         widget.setText(plain)

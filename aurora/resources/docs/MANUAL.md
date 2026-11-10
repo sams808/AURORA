@@ -415,7 +415,7 @@ undo step, and the session is backed up just before.
 ### 4.4 The zone card
 
 - Easy mode (**4 · Reduce**): a read-only line of the settings used, for example *I0 mcc ch1 (Au mesh) · TEY mcc ch4 ·
-  zone sum · fluorescence / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3 saturated, left out)*, and **Add to
+  zone mean (John Bussey's reduction) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)*, and **Add to
   Check** (**Ctrl+Return**), which queues the selected sample on the current scan for Check (disabled while the region
   holds no point), and **Load polygon…** (4.3). A sample still called *zone 1* is saved under that name: the status
   line says so (John Bussey's GUI asked for a label). Settings that do not exist yet are made from the Easy defaults.
@@ -444,10 +444,10 @@ de-spike k).
 | include | the scan contributes to the report figures and CSVs (Check's **Looks OK** is the same tick) |
 | SDD1–SDD4 | detectors in the fluorescence sum (saturated detectors start unticked) |
 | line | the emission window: a fixed line, the total XRF, or the XRF windows of step 2 (4.8) |
-| signal | PFY or IPFY. IPFY divides I0 by the counts of the line (inverse partial fluorescence yield, Achkar et al., Phys. Rev. B 83, 081106(R), 2011): use it with a non-resonant line (O Kα across the F K edge). The traces are named ipfy_sum_norm / ipfy_sddN_norm and the normalisation never divides by I0 a second time. New scans start with IPFY when the sgm_report mode says IPFY or the line belongs to another element than the edge |
+| signal | PFY or IPFY. IPFY divides I0 by the counts of the line (inverse partial fluorescence yield, Achkar et al., Phys. Rev. B 83, 081106(R), 2011): use it with a non-resonant line (O Kα across the F K edge); with the edge's own line (F Kα on an F K scan) it is 1 / PFY, and the traces' notes and Check say so. The traces are named ipfy_sum_norm / ipfy_sddN_norm and the normalisation never divides by I0 a second time. New scans start with IPFY when the sgm_report mode says IPFY or the line belongs to another element than the edge |
 | fluo | fluorescence normalisation: raw counts; / I0; / I0, pre-edge = 0 (the pre-edge line removed); / I0, edge jump = 1; / I0, area = 1; / I0, maximum = 1 |
 | TEY | include TEY and its normalisation (same choices) |
-| de-spike, k | single-point outliers beyond k MADs of a 5-point running median are interpolated (k = 6 MAD by default). New scans use the coherent rule: a spike in one SDD is looked for against the other three, so a white line that all four detectors show is kept (the earlier rule, still used by files without a mode, could take a one-point white line of a coarse scan for a spike). Spike energies are listed in eV in the traces' notes, and spikes next to the edge give a note *check the preview* |
+| de-spike, k | single-point outliers beyond k MADs of a 5-point running median are interpolated (k = 6 MAD by default). New scans use the coherent rule: a spike in one SDD is looked for against the other three, so a white line that all four detectors show is kept (the earlier rule, still used by files without a mode, could take a one-point white line of a coarse scan for a spike). The coherent rule never sets its threshold below k times the trace's point-to-point noise (from its second differences), so the smooth traces of a large zone do not have ordinary noise taken for spikes, and it keeps an I0 outlier that the fluorescence and TEY follow (a beam fluctuation, which the division by I0 takes out). Spike energies are listed in eV in the traces' notes, and spikes next to the measured edge give a note *check the preview* |
 | I0 | own, or the good-I0 mean of the scans ticked in Check (scans flagged I0 invalid start with the good-I0 mean). Energies where the I0 used is below 20 % of its median (beam loss) are left out of every / I0 trace and counted in the notes |
 | pre (eV), post (eV) | windows in eV, "680-684" style; blank = first 15 % / last 20 % of the energies, the pre window ending at least 5 eV below E0 (the largest local maximum of the smoothed derivative, as in Compare; the browser zone tool kept the 15 %), else the first energy alone; a note in Check and the report says when it was shortened. A negative edge jump (a signal that falls across the edge) is kept as measured, divided by its size, with a note, as larch does |
 
@@ -492,9 +492,9 @@ region*. The first time, the raw spectra are read in the background (**Cancel** 
 
 - **preset**: every fixed line of `config/roi_bins.json` (*F Kα (fixed bins)*; a line the stack was reduced without
   is summed from the raw spectra with the same bins), the *line of the edge* (only with an SDD calibration: the
-  xraydb emission line ± 1.5 σ, σ from roi_bins.json, the rule of sgm_report's fixed bins), and *custom*.
+  xraydb emission line ± 1.5 σ at each detector's calibrated channel, σ from roi_bins.json, the rule of sgm_report's fixed bins, so a line of roi_bins.json gets its own bins), *John Bussey's 60:83 (F Kα)* when neither gives the edge's line (his GUI's default window, which holds F Kα at the nominal 10 eV / channel; not offered for an edge whose line it does not hold), and *custom*. Without roi_bins.json a stack has the total XRF only, which holds every emission line, not just the edge's: the line below the boxes says so.
 - Four draggable windows, one per detector, in the series colours and dashes. **same range for all detectors**
-  (Advanced, on by default): dragging one moves all four; untick it to set each detector apart (**for** chooses the
+  (Advanced, on by default): dragging one, or a change of **lo** or **hi**, moves all four by as many channels (windows that differ per detector, such as a line's fixed bins, keep their offsets; Easy mode always works so, and the line below the boxes names the four windows); ticking it gives all four the shown window; untick it to set each detector apart (**for** chooses the
   detector the boxes edit).
 - **lo** and **hi** in channels; hi is excluded, John Bussey's convention (60 and 83 sum channels 60 to 82). The line
   below gives the eV equivalent from the calibration, or *10 eV/ch nominal* without one.
@@ -626,13 +626,14 @@ For one zone and scan, Check's **Save ticked → Compare** writes into `processe
 | `<sample>_gui_settings.json` | his keys (rois, params {i0, mode, tey}, stack_h5, survey_h5, spike_z, drop_energy_ranges, drop_indices) plus an `aurora` block (version, zone, settings, points, spikes, masked and incomplete energies) |
 
 The numbers follow his reduction: per detector the mean over the zone pixels of the counts in channels [lo, hi) (his
-'mean'; I0 = mcc ch1 and TEY = mcc ch4 over the same pixels). AURORA's processing is stated in the header: each trace
-is interpolated at its own spikes (the zone's de-spike), energies with I0 below 20 % of its median keep their counts
+'mean'; I0 = mcc ch1 and TEY = mcc ch4 over the same pixels; a detector file cut short gives the mean of the pixels it holds, read from the raw folder also where the reduced stack left that energy out). AURORA's processing is stated in the header: each trace
+is interpolated at its own spikes (the zone's de-spike; a spike of the sum in each detector summed, so sdd_total stays sdd1 + … + sdd4), energies with I0 below 20 % of its median keep their counts
 but get an empty I0, and sdd_total / sdd_mean are over the ticked detectors, empty when one of them is missing at that
 energy (his GUI summed the others). bad_point is True at every such energy. On his BO3 stack the written file equals
 his `_full_reduced.csv` in every sdd1–4, I0 and TEY value (relative 1e-12). Compare reads the files as sdd-scaled,
 sdd_total and TEY (each / I0). A zone using IPFY is written as counts too (the header says so): read back, sdd_total /
 I0 is the PFY of that line.
+Unlike his GUI's default (its *Detect spikes* is off), the files of Easy mode hold de-spiked values (step 4 says so; in Advanced mode the scan card's *de-spike, k* switches it off, 4.5). His spike_z key keeps his meaning, the robust-z threshold of *Detect spikes*: AURORA does not run that detector and writes None; its own de-spike is under despike in the header and despike_k in the `aurora` block. His *Drop energy ranges* and *Drop point indices* have no AURORA equivalent (both keys are written empty). The zone mean of the files and the zone sum of AURORA's traces give the same / I0 spectra.
 
 ## 6. Compare
 
@@ -1133,6 +1134,7 @@ Re-reduce the stack with the project ROI bins** (Advanced) reduces that stack fr
 - **Numbers differ from the beamtime report**: AURORA uses the sgm_report caches when they exist; after deleting
   `processed/`, the raw reduce gives the same spectra within floating point but the I0 flags come from AURORA's own
   Check instead of the summary.
+  TEY / I0 differs a little (up to 0.1 % on the 2026 pads): AURORA divides the zone's TEY sum by its I0 sum, sgm_report averages the per-pixel TEY / I0 ratios; the fluorescence / I0 traces are the same in both (ratios of sums).
 - **Check names a saturated SDD that sgm_report did not**: AURORA's own check (qc.json) is a second source; both are
   quoted with their source.
 - **A white line disappeared on a coarse scan**: files from earlier versions use the classic de-spike, which takes

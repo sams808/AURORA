@@ -1460,9 +1460,11 @@ class ReducePerspective(QWidget):
         return easy_scan_settings(scan, self.session.flags_of(scan), labels=list(sd.labels) if sd is not None else None)
 
     def step4_text(self, sid: str | None = None) -> str:
-        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3
-        saturated, left out)': the settings of the current sample on the current stack, read-only (the Easy defaults
-        until it has some). A flagged SDD still in the sum or an I0 flagged invalid still used is named."""
+        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · / I0, edge jump = 1 · de-spike
+        k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)': the settings of the current sample on
+        the current stack, read-only (the Easy defaults until it has some). A flagged SDD still in the sum or an I0
+        flagged invalid still used is named. The zone mean is what the saved files hold (the / I0 traces of the zone
+        sum are the same); the de-spike, on in Easy, was off by default in his GUI, so the line says so."""
         from aurora.core.constants import DETS
         from aurora.core.flags import i0_invalid, saturated_dets
         sd = self.current_stack()
@@ -1488,8 +1490,9 @@ class ReducePerspective(QWidget):
             i0 = "I0 mcc ch1 (Au mesh)" + (" (flagged invalid, still used)" if bad_i0 else "")
         despike = "de-spike off"
         if st.despike:          # a session without a de-spike rule keeps the earlier one (no control sets it)
-            despike = f"de-spike k = {st.k:g}" + (" (the earlier rule)" if st.despike_mode == "classic" else "")
-        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", "zone sum",
+            despike = (f"de-spike k = {st.k:g} (the earlier rule), John Bussey's default: off"
+                       if st.despike_mode == "classic" else f"de-spike k = {st.k:g} (John Bussey's default: off)")
+        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", "zone mean (John Bussey's reduction)",
                            f"fluorescence {NORM_LABELS.get(st.fluo_norm, st.fluo_norm)}", despike, dets])
 
     def zone_differences(self, z: Zone | None = None) -> dict[str, list[str]]:

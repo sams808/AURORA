@@ -414,7 +414,8 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
             who = f"'{z.label}' ({hname})"
             if not z.group.strip():
                 findings.append(Finding(f"ungrouped|{key}|{z.id}", "ungrouped",
-                                        f"{who} has no group: it goes under '{UNGROUPED}'.", key, z.id))
+                                        f"{who} has no group: it goes under '{UNGROUPED}' (the group is set in Reduce, "
+                                        "Zone card, Advanced mode).", key, z.id))
             included = [(sid, st) for sid, st in z.settings.items() if st.include]
             good_asked = []
             for sid, st in included:

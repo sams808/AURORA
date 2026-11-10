@@ -82,6 +82,24 @@ def test_ipfy_traces_on_the_demo_are_i0_over_the_counts(demo):
     assert pfy.signal == "pfy" and pfy.trace_names()["sum"] == "fluo_sum_norm" and not any("IPFY" in n for n in pfy.notes)
 
 
+def test_ipfy_of_the_resonant_line_is_named_for_what_it_is(demo):
+    """I0 / (F Kα counts) on an F K stack is exactly 1 / PFY of that line, which the i0jump normalisation then turns
+    into a rising edge that passes for an IPFY. IPFY needs a line of another element: the traces say so and Check
+    warns. A non-resonant line (O Kα across the F K edge) gets no such note."""
+    from aurora.core import qc
+    sd, pix = demo
+    assert sd.edge == ("F", "K")
+    t = zone_traces(sd, pix, ScanSettings(line="F Kα", fluo_norm="raw", signal="ipfy", despike=False))
+    pfy = zone_traces(sd, pix, ScanSettings(line="F Kα", fluo_norm="i0", signal="pfy", despike=False))
+    assert np.allclose(t.sum, 1 / pfy.sum, rtol=1e-12, equal_nan=True)
+    note = next((n for n in t.notes if n.startswith("IPFY of the resonant line")), None)
+    assert note is not None and "F Kα" in note and "1 / PFY" in note, t.notes
+    assert ("warn", note) in qc.check_zone(t, sd)
+    to = zone_traces(sd, pix, ScanSettings(line="O Kα", fluo_norm="raw", signal="ipfy", despike=False))
+    assert not any(n.startswith("IPFY of the resonant line") for n in to.notes)
+    assert not any(n.startswith("IPFY of the resonant line") for n in pfy.notes)
+
+
 def test_ipfy_edge_jump_positive_in_every_normalisation_mode(demo):
     """The demo's synthetic raw data has no non-resonant response (its 'O Kα' window holds the tail of the F Kα peak,
     which rises with the edge step at 682 eV, so I0 / S falls there, correctly). Here the demo stack's O Kα counts are

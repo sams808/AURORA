@@ -89,6 +89,10 @@ def test_bad_point_fraction_and_flags():
     msgs = check_zone(build_traces(sums(), st2, good_curve=np.full(len(E), 2.5)), flags=[sat, inv])
     assert "SDD saturated: SDD2 (AURORA check): left out of the sum" in levels(msgs, "ok")
     assert "I0 invalid (sgm_report): divided by the good-I0 mean" in levels(msgs, "ok")
+    # the row's headline is its first warning: a saturated SDD in the sum comes before 'missing energy points'
+    det3 = sums().det["F Kα"].copy(); det3[[5, 6], :] = np.nan
+    warn = levels(check_zone(build_traces(sums(det=det3), st), flags=[sat]), "warn")
+    assert warn[0].startswith("SDD saturated: SDD2") and "2 missing energy points" in warn[1:]
 
 
 # ----------------------------------------------------------------------------- the page on the demo
@@ -220,6 +224,7 @@ def test_save_ticked_to_compare(qapp, demo):
     added = lib.requests[before:]
     assert added and {r.label for r in added} == {z.label} and {r.signal for r in added} <= {"sdd-scaled", "sdd_total", "TEY"}
     assert "added to Compare" in ck.queue_note.text() and not asked
+    assert "1 spectrum saved in John Bussey" in ck.queue_note.text()
     # a second save asks before overwriting; 'no' skips the spectrum
     ck.ask_overwrite = lambda paths: asked.append(paths) or "no"
     ck.save_btn.click()
@@ -350,3 +355,14 @@ def test_looking_at_an_empty_queue_writes_nothing(qapp, fake_project):
         win.jobs.wait_idle(30000)
         win.close()
     assert not (fake_project / ".aurora" / "session.json").exists()
+
+
+def test_the_saved_note_names_the_folder_of_every_file(qapp, tmp_path):
+    """Two samples are two folders: the note points at the folder that holds both, not at the first one."""
+    from PySide6.QtWidgets import QLabel
+    from aurora.app.widgets import notify_saved
+    a, b = tmp_path / "reduced" / "1 alpha" / "1 alpha_full_reduced.csv", tmp_path / "reduced" / "2 beta" / "2 beta_full_reduced.csv"
+    lab = QLabel()
+    plain = notify_saved(lab, [a, b])
+    assert plain.endswith(f"→ {tmp_path / 'reduced'}") and "1 alpha_full_reduced.csv, 2 beta_full_reduced.csv" in plain
+    assert notify_saved(QLabel(), [a]).endswith(f"→ {a.parent}")

@@ -33,7 +33,8 @@ def test_exactly_the_three_findings(tmp_path):
         ("ungrouped", "N5", 2, None), ("no_included", "N5", 3, None), ("uncovered_stack", "N6", None, sid2)])
     assert [f.id for f in preflight(proj, zf)] == [f.id for f in found]                  # stable ids
     texts = {f.kind: f.text for f in found}
-    assert texts["ungrouped"] == "'2 beta' (N5) has no group: it goes under 'Ungrouped'."
+    assert texts["ungrouped"] == ("'2 beta' (N5) has no group: it goes under 'Ungrouped' (the group is set in Reduce, "
+                                  "Zone card, Advanced mode).")
     assert texts["no_included"] == "'3 gamma' (N5) has no included scan, so it is left out."
     assert "covered by no zone" in texts["uncovered_stack"]
     p = plan(proj, zf)

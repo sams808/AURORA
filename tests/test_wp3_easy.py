@@ -51,8 +51,10 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
     assert rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 points of ")
     # step 4: the read-only line and the primary 'Add to Check'; the preview keeps one toggle
     assert rd.step4_line.isVisible() and rd.add_check_btn.isVisible() and rd.add_check_btn.objectName() == "primary"
-    assert rd.step4_line.text().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum")
-    assert "de-spike k = 6" in rd.step4_line.text() and rd.step4_line.text().endswith("SDD1-4")
+    # the saved files hold the zone mean (John Bussey's reduction) and de-spiked values, which his GUI did not by default
+    assert rd.step4_line.text().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction)")
+    assert "de-spike k = 6 (John Bussey's default: off)" in rd.step4_line.text()
+    assert rd.step4_line.text().endswith("SDD1-4")
     assert rd.preview.all_scans.isVisible() and rd.preview.all_scans.text() == "all scans of the sample"
     assert not rd.preview.toggles.isVisible()
     # step 2: preset, spectrum, lo / hi
