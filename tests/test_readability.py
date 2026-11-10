@@ -295,6 +295,10 @@ def test_the_page_preview_fits_the_card_and_zooms(qapp, tmp_path):
     pump(qapp)
     vw = rp.scroll.viewport().width()
     assert rp.zoom.isEnabled() and rp.page_view.pixmap().width() == max(200, vw - 16)       # fit width, not 820 px
+    assert rp.zoom_pair.isHidden()                    # Easy: the width of the card, no zoom box
+    mode.set_advanced(True)
+    pump(qapp)
+    assert rp.zoom.isVisible()
     rp.zoom.setCurrentIndex(rp.zoom.findData(1.5))
     assert rp.page_view.pixmap().width() == round(910 * 1.5)
     vp = rp.scroll.viewport()
@@ -303,6 +307,9 @@ def test_the_page_preview_fits_the_card_and_zooms(qapp, tmp_path):
                      Qt.NoScrollPhase, False)
     qapp.sendEvent(vp, ev)
     assert rp.zoom.currentData() == 2.0               # Ctrl+wheel up: one step larger
+    mode.set_advanced(False)
+    pump(qapp)
+    assert rp.zoom.currentData() == 0.0               # back in Easy: fit width again
     win.close()
 
 

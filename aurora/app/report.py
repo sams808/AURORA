@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, Q
 
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain, explain_all, header_tips, labelled
-from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
+from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.vocab import plural
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, fit_height,
@@ -189,7 +189,8 @@ class ReportPerspective(QWidget):
             nav_row.addWidget(w)
         tail = QWidget()                                # zoom and the two Open buttons wrap below on a narrow card
         tl = FlowLayout(tail, spacing=6)
-        for w in (pair(labelled("zoom", self.zoom, "report.zoom"), self.zoom), self.open_btn, self.pdf_btn):
+        self.zoom_pair = pair(labelled("zoom", self.zoom, "report.zoom"), self.zoom)   # Advanced (Easy: fit width)
+        for w in (self.zoom_pair, self.open_btn, self.pdf_btn):
             tl.addWidget(w)
         nav_row.addStretch(1)
         nav_row.addWidget(tail)
@@ -247,7 +248,8 @@ class ReportPerspective(QWidget):
         from aurora.app.theme import on_theme_changed
         on_theme_changed(self, lambda _s: self._fill_plan())
         # Easy mode: all groups and both appendices, stated read-only; the choices are Advanced
-        mark_advanced(self.scope_box)
+        mark_advanced(self.scope_box, self.zoom_pair)
+        on_mode_changed(self, lambda adv: adv or self.zoom.setCurrentIndex(0), call_now=False)     # Easy: fit width
         mark_advanced_tab(self.check_tabs, self.scope_page)
         mark_easy(self.scope_line)
         self._scope_text()
@@ -683,7 +685,7 @@ class ReportPerspective(QWidget):
         if obj is self.scroll.viewport():
             if ev.type() == QEvent.Resize and not self.zoom.currentData():
                 self._scale_page()
-            elif ev.type() == QEvent.Wheel and ev.modifiers() & Qt.ControlModifier:
+            elif ev.type() == QEvent.Wheel and ev.modifiers() & Qt.ControlModifier and not self.zoom_pair.isHidden():
                 step = 1 if ev.angleDelta().y() > 0 else -1
                 self.zoom.setCurrentIndex(max(0, min(self.zoom.count() - 1, self.zoom.currentIndex() + step)))
                 return True

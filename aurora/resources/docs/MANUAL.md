@@ -77,7 +77,7 @@ in Report).
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
 | Fit | the **LCF** tab with its fixed options stated; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
 | Maps | not shown (**Ctrl+7** says *Maps is part of Advanced mode (Ctrl+Shift+A)*) | the whole perspective |
-| Report | **Options** (title, output, author, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab |
+| Report | **Options** (title, output, author, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab, the page **zoom** |
 | Menus | every entry except those on the right | **File > Restore zones from a backup…**, **File > Re-reduce the stack with the project ROI bins**, **Edit > History…** (and **View > Go to > Maps**) |
 | Settings | appearance, text size, report author, the last project at start, advanced mode, the update check | the de-spike threshold, the two default normalisations, the map colour map, the reference spectra folder |
 
@@ -926,8 +926,8 @@ findings are not counted; a note, shown with the muted dot, drops no data and is
 
 ### 9.3 What a build writes
 
-**Pages**: the pages are previewed with **◀** **▶**; **zoom** sets their size (*fit width*, the default, or 100, 150 or
-200 % of the page image; Ctrl+wheel over the page steps through them); **Open folder** opens the folder of the last
+**Pages**: the pages are previewed with **◀** **▶** at the width of the card; **zoom** (Advanced) sets 100, 150 or
+200 % of the page image instead (Ctrl+wheel steps through them); **Open folder** opens the folder of the last
 build, **Open PDF** its PDF.
 The status line under **Build the report** names the build folder, the pages, spectra, CSVs and figures,
 what changed since the previous build, and anything the build had to work around (a locked file).
