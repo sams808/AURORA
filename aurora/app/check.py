@@ -484,14 +484,16 @@ class CheckPerspective(QWidget):
         n_scans = sum(len(v) for v in holders.values())
 
         def job(cb):
-            total = n_scans * (2 if load else 1) + 1
+            total = (n_scans * (2 if load else 1) + 1) * 100              # per stack: 100 steps of its energies
             res = qc.probe_holders(project, holders, ses.stack_id,
-                                   progress=lambda i, n, m: cb(i, total, m))
+                                   progress=lambda i, n, m: cb(i * 100, total, m))
             if load:
                 for i, s in enumerate(s for v in holders.values() for s in v):
-                    cb(n_scans + 1 + i, total, f"loading {s.name}")
-                    try:
-                        ses.stack(ses.stack_id(s))
+                    base = (n_scans + 1 + i) * 100
+                    cb(base, total, f"loading {s.name}")
+                    try:                                # each energy folder reports: Cancel stops within one
+                        ses.stack(ses.stack_id(s), progress=lambda j, m, t="", b=base: cb(b + int(100 * j / max(m, 1)),
+                                                                                           total, t))
                     except Exception as err:                    # noqa: BLE001  a damaged stack: listed without I0
                         log.warning("%s not loaded for the good-I0 list (%s)", s.name, err)
             return res
@@ -661,9 +663,13 @@ class CheckPerspective(QWidget):
             self.spike_note.setText("")
             set_plot_hint(self.sdd_plot, "select a zone in Reduce and a scan that covers it")
             return
+        st = z.settings[sid]
+        if st.i0_source == "good" and not self.session.ensure_good_i0(self, self._update_sdd, taskbar=self.taskbar):
+            self.sdd_note.setText("reading the good-I0 scans …")       # drawn again when they are in
+            set_plot_hint(self.sdd_plot, "reading the good-I0 scans …")
+            return
         set_plot_hint(self.sdd_plot, None)
         pix = members(z, sd.x, sd.y, sd.pitch)
-        st = z.settings[sid]
         good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
         t = zone_traces(sd, pix, st, good)
         if t is None:
@@ -741,6 +747,9 @@ class CheckPerspective(QWidget):
                                  taskbar=self.taskbar)
             return row
         row.n_total = sd.n_pix
+        if st.i0_source == "good" and not ses.ensure_good_i0(self, self._refresh_queue, taskbar=self.taskbar):
+            row.state = "loading"                         # the good-I0 scans are read in a job, then the row
+            return row
         scan = ses.scan_of(it.sid)
         flags = ses.flags_of(scan) if scan is not None else []
         key = self._row_key(it, zone, st, sd, flags)
@@ -1070,6 +1079,10 @@ class CheckPerspective(QWidget):
         ticked = [r for r in self._rows if r.state == "ready" and r.settings.include and r.frame is not None]
         if not ticked:
             self.queue_note.setText("Tick 'Looks OK' for the spectra to save.")
+            return
+        if any(r.settings.i0_source == "good" for r in ticked) \
+                and not ses.ensure_good_i0(self, self.save_ticked, taskbar=self.taskbar):
+            self.queue_note.setText("reading the good-I0 scans first: the spectra are saved once they are in")
             return
         bad = [r for r in ticked if r.level == "bad"]
         good = [r for r in ticked if r.level != "bad"]
