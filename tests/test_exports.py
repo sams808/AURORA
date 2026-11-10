@@ -133,7 +133,7 @@ def test_a_write_error_is_one_calm_dialog(qapp, tmp_path, monkeypatch, excepthoo
     real_open = builtins.open
 
     def locked(path, *a, **k):
-        if str(path).endswith("lcf.csv"):
+        if "lcf.csv" in Path(str(path)).name:            # the file or its temporary twin (written atomically)
             raise PermissionError(13, "Permission denied", str(path))
         return real_open(path, *a, **k)
 

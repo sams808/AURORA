@@ -788,13 +788,15 @@ class ComparePerspective(QWidget):
             self.notify(out)
 
     def export(self, path: Path, opts=None) -> list[Path]:
-        """The wide CSV of the shown traces as processed, the figure at the chosen size (PNG / SVG / PDF, drawn again
-        with matplotlib, offsets and x range as on screen), and the config JSON (+ its sidecar of arrays)."""
+        """The wide CSV of the shown traces as processed (the quantity the figure shows: the first derivative when it
+        is ticked, '<label>-d/dE <signal>' columns; without the offsets), the figure at the chosen size (PNG / SVG /
+        PDF, drawn again with matplotlib, offsets and x range as on screen), and the config JSON (+ its sidecar of
+        arrays)."""
         from aurora.app.figure_export import current_options, export_colour, styled
         from aurora.core.figures import FigureTrace, compare_figure, save_figure
         path = Path(path)
         traces = self.plot_traces()
-        export_wide_csv(path, [(t.r, t.E, t.nr.y) for t in traces])
+        export_wide_csv(path, [(t.r, t.E, t.base) for t in traces], quantity="d/dE " if self.deriv.isChecked() else "")
         out = [path]
         xr = self._xrange()
         o = styled(opts or current_options(), x_range=tuple(xr) if xr else None, ylabel=self._ylabel(units=True),
