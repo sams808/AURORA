@@ -246,12 +246,16 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         pump(qapp)
         z = ses.zone()
         assert z.settings[sid].line == "F Kα" and z.settings[sid].roi is None
-        # 'same range' ticked: setting one region moves all four, and the spins follow
+        # 'same range' ticked: dragging one region moves all four by as much (the fixed bins keep their offsets),
+        # and the spins follow (SDD1's window)
         assert wc.same_range.isChecked()
         wc.regions[1].setRegion((50, 70))
         pump(qapp)
+        assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(49, 69), (50, 70), (51, 71), (52, 72)]
+        assert (wc.lo.value(), wc.hi.value()) == (49, 69) and wc.preset.currentText() == "custom"
+        wc.set_window(None, 50, 70)                    # det None: the same window for all four
+        pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(50, 70)] * 4
-        assert (wc.lo.value(), wc.hi.value()) == (50, 70) and wc.preset.currentText() == "custom"
         wc.commit_now()
         pump(qapp)
         st = z.settings[sid]
@@ -273,10 +277,73 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc.set_window(None, 46, 58, commit=False)
         assert wc.choice() == {"line": "O Kα", "roi": None}
         # unlinked (Advanced): one detector apart
+        from aurora.app import mode
+        mode.set_advanced(True)
         wc.same_range.setChecked(False)
         wc.det.setCurrentIndex(2)
         wc.set_window(2, 10, 20, commit=False)
         assert wc.windows()["sdd3"] == [10, 20] and wc.windows()["sdd1"] == [46, 58]
+    finally:
+        from aurora.app import mode
+        mode.set_advanced(False)
+        close(win)
+
+
+def test_easy_nudges_keep_the_per_detector_windows(qapp, tmp_path):
+    """Easy mode has one lo / hi pair for the four windows and no 'same range' or 'for' control. A nudge moves every
+    window by one channel: the fixed bins of a line (60:74, 61:75, 62:76, 63:77 on the demo) keep their offsets,
+    where they used to collapse onto SDD1's window. The line under the spins names the four windows."""
+    from aurora.cli import cmd_demo
+    from wp3_helpers import close, open_window, pump
+    root = tmp_path / "demo"
+    cmd_demo(root)
+    win, sid = open_window(qapp, Project.discover(root))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        assert not wc.same_range.isVisible() and not wc.det_box.isVisible()
+        assert "SDD2 61:75, SDD3 62:76, SDD4 63:77 move with it" in wc.ev_label.text()
+        wc.hi.setValue(wc.hi.value() + 1)
+        wc.lo.setValue(wc.lo.value() - 1)
+        wc.commit_now()
+        pump(qapp)
+        expect = {"sdd1": [59, 75], "sdd2": [60, 76], "sdd3": [61, 77], "sdd4": [62, 78]}
+        assert wc.windows() == expect and ses.zone().settings[sid].roi == expect
+        assert wc.ev_label.text().startswith("SDD1: channels 59:75")
+        # the same with the hidden 'same range' unticked (left so by Advanced): Easy still moves all four
+        wc.same_range.setChecked(False)
+        wc.det.setCurrentIndex(2)
+        wc.hi.setValue(wc.hi.value() + 1)
+        assert wc.windows() == {d: [a, b + 1] for d, (a, b) in expect.items()}
+    finally:
+        close(win)
+
+
+def test_easy_line_of_the_edge_does_not_flip_the_hidden_same_range(qapp, fake_project):
+    """The preset 'line of the edge' gives per-detector windows (each detector's calibration). In Easy it no longer
+    unticks the hidden 'same range' box, and the next nudge moves the four windows together."""
+    from wp3_helpers import close, open_window, pump
+    (fake_project / "config" / "sdd_calibration.json").write_text(json.dumps(
+        {d: {"gain": g, "offset": o} for d, g, o in zip(DETS, (10.06, 9.40, 9.85, 10.09), (3.9, -3.6, -1.3, 7.9))}),
+        encoding="utf-8")
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        i = next(i for i in range(wc.preset.count()) if wc.preset.itemData(i)[0] == "edge")
+        wc.preset.setCurrentIndex(i)
+        pump(qapp)
+        st = ses.zone().settings[sid]
+        edge = dict(st.roi)
+        assert not xw.same_for_all(edge) and wc.same_range.isChecked()
+        wc.lo.setValue(wc.lo.value() - 1)
+        wc.commit_now()
+        pump(qapp)
+        assert ses.zone().settings[sid].roi == {d: [a - 1, b] for d, (a, b) in edge.items()}
     finally:
         close(win)
 

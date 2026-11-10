@@ -4,7 +4,9 @@ the eV equivalent, and the presets (every fixed line of roi_bins.json, the line 
 exists, custom).
 
 The card shows a choice {'line': label, 'roi': windows or None}: a fixed line keeps roi None (the reduced stack's own
-bins); the line of the edge and custom windows set ScanSettings.roi. `committed` carries a choice made by the user;
+bins); the line of the edge and custom windows set ScanSettings.roi. Linked edits (Easy mode, where one lo / hi pair
+stands for the four detectors, or 'same range for all detectors' ticked) move every detector's window by the same
+number of channels, so the per-detector windows of a fixed line or of the line of the edge keep their offsets. `committed` carries a choice made by the user;
 the Reduce perspective writes it into the zone's settings through session.edit. Reading the spectra is a job of the
 window (Cancel, progress); the result is cached by aurora.core.xrf_windows.
 """
@@ -17,7 +19,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSpinBo
 
 from aurora.app import jobs
 from aurora.app.help_text import explain_all, labelled
-from aurora.app.mode import mark_advanced
+from aurora.app.mode import is_advanced, mark_advanced
 from aurora.app.theme import curve, dash, make_plot, mk_pen, on_theme_changed, with_alpha
 from aurora.app.vocab import DET_LABELS, unit_suffix
 from aurora.app.widgets import Card, FlowLayout, pair, set_plot_hint
@@ -165,7 +167,7 @@ class XrfWindowCard(Card):
         self._updating = True
         try:
             self.preset.setCurrentIndex(self._preset_index())
-            if roi and not xw.same_for_all(self._windows):
+            if roi and not xw.same_for_all(self._windows) and is_advanced():     # Easy never flips a hidden control
                 self.same_range.setChecked(False)
             self._place_regions()
             self._fill_spins()
@@ -223,13 +225,27 @@ class XrfWindowCard(Card):
         self._describe()
         self.commit_now()
 
+    def _linked(self) -> bool:
+        """The four windows are edited together: Easy mode (one lo / hi pair, the checkbox hidden) or 'same range'."""
+        return self.same_range.isChecked() or not is_advanced()
+
+    def _shown_det(self) -> int:
+        """The detector whose window the lo / hi boxes show: SDD1 when linked, else the one 'for' names."""
+        return 0 if self._linked() else self.det.currentIndex()
+
     def set_window(self, det: int | None, lo: int, hi: int, commit: bool = True) -> None:
-        """Set one detector's window (or all four with det None or 'same range' ticked)."""
+        """Set one detector's window to [lo, hi); det None gives all four that window. A linked edit (_linked) moves
+        every detector's window by the change of det's, so windows that differ per detector keep their offsets."""
         lo, hi = int(lo), int(hi)
         w = xw.normalise_windows({DETS[0]: [lo, hi]})[DETS[0]]
-        targets = range(len(DETS)) if det is None or self.same_range.isChecked() else [det]
-        for k in targets:
-            self._windows[DETS[k]] = list(w)
+        if det is None:
+            for d in DETS:
+                self._windows[d] = list(w)
+        elif self._linked():
+            dlo, dhi = w[0] - self._windows[DETS[det]][0], w[1] - self._windows[DETS[det]][1]
+            self._windows = xw.normalise_windows({d: [a + dlo, b + dhi] for d, (a, b) in self._windows.items()})
+        else:
+            self._windows[DETS[det]] = list(w)
         self._custom = True
         self._updating = True
         try:
@@ -246,12 +262,14 @@ class XrfWindowCard(Card):
         if self._updating:
             return
         lo, hi = self.regions[k].getRegion()
-        if self.same_range.isChecked():                 # dragging one moves all four
+        if self._linked():                              # dragging one moves all four by as much
+            a, b = self._windows[DETS[k]]
             self._updating = True
             try:
                 for j, r in enumerate(self.regions):
                     if j != k:
-                        r.setRegion((lo, hi))
+                        wj = self._windows[DETS[j]]
+                        r.setRegion((wj[0] + lo - a, wj[1] + hi - b))
             finally:
                 self._updating = False
 
@@ -264,7 +282,7 @@ class XrfWindowCard(Card):
     def _spin_changed(self) -> None:
         if self._updating:
             return
-        k = 0 if self.same_range.isChecked() else self.det.currentIndex()
+        k = self._shown_det()
         lo, hi = self.lo.value(), self.hi.value()
         if hi <= lo:
             hi = lo + 1
@@ -299,7 +317,7 @@ class XrfWindowCard(Card):
             r.setVisible(self._sd is not None)
 
     def _fill_spins(self) -> None:
-        k = 0 if self.same_range.isChecked() else self.det.currentIndex()
+        k = self._shown_det()
         lo, hi = self._windows[DETS[k]]
         old = self._updating
         self._updating = True
@@ -316,13 +334,18 @@ class XrfWindowCard(Card):
             return
         proj = self.session.project
         cal = getattr(proj, "calibration", None)
-        k = 0 if self.same_range.isChecked() else self.det.currentIndex()
+        k = self._shown_det()
         lo, hi = self._windows[DETS[k]]
         a, b = xw.channel_ev(cal, DETS[k], lo), xw.channel_ev(cal, DETS[k], hi)
         nominal = cal is None or not getattr(cal, "calibrated", False)
-        who = "all detectors" if self.same_range.isChecked() and xw.same_for_all(self._windows) else DET_LABELS[k]
+        same = xw.same_for_all(self._windows)
+        who = "all detectors" if self._linked() and same else DET_LABELS[k]
+        others = ""
+        if self._linked() and not same:                 # one lo / hi pair, four different windows: name them all
+            others = " · " + ", ".join(f"{DET_LABELS[j]} {self._windows[d][0]}:{self._windows[d][1]}"
+                                       for j, d in enumerate(DETS) if j != k) + " move with it"
         self.ev_label.setText(f"{who}: channels {lo}:{hi} = {a:.0f}–{b:.0f} eV"
-                              + (" (10 eV/ch nominal)" if nominal else " (calibrated)"))
+                              + (" (10 eV/ch nominal)" if nominal else " (calibrated)") + others)
 
     def refresh_spectrum(self) -> None:
         """Draw the spectrum of the chosen source; the stack's is read in a job the first time (cached)."""

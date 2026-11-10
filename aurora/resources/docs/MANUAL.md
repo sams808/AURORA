@@ -466,7 +466,7 @@ region*. The first time, the raw spectra are read in the background (**Cancel** 
   is summed from the raw spectra with the same bins), the *line of the edge* (only with an SDD calibration: the
   xraydb emission line ± 1.5 σ, σ from roi_bins.json, the rule of sgm_report's fixed bins), and *custom*.
 - Four draggable windows, one per detector, in the series colours and dashes. **same range for all detectors**
-  (Advanced, on by default): dragging one moves all four; untick it to set each detector apart (**for** chooses the
+  (Advanced, on by default): dragging one, or a change of **lo** or **hi**, moves all four by as many channels (windows that differ per detector, such as a line's fixed bins, keep their offsets; Easy mode always works so, and the line below the boxes names the four windows); ticking it gives all four the shown window; untick it to set each detector apart (**for** chooses the
   detector the boxes edit).
 - **lo** and **hi** in channels; hi is excluded, John Bussey's convention (60 and 83 sum channels 60 to 82). The line
   below gives the eV equivalent from the calibration, or *10 eV/ch nominal* without one.
