@@ -1,9 +1,9 @@
 # AURORA tutorials
 
 Nine tutorials, each ten minutes or less. The first eight use the synthetic demo beamtime that AURORA writes for you,
-so nothing you do touches real data; the ninth is the recipe for a real beamtime. Controls are described in full in
-`MANUAL.md`. AURORA starts in Easy mode; the steps marked *Advanced* need Advanced mode (**View > Advanced mode**, the
-mode button at the right of the top bar, or **Ctrl+Shift+A**).
+so nothing you do touches real data; the ninth takes the same steps on a beamtime of your own. Controls are described
+in full in `MANUAL.md`. AURORA starts in Easy mode; the steps marked *Advanced* need Advanced mode (**View > Advanced
+mode**, the mode button at the right of the top bar, or **Ctrl+Shift+A**).
 
 The demo beamtime is one click away: **Help > Open the demo beamtime** (or the **Open the demo beamtime** button on
 Home before a project is open) writes it into the user data folder and opens it. To put it somewhere else (a new or
@@ -13,11 +13,13 @@ empty folder: AURORA refuses one that already holds files, so a real beamtime is
 aurora demo C:\Users\<you>\Desktop\aurora_demo
 ```
 
-It contains one day (2026-11-05) with one holder, N5: the survey `010013_holderA_survey`, one complete F K stack
-`092758_alpha_beta_f_k_stack` (5 energies × 12 points), one aborted stack, one photodiode test, fixed ROI bins for
-F Kα and O Kα and a two-row sample sheet (`1 alpha` in Minerals, `2 beta` in Simple Glass). It also holds five reduced
-spectra in John Bussey's layout in `processed/reduced/` (NaF, CaF2, BaY2F8 and two mixtures of them) and three
-reference spectra in `references/`. Every number in it is synthetic and says so in its headers. From an installed copy
+It is a small made-up beamtime: one day (2025-03-14) with one holder, holderA. Its survey `010013_holderA_survey`
+shows two bright pads, the samples `1 alpha` (left) and `2 beta` (right), under the footprint of one complete F K stack
+`092758_alpha_beta_f_k_stack` (66 energies from 670 to 735 eV, across the F K edge at 696.7 eV, × 12 points). It also
+has one aborted stack, one photodiode test, fixed ROI bins for F Kα and O Kα and a two-row sample sheet `samples.csv`
+(`1 alpha` in Group 1, `2 beta` in Group 2), five reduced spectra in John Bussey's layout in `processed/reduced/` (NaF,
+CaF2, LiF and two mixtures of them) and three reference spectra in `references/`. It has no sketch: sketches are
+optional. Every name and number in it is synthetic and says so in its headers and in `README_demo.txt`. From an installed copy
 use `aurora-cli.exe demo …` on Windows or `AURORA.app/Contents/MacOS/AURORA demo …` on macOS.
 
 ---
@@ -26,11 +28,12 @@ use `aurora-cli.exe demo …` on Windows or `AURORA.app/Contents/MacOS/AURORA de
 
 1. Start AURORA. Home shows **Open project…**, **Open the demo beamtime** and **Read the tutorials**; click **Open the
    demo beamtime** (or **File > Open project…** and the `aurora_demo` folder).
-2. Home shows one day, one holder (`N5`, named after the survey) and four scans. Read the Status column: `complete`
+2. Home shows one day, one holder (`holderA`, named after the survey) and four scans. Read the Status column: `complete`
    for the stack, `aborted` for the short one, `test` for the photodiode test; the survey is the first row.
 3. Select the stack `092758_alpha_beta_f_k_stack` and read its scan analysis summary on the right: *6 s per map*,
-   *5 maps × 6 s = 30 s*, *4 × 3 points, pitch 0.250 × 0.250 mm*, energy regions *680–692 eV in 3 eV steps*, *5 found
-   of 5 planned; every map complete*. Select the aborted stack: *3 found of 5 planned; missing 689.00, 692.00 eV*.
+   *66 maps × 6 s = 6.6 min*, *4 × 3 points, pitch 0.250 × 0.250 mm*, energy regions *670–735 eV in 1 eV steps*, *66
+   found of 66 planned; every map complete*. Select the aborted stack: *20 found of 66 planned; missing 690.00,
+   691.00, …*.
 4. Run the same listing headless to see what the GUI saw:
 
    ```
@@ -44,7 +47,7 @@ headless listing and the tree agree.
 
 ## Tutorial 2: draw zones and reduce a stack
 
-1. In Reduce, step **1 · Scans of holder N5** lists the complete stack; it is selected.
+1. In Reduce, step **1 · Scans of holder holderA** lists the complete stack; it is selected.
 2. Step **2 · XRF window** shows the emission spectrum with the preset *F Kα (fixed bins)*: **lo** 60 and **hi** 74
    channels on SDD1 (hi excluded). Keep it.
 3. Step **3 · Region**: select **rect+** (or **lasso+** and draw around the area) and drag over the left half of the
@@ -57,7 +60,7 @@ headless listing and the tree agree.
 6. Step **4 · Reduce** states the settings in force (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · fluorescence /
    I0, edge jump = 1 · de-spike k = 6 · SDD1-4*). Select zone 1 and press **Add to Check**; do the same for zone 2.
 7. *Advanced*: switch with **Ctrl+Shift+A**. The cards lose their numbers; the **Zone** card shows **group**, filled
-   from the sample sheet when the label was picked (`Minerals` for zone 1, `Simple Glass` for zone 2). The scan card below shows **include** ticked, SDD1–4 ticked,
+   from the sample sheet when the label was picked (`Group 1` for zone 1, `Group 2` for zone 2). The scan card below shows **include** ticked, SDD1–4 ticked,
    line F Kα, fluorescence */ I0, edge jump = 1*, **de-spike** with k = 6, I0 own. Untick **SDD3** and watch the
    preview's sum change; switch back to Easy mode: the chip *advanced settings in use* appears, its tooltip names *SDD3
    off*, and **Reset to Easy defaults** ticks it again.
@@ -74,14 +77,15 @@ undone, and everything is saved automatically.
 ## Tutorial 3: proposals and the zones file (Advanced)
 
 1. In Reduce, **Propose zones** (in the zone card). The demo has no sgm_report summary, so the proposal comes from the
-   bright pads of the survey map: one zone. **Ctrl+Z** removes the whole proposal again.
+   bright pads of the survey map: two zones, one over the two samples under the complete stack and one over the pad of
+   the aborted stack. **Ctrl+Z** removes the whole proposal again.
 2. Go to Survey. The zones are drawn on the plate map with the footprints of the stacks. Click the footprint of the
    complete stack: Reduce opens on that stack.
 3. **Export zones…** to `zones_demo.json`. Open it in a text editor: one entry per holder, zones with rects, paint and
    erase lists in mm and the per-scan settings. This is the `zones_all.json` format the browser zone tool uses, so
    zones can travel both ways.
 4. **Import zones…** reads it back. The holder already has these zones, so nothing is added: the status line counts
-   them as duplicates. A file with other zones for N5 would open the **Import zones** dialog (**Merge**, **Replace** or
+   them as duplicates. A file with other zones for holderA would open the **Import zones** dialog (**Merge**, **Replace** or
    **Skip** per holder).
 5. Survey > **Grid of zones…**, drag over the pads of the plate map, choose *zone numbers* in **labels from**,
    **Accept**: the grid is added in one step, and **Edit > Undo** removes the whole grid at once.
@@ -94,7 +98,7 @@ undone, and everything is saved automatically.
 2. Select a row and switch **view** to *fluorescence sum and its bad points*, then to *sum / I0 and TEY / I0*.
 3. Press **Save ticked → Compare**: the two spectra are written in John Bussey's format to
    `processed/reduced/1 alpha/` and `processed/reduced/2 beta/`, and Compare lists them.
-4. *Advanced*: **Run the checks on holder N5** (in **Scans of holder N5**). The table fills with the I0 level, the
+4. *Advanced*: **Run the checks on holder holderA** (in **Scans of holder holderA**). The table fills with the I0 level, the
    count rate per detector, and empty Saturated / High rate columns (the demo is clean).
 5. *Advanced*: in **I0 of the holder's scans (per-pixel mean)**, tick the stack, or **Auto-select good I0**. Back in
    Reduce, a scan card's I0 list now offers *good-I0 mean* with a meaning.
@@ -106,9 +110,9 @@ undone, and everything is saved automatically.
 
 ## Tutorial 5: compare and fit reduced spectra
 
-This tutorial uses the demo's `processed/reduced/` folder: NaF, CaF2 and BaY2F8, and the two mixtures
-`mixture 1` (0.5 NaF + 0.3 CaF2 + 0.2 BaY2F8) and mixture 2 (0.2 + 0.5 + 0.3), plus the two spectra saved in
-Tutorial 4. Any folder of reduced CSVs works the same way.
+This tutorial uses the demo's `processed/reduced/` folder: NaF, CaF2 and LiF, and the two mixtures `mixture 1`
+(0.5 NaF + 0.3 CaF2 + 0.2 LiF) and `mixture 2` (0.2 + 0.5 + 0.3), plus the two spectra saved in Tutorial 4 (`1 alpha`
+has the NaF edge, `2 beta` 0.6 CaF2 + 0.4 LiF). Any folder of reduced CSVs works the same way.
 
 1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a sdd-scaled and a TEY row. Untick **Show**
    on the TEY rows (or **Hide all**, then tick the sdd-scaled ones). In Easy mode only John-format files are read;
@@ -119,7 +123,7 @@ Tutorial 4. Any folder of reduced CSVs works the same way.
 3. *Advanced*: tick **mark peaks**: the maxima are dotted and listed under the plot. Select one row and read its E0 and
    edge step in the diagnostics panel.
 4. Tick **Fit** on the sdd-scaled rows. Go to Fit > **LCF**, target `mixture 1 [sdd-scaled]`, tick the three end
-   members, **Run LCF**: the coefficients with ± from 200 bootstrap draws (about 0.51 NaF, 0.29 CaF2, 0.20 BaY2F8),
+   members, **Run LCF**: the coefficients with ± from 200 bootstrap draws (about 0.51 NaF, 0.29 CaF2, 0.20 LiF),
    χ²ν and the R-factor, and the chip *converged*. In Advanced mode the detail under the table gives the F-test of
    each component.
 5. *Advanced*: Fit > **PCA / MCR-ALS**: **Update PCA scree** (three components explain 99.9 %), three components,
@@ -131,7 +135,7 @@ Tutorial 4. Any folder of reduced CSVs works the same way.
 
 ## Tutorial 6: a reference library (Advanced)
 
-1. The demo's `references/` folder holds `NaF_F_K_ref.csv`, `CaF2_F_K_ref.csv` and `BaY2F8_F_K_ref.csv` (energy and
+1. The demo's `references/` folder holds `NaF_F_K_ref.csv`, `CaF2_F_K_ref.csv` and `LiF_F_K_ref.csv` (energy and
    normalised absorption). Your own library can have subfolders per element, for example `references/F/NaF_F_K.csv`.
 2. **File > Settings…**, set **reference spectra folder** to that folder.
 3. Compare, **References…**: the list shows `NaF F K   (F K)   NaF_F_K_ref.csv` and the two others. Type `F` in
@@ -163,12 +167,12 @@ a recognisable edge are listed without one and never filtered out.
 
 1. Report: leave the title and the output folder. Look at **Check before building**: with the two zones of Tutorial 2
    it reads *2 zones · 2 spectra · 0 warnings*. Delete zone 2 in Reduce and come back: it reads *1 zone · 1 spectrum ·
-   1 warning*, with the finding *Sample '2 beta' of N5 (sample sheet) has no zone.* Click **Show** to open N5 in
+   1 warning*, with the finding *Sample '2 beta' of holderA (sample sheet) has no zone.* Click **Show** to open holderA in
    Reduce, or tick **Ignore**; **Ctrl+Z** in Reduce brings zone 2 back.
 2. **Build the report**. Browse the pages with **◀** **▶**, then **Open folder**: `reports/aurora/<date>_<time>_all/`
    holds the PDF, `figures/`, `csv/` (each CSV with its `.json` sidecar), `pages/` and `report_manifest.json`;
    `reports/aurora/latest.json` points at it.
-3. Look at `csv/Minerals/`: one CSV per zone and scan with the full provenance header (zone, scan, detectors,
+3. Look at `csv/Group 1/`: one CSV per zone and scan with the full provenance header (zone, scan, detectors,
    normalisation, windows, I0 source, de-spike, flags, calibration, settings).
 4. Rename a zone in Reduce and build again: a second folder appears, and the cover's *Changes since the previous
    build* names the rename.
@@ -183,26 +187,36 @@ a recognisable edge are listed without one and never filtered out.
    Or from an exported zones file, only one group, as a Draft:
 
    ```
-   aurora report <project> --zones zones_demo.json --groups Minerals --preset draft --out <folder>
+   aurora report <project> --zones zones_demo.json --groups "Group 1" --preset draft --out <folder>
    ```
 
-## Tutorial 9: a real beamtime, the recipe
+## Tutorial 9: your own beamtime
 
-The order that worked during the November 2026 F K campaign:
+The same steps on a beamtime of your own. Nothing in it needs to be renamed or prepared; every file besides `raw/` is
+optional (MANUAL 12 lists what each one adds).
 
-1. Open the beamtime folder (the one with `raw/`). If sgm_report ran, its summaries feed the flags and proposals.
-2. *Advanced*: Check, **Run the checks on every holder**, and read Saturated / High rate / I0 invalid. AURORA's verdicts
-   set the defaults of new zones (saturated SDDs off, the good-I0 mean for an invalid I0); tick the good I0 scans.
-3. Per holder: Survey to see the plate, Reduce (*Advanced*: **Propose zones** or Survey > **Grid of zones…**), correct
-   the labels and groups from the sample sheet, delete what is not a sample. Zones attach to every stack of the holder
-   that covers them, loaded or not.
-4. Select a few zones and check the four detectors; untick a detector that misbehaves on that zone. **Copy to…** and
-   **Rules…** apply a choice to many cards at once.
-5. If the plate was measured as tiles, **Stitch…** after **Load all**, check the seams, bake, and draw the zones on the
-   stitched stack.
-6. Send each sample with **Add to Check**, look at the messages, and **Save ticked → Compare**.
-7. Report: read **Check before building** first, fix or ignore the findings, build. Appendix C says what was skipped
-   and why.
-8. Compare the saved spectra, add references, fit.
+1. **File > Open project…** and choose the folder you downloaded from the beamline, the one that contains `raw/`.
+   Home lists its days, holders and scans. If it shows no day, holder or scan, compare the folder with the layout of
+   MANUAL 2.3: day folders named YYYY-MM-DD under `raw/`, the scan folders directly inside them.
+2. Read the **Project** summary on the right: the calibration (*none found* means the nominal 10 eV per channel), the
+   fixed emission lines of `config/roi_bins.json` (*none found* means total fluorescence until you set a window), the
+   sample sheet and the plate layout. None of them is required.
+3. Pick a holder in the top bar. Each holder is named after its survey; Survey shows its plate map with the measured
+   areas of its stacks (the footprints).
+4. In Reduce, step **2 · XRF window**: without fixed lines, drag the window over the emission peak of your element
+   in the spectrum (the line under it gives the channels and the eV of each detector).
+5. Optional: a sample sheet. Write a CSV at the root of the beamtime folder with the columns of MANUAL 2.4
+   (`Sample ID,Holder,Group,Composition,Edges,Notes`, one row per sample, the holder written as AURORA names it).
+   Reopen the project (**Reload**): Reduce offers the names of each holder's samples, and the report follows the
+   groups.
+6. Optional: a sketch or a photo of a holder, with **Load a sketch…** in Survey.
+7. Draw each sample in Reduce, **Add to Check**, look at the messages in Check and **Save ticked → Compare**.
+8. Report: read **Check before building**, fix or ignore the findings, **Build the report**. Appendix C says what was
+   skipped and why.
 9. Keep `.aurora/` with the beamtime: `session.json` is the record of every choice (with its backups), and `aurora
    report` rebuilds the report from it at any time.
+
+If your beamtime already has sgm_report outputs (`processed/<day>/summary.json` and its caches), AURORA uses them:
+the flags in Home, **Propose zones** (*Advanced*) from the summary, and the same numbers as that report. *Advanced*:
+Check > **Run the checks on every holder** reads Saturated / High rate / I0 invalid for every scan first; **Copy to…**
+and **Rules…** apply one choice to many zones; **Stitch…** joins a plate measured as tiles.

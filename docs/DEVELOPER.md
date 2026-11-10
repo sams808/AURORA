@@ -104,22 +104,22 @@ that this block loads and round-trips):
   "notes": "",
   "goodI0": {},
   "holders": {
-    "N5": {
-      "holder": "N5",
-      "day": "2026-11-05",
+    "holderA": {
+      "holder": "holderA",
+      "day": "2025-03-14",
       "survey": "010013_holderA_survey",
       "zones": [
         {
           "id": 1,
           "label": "1 alpha",
-          "group": "Minerals",
+          "group": "Group 1",
           "comment": "",
           "rects": [[-0.625, -0.125, 4.875, 5.625]],
           "erects": [],
           "paint": [],
           "erase": [],
           "st": {
-            "2026-11-05_092758_alpha_beta_f_k_stack": {
+            "2025-03-14_092758_alpha_beta_f_k_stack": {
               "inc": true,
               "n": 6,
               "sdd": [true, true, true, true],
@@ -135,7 +135,7 @@ that this block loads and round-trips):
               "stack": "092758_alpha_beta_f_k_stack"
             }
           },
-          "members": {"2026-11-05_092758_alpha_beta_f_k_stack": [0, 1, 6, 7, 8, 9]}
+          "members": {"2025-03-14_092758_alpha_beta_f_k_stack": [0, 1, 6, 7, 8, 9]}
         },
         {
           "id": 2,
@@ -147,7 +147,7 @@ that this block loads and round-trips):
           "paint": [],
           "erase": [],
           "st": {
-            "2026-11-05_092758_alpha_beta_f_k_stack": {
+            "2025-03-14_092758_alpha_beta_f_k_stack": {
               "inc": true,
               "n": 6,
               "sdd": [true, false, true, false],
@@ -163,7 +163,7 @@ that this block loads and round-trips):
               "stack": "092758_alpha_beta_f_k_stack"
             }
           },
-          "members": {"2026-11-05_092758_alpha_beta_f_k_stack": [2, 3, 4, 5, 10, 11]}
+          "members": {"2025-03-14_092758_alpha_beta_f_k_stack": [2, 3, 4, 5, 10, 11]}
         }
       ]
     }
@@ -188,8 +188,8 @@ written back. A file without `schema` is schema 1 (AURORA ≤ 0.3, the zone tool
 one process) and checks it before every save; a project another live AURORA holds, or whose session cannot be written,
 opens read-only. Geometry is validated when a file is read (4 numbers per rectangle or square, 2 per polygon vertex;
 ValueError otherwise). Coordinates are mm on the hexapod. The
-browser zone tool writes the same keys, which is why the two agree pixel for pixel on the Nov 2026 beamtime (224
-zone-scan pairs verified).
+browser zone tool writes the same keys, which is why the two agree pixel for pixel on a real beamtime (224
+zone-scan pairs verified by test_real_zones.py).
 
 ### 4.2 Caches
 
@@ -224,14 +224,27 @@ python -m pytest -q
 | `test_zones.py`, `test_qc.py`, `test_compare_fit.py`, `test_hypercube.py`, `test_phase5_core.py` | the core algorithms against known answers (membership, de-spike, normalisations, LCF on a known mixture, Otsu, auto trims, deconvolution, peaks) |
 | `test_report.py` | a full report build, its files and manifest |
 | `test_app*.py` | the perspectives offscreen: loading, drawing zones, checks, compare and fit, maps, navigation, phase 5 (I0 explorer, references dialog, proposals, stitch dialog, deconvolution, peaks tab) |
-| `test_real_data.py`, `test_real_zones.py` | the Nov 2026 beamtime, read-only, skipped when `AURORA_REAL_PROJECT` is absent; the zone membership of every manual zone-scan pair and the reproduction of the sgm_report CSVs |
+| `test_real_data.py`, `test_real_zones.py` | a real beamtime, read-only, skipped when `AURORA_REAL_PROJECT` is absent: its structure, the zone membership of every manual zone-scan pair and the reproduction of the sgm_report CSVs, with the facts of that beamtime from its `aurora_expectations.json` |
 | `test_wp0_*.py` … `test_wp7_*.py` | one file per item of the 0.4 work packages (its docstring names the item): structure (wp0), Home and the project (wp1), the session (wp2), Reduce (wp3), Check and John Bussey's files (wp4), Compare and Fit (wp5), Maps (wp6), Report (wp7) |
 | `test_docs.py`, `test_docs_parity.py`, `test_help.py` | the manuals against the repository and the window: links, every bold name on screen, every control in MANUAL |
 | `test_publication.py` | the public repository: no private files tracked, no home-folder paths, the front pages link only tracked files |
+| `test_blank.py` | AURORA ships blank: no account name of the machine, no beamtime folder name, the author only by full name, an optional local deny-list, neutral demo names, every configuration file optional (core, CLI and window) |
+| `test_cli_demo.py`, `test_demo_easy_path.py`, `test_sketches.py` | the demo beamtime (a survey over the stack, a stack across the F K edge, the Easy path to two spectra in Compare and Fit) and the optional sketch and panels of Survey |
 
 The folders of one machine (the beamtime, John Bussey's GUI) come from `AURORA_REAL_PROJECT`, `AURORA_LEGACY` and
 `AURORA_JOHN_GUI`, else from `tests/local_paths.json` (untracked; copy `tests/local_paths.example.json`); see
-`tests/local_paths.py`. Without them those tests skip.
+`tests/local_paths.py`. Without them those tests skip. No fact of one beamtime is written in the tracked tests: its
+holder and scan names, counts and the sgm_report zone used for the comparison come from
+`<beamtime>/aurora_expectations.json` (or the file named by `AURORA_REAL_EXPECTATIONS`), kept with the beamtime;
+`tests/real_expectations.example.json` lists the keys with placeholder values, and the tests that need it skip without
+it. `AURORA_BLANK_DENYLIST` names a local text file of tokens (people, samples, the beamtime folder; one per line)
+that `test_blank.py` keeps out of every tracked and shipped file; the list itself is never committed.
+
+The synthetic data of the tests and of the demo come from `aurora.core.testdata`: `make_fake_project` (the test
+variant: 5 energies 680–692 eV, a survey beside the stacks) and `write_demo` (the demo of `aurora demo` and Help >
+Open the demo beamtime: a survey over the stack, a stack across the F K edge, the sample sheet, reduced spectra and
+references). Their names (`testdata.HOLDER`, `STACK`, `DAY`, …) are made up; tests use the constants, never copies of
+the names.
 
 Rules: a Qt test never touches the real settings (`AURORA_SETTINGS_DIR` from `conftest.py`); a real-data test never
 writes into the beamtime (Session.save is monkeypatched there); and a green suite is not verification, the real-data
