@@ -248,7 +248,7 @@ def test_welcome_is_blank_and_plain(qapp):
             assert not any(b in t for b in banned), (adv, t[:120])
     mode.set_advanced(False)
     html = guide.getting_started_html(False)
-    assert "my_beamtime/" in html and "← open this folder" in html and "samples.csv" in html
+    assert "my_beamtime/" in html and "open this folder" in html and "samples.csv" in html
     plain = guide.welcome_plain(False)
     for key, _title in guide.STEPS:
         line = guide._step_item(key)
@@ -588,3 +588,47 @@ def test_quick_start_in_user_guide():
     assert "Help > Glossary" in sec
     first = " ".join(text.split("\n\n")[1].split())
     assert "John Bussey" in first and "Dynes" in first and "Help > Glossary" in first
+
+
+def test_findings_grouped_by_kind(qapp):
+    """Several findings of one kind are one parent row in plain words (collapsed beyond three); one finding stays a
+    row of its own; the parent row has no Ignore tick, its children keep theirs."""
+    from aurora.app.report import FINDING_PLAIN, ReportPerspective
+    from aurora.app.session import Session
+    from aurora.core import report as core_report
+    from aurora.core.report import Finding
+
+    class FakePlan:
+        def __init__(self, findings):
+            self.findings, self.n_zones = findings, 0
+
+        def by_group(self):
+            return {}
+
+        def totals(self, ign):
+            return f"{len(self.open_findings(ign))} warnings"
+
+        def open_findings(self, ign):
+            return [f for f in self.findings if f.id not in ign]
+
+    assert set(FINDING_PLAIN) == set(core_report.FINDING_KINDS)
+    ses = Session()
+    rp = ReportPerspective(ses)
+    try:
+        fs = [Finding(f"u{i}", "uncovered_stack", f"stack {i} is covered by no zone") for i in range(5)]
+        fs.append(Finding("g1", "ungrouped", "zone 2 has no group"))
+        rp._plan = FakePlan(fs)
+        rp._fill_plan()
+        lst = rp.preflight_list
+        tops = [lst.topLevelItem(i) for i in range(lst.topLevelItemCount())]
+        assert len(tops) == 2
+        parent = next(t for t in tops if t.childCount())
+        assert parent.text(0).startswith("5 measurements (complete stacks) have no sample outlined")
+        assert parent.childCount() == 5 and not parent.isExpanded() and parent.data(0, Qt.UserRole) is None
+        assert core_report.FINDING_KINDS["uncovered_stack"] in parent.toolTip(0)
+        single = next(t for t in tops if not t.childCount())
+        assert single.data(0, Qt.UserRole) == "g1" and lst.itemWidget(single, 2) is not None
+        child = parent.child(0)
+        assert child.data(0, Qt.UserRole) == "u0" and lst.itemWidget(child, 2) is not None
+    finally:
+        dispose(rp)

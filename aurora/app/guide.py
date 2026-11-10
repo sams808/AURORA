@@ -179,7 +179,7 @@ def getting_started_html(advanced: bool, tokens: dict | None = None) -> str:
             "spectrum per sample: you outline each sample on its map, AURORA adds up its pixels, checks the result "
             "and builds a report.</p>"
             "<h4>What a beamtime folder looks like</h4>"
-            f"<pre style='color:{muted}'>{e(FOLDER_PICTURE)}</pre>"
+            f"{folder_table(muted)}"
             "<p>A day folder or one scan folder opens too (that day alone), and a scan's <code>.h5</code> file when "
             "it is dropped on the window or given on the command line. AURORA never writes into <code>raw</code>. "
             "Your outlines and spectra are kept next to it (<code>.aurora/</code> and <code>processed/</code>).</p>"
@@ -189,6 +189,24 @@ def getting_started_html(advanced: bool, tokens: dict | None = None) -> str:
             "uses (I0, TEY, edge, stack …), and the user guide starts with a quick start for non-specialists "
             f"(<a href='aurora:help:USER_GUIDE.md#quick-start-for-non-specialists' {a}>open it</a>). The demo "
             "beamtime is a small made-up beamtime with the same layout: try every step on it first.</p>")
+
+
+def folder_table(muted: str) -> str:
+    """FOLDER_PICTURE as a two-column table (indented names, the notes in the muted colour): it reads in any font."""
+    e = html.escape
+    rows = []
+    for line in FOLDER_PICTURE.splitlines():
+        name = line.rstrip()
+        note = ""
+        for sep in ("←", "(optional)"):
+            if sep in name:
+                i = name.index(sep)
+                name, note = name[:i].rstrip(), name[i:].lstrip("← ").strip()
+                break
+        indent = len(name) - len(name.lstrip())
+        rows.append(f"<tr><td style='padding:1px 14px 1px {indent * 6}px'><b>{e(name.strip())}</b></td>"
+                    f"<td style='color:{muted};padding:1px 0'>{e(note)}</td></tr>")
+    return "<table>" + "".join(rows) + "</table>"
 
 
 def _step_item(key: str) -> str:

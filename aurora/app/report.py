@@ -54,6 +54,30 @@ def _in_or_above(path, folder: Path) -> bool:
 
 
 OUT_READ_ONLY = "The report folder cannot be written: choose another with Browse…"
+KIND_ROLE = int(Qt.UserRole) + 21               # the kind of a parent row of the Findings tree
+# what several findings of one kind mean, in plain words ('{n}' is their number; the kind title is the row's tooltip)
+FINDING_PLAIN = {
+    "uncovered_stack": "{n} measurements (complete stacks) have no sample outlined: they will not be in the report",
+    "no_included": "{n} samples have no scan kept for the report: they are left out",
+    "no_pixels": "{n} outlines hold no pixel of a scan kept for them: that scan is left out",
+    "no_settings": "{n} scans cover an outline but were never sent to Check: they are left out",
+    "saturated_ticked": "{n} spectra still add a saturated detector",
+    "good_i0_empty": "{n} scans ask for the average beam of the good scans, but no scan is marked good (Advanced: "
+                     "Check)",
+    "scan_missing": "{n} scans named in the outlines are not in this beamtime",
+    "ungrouped": "{n} samples have no group (groups come from the sample sheet)",
+    "label_not_in_sheet": "{n} sample names are not in the sample sheet",
+    "duplicate_label": "{n} sample names appear on several holders of one group",
+    "sheet_row_no_zone": "{n} samples of the sample sheet have no outline yet",
+}
+
+
+def finding_plain(kind: str, n: int) -> str:
+    """The parent row of n findings of one kind ('12 measurements (complete stacks) have no sample outlined: …')."""
+    text = FINDING_PLAIN.get(kind)
+    if text is None:
+        return f"{n} × {core_report.FINDING_KINDS.get(kind, kind)}"
+    return text.format(n=n)
 SUBTITLE = {False: "One PDF with every kept spectrum, one page per sample group.",
             True: "the final report, organised by sample group, from the zones and their settings"}
 
@@ -582,7 +606,33 @@ class ReportPerspective(QWidget):
             self.check_tabs.setTabText(1, "Contents")
             return
         order = sorted(plan.findings, key=lambda f: (f.id in ign, f.tone != "warn"))
+        # one row per finding; a kind with several findings is one parent row '{n} × what it means' (collapsed when it
+        # has more than three), the kinds of the holder on screen first
+        cur = self.session.current_holder
+        by_kind: dict[str, list] = {}
         for f in order:
+            by_kind.setdefault(f.kind, []).append(f)
+        kinds = sorted(by_kind, key=lambda k: (all(f.id in ign for f in by_kind[k]),      # ignored kinds last
+                                               not any(f.holder == cur for f in by_kind[k]),
+                                               [x.kind for x in order].index(k)))
+        grouped = any(len(v) > 1 for v in by_kind.values())
+        lst.setRootIsDecorated(grouped)
+        rows = []
+        for kind in kinds:
+            fs = by_kind[kind]
+            parent = None
+            if len(fs) > 1:
+                n_open = sum(1 for f in fs if f.id not in ign)
+                parent = QTreeWidgetItem([finding_plain(kind, len(fs)), "", ""])
+                parent.setToolTip(0, f"{core_report.FINDING_KINDS.get(kind, kind)} ({n_open} not ignored)")
+                parent.setIcon(0, status_icon(fs[0].tone if n_open else "muted"))
+                parent.setFlags(parent.flags() & ~Qt.ItemIsEditable & ~Qt.ItemIsUserCheckable)
+                parent.setData(0, Qt.UserRole, None)
+                parent.setData(0, KIND_ROLE, kind)
+                lst.addTopLevelItem(parent)
+            for f in fs:
+                rows.append((parent, f))
+        for parent, f in rows:
             it = QTreeWidgetItem([f.text, "", ""])
             it.setData(0, Qt.UserRole, f.id)
             it.setToolTip(0, f.text)
@@ -592,7 +642,10 @@ class ReportPerspective(QWidget):
             it.setToolTip(1, "ignored: not counted in the warnings" if f.id in ign else "tick to ignore this finding")
             if f.id in ign:
                 set_item_tone(it, "muted", 0, icon=False)
-            lst.addTopLevelItem(it)
+            if parent is None:
+                lst.addTopLevelItem(it)
+            else:
+                parent.addChild(it)
             cell = QWidget()                                 # keeps the button at its own height on a tall row
             cl = QVBoxLayout(cell); cl.setContentsMargins(2, 2, 4, 2)
             btn = QToolButton()
@@ -601,6 +654,10 @@ class ReportPerspective(QWidget):
             btn.clicked.connect(lambda _c=False, ff=f: self.jump(ff))
             cl.addWidget(btn); cl.addStretch(1)
             lst.setItemWidget(it, 2, cell)
+        for i in range(lst.topLevelItemCount()):
+            top = lst.topLevelItem(i)
+            if top.childCount():
+                top.setExpanded(top.childCount() <= 3)
         lst.blockSignals(False)
         self._wrap_rows()
         self._findings = {f.id: f for f in plan.findings}
@@ -637,8 +694,12 @@ class ReportPerspective(QWidget):
         fm = lst.fontMetrics()
         width = max(60, lst.header().sectionSize(0) - lst.iconSize().width() - 24)
         btn_h = 0
+        items = []
         for i in range(lst.topLevelItemCount()):
-            it = lst.topLevelItem(i)
+            top = lst.topLevelItem(i)
+            items.append(top)
+            items.extend(top.child(j) for j in range(top.childCount()))
+        for it in items:
             cell = lst.itemWidget(it, 2)
             if cell is not None:
                 btn_h = max(btn_h, cell.sizeHint().height())
@@ -650,6 +711,8 @@ class ReportPerspective(QWidget):
         if col != 1:
             return
         fid = item.data(0, Qt.UserRole)
+        if not fid:                                         # a kind's parent row has no tick of its own
+            return
         ign = self.ignored()
         if item.checkState(1) == Qt.Checked:
             ign.add(fid)

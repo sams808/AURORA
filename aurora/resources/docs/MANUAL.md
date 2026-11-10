@@ -1043,7 +1043,10 @@ are not counted). Three tabs:
 - **Findings** (the number of open findings in the tab title). Each row has an icon, the Finding, an **Ignore** tick
   and a **Show** button that opens Reduce on that holder and zone (and selects the scan when the finding names one).
   Double-clicking a row does the same. An ignored finding is dimmed, sorted last, and remembered with the session
-  (session.json `ui` block, key `preflight_ignored`). The check looks for:
+  (session.json `ui` block, key `preflight_ignored`). Several findings of one kind are one row in plain words, for
+  example *5 measurements (complete stacks) have no sample outlined: they will not be in the report*, with the findings
+  under it (collapsed when there are more than three; the kind's title is its tooltip), the kinds of the holder on
+  screen first. The check looks for:
   - zones without a group (they go under *Ungrouped*);
   - zones without an included scan (left out);
   - included scans on which the zone has no pixel, and scans not found in the project (left out);
