@@ -101,3 +101,65 @@ def test_first_energy_read(project):
     e, p = s.energy_dirs[0]
     pd = read_point_dir(p)
     assert e == 680.0 and pd.n_pix == 121 and pd.complete and pd.mcc.shape[1] == 8
+
+
+def test_real_zone_commit_timing(real_project, monkeypatch):
+    """One stroke written with every listener connected (Reduce shown, Check and Survey hidden) on the holder with the
+    largest survey and its largest stack: the median over 6 strokes is 400 ms or less (it was 2.5-6 s before the
+    vectorised de-spike, the shared trace cache and the deferred hidden views), x3 with AURORA_TIMING_LOOSE=1. Never
+    writes into the beamtime (Session.save is a no-op here, and the folder is protected)."""
+    import os
+    import time
+
+    pytest.importorskip("pyqtgraph")
+    from aurora.app.main import MainWindow, create_app
+    from aurora.app.session import Session
+    from aurora.core.zones import Stroke, members
+    monkeypatch.setattr(Session, "save", lambda self: None)
+    qapp = create_app(["aurora-tests"])
+    win = MainWindow()
+    win.resize(1200, 760)
+    win.show()
+    try:
+        win.home.set_project(Project.discover(real_project))
+        qapp.processEvents()
+        win.jobs.wait_idle(120000)
+        ses = win.session
+
+        def size(key):
+            h = ses.holder_keys[key][1]
+            return (h.survey.n_points if h.survey is not None else 0), len(h.stacks)
+        ses.set_holder(max(ses.holder_keys, key=size))
+        qapp.processEvents()
+        sid = ses.stack_id(max(ses.holder().stacks, key=lambda s: s.n_points or 0))
+        sd = ses.stack(sid)
+        win.reduce._attach(sd)
+        ses.touch()
+        ses.select_stack(sid)
+        win.show_perspective("reduce")
+        for _ in range(10):
+            qapp.processEvents()
+        win.jobs.wait_idle(60000)
+        if ses.current_stack != sid:
+            ses.select_stack(sid)
+        rd = win.reduce
+        x0, x1, y0, y1 = sd.bbox
+        zid = rd.editor.commit(Stroke(shape="rect", rect=(x0, (x0 + x1) / 2, y0, (y0 + y1) / 2)))
+        assert zid is not None
+        z = ses.zone(zid)
+        pix = members(z, sd.x, sd.y, sd.pitch)
+        box = (float(sd.x[pix].min()), float(np.median(sd.x[pix])), float(sd.y[pix].min()), float(np.median(sd.y[pix])))
+        times = []
+        for i in range(6):                                  # erase, then draw back, the same box: each one writes
+            n = ses.undo_stack.count()
+            t = time.perf_counter()
+            rd.editor.commit(Stroke(shape="rect", rect=box, erase=i % 2 == 0, serial=10 + i))
+            times.append(time.perf_counter() - t)
+            qapp.processEvents()
+            assert ses.undo_stack.count() == n + 1
+        limit = 0.4 * (3 if os.environ.get("AURORA_TIMING_LOOSE") == "1" else 1)
+        assert float(np.median(times)) <= limit, [round(1000 * v) for v in times]
+    finally:
+        win.session._save_timer.stop()
+        win.session.project = None
+        win.close()
