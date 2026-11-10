@@ -1084,6 +1084,7 @@ Re-reduce the stack with the project ROI bins** (Advanced) reduces that stack fr
 - **Numbers differ from the beamtime report**: AURORA uses the sgm_report caches when they exist; after deleting
   `processed/`, the raw reduce gives the same spectra within floating point but the I0 flags come from AURORA's own
   Check instead of the summary.
+  TEY / I0 differs a little (up to 0.1 % on the 2026 pads): AURORA divides the zone's TEY sum by its I0 sum, sgm_report averages the per-pixel TEY / I0 ratios; the fluorescence / I0 traces are the same in both (ratios of sums).
 - **Check names a saturated SDD that sgm_report did not**: AURORA's own check (qc.json) is a second source; both are
   quoted with their source.
 - **A white line disappeared on a coarse scan**: files from earlier versions use the classic de-spike, which takes
