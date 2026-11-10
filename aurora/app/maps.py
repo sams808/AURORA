@@ -505,13 +505,22 @@ class MapsPerspective(QWidget):
                 return Hypercube.load(project, scan, progress=cb)
             except CacheSpaceError as err:          # a calm refusal: nothing was written
                 return err
-        jobs.of(self).submit(f"cube:{sid}", work, on_done=self._loaded,
+        gen = self._gen
+        jobs.of(self).submit(f"cube:{sid}", work, on_done=lambda hc: self._loaded(hc, (gen, sid, project), scan.name),
                              on_failed=lambda t: self.status.setText(t.strip().splitlines()[-1]),
                              on_end=lambda _s: self.update_actions(), label=f"loading the hypercube of {scan.name}",
                              taskbar=self.taskbar)
         self.update_actions()
 
-    def _loaded(self, hc) -> None:
+    def _loaded(self, hc, asked=None, name: str = "") -> None:
+        """A cube job ended. `asked` = (generation, stack id, project) when Load was clicked: a cube that lands after
+        the holder, the picked stack or the project changed is not shown (it stays cached: Load opens it at once)."""
+        gen, sid, project = asked if asked is not None else (self._gen, self.scan_combo.currentData(), self.session.project)
+        if gen != self._gen or sid != self.scan_combo.currentData() or project is not self.session.project:
+            self.status.setText(f"hypercube of {name} not loaded: {hc}" if isinstance(hc, CacheSpaceError) else
+                                f"hypercube of {name} not shown: another holder, stack or project was picked while it "
+                                f"loaded (it is cached: Load opens it at once)")
+            return
         if isinstance(hc, CacheSpaceError):
             self._load_note = f"Not loaded: the hypercube {hc}. Free some disk space, then load it again."
             self.status.setText(f"hypercube not loaded: {hc}")
@@ -1095,17 +1104,28 @@ class MapsPerspective(QWidget):
         scan = self.session.project.find(self.hc.name) if self.session.project is not None and self.hc else None
         return self.session.stack_id(scan) if scan is not None else (self.hc.name if self.hc else "")
 
+    def _cluster_holder(self) -> str | None:
+        """The key of the holder whose stack the cube is (None when no holder has it)."""
+        return self.session.holder_of_stack(self._cluster_sid())
+
     def _cluster_label(self) -> str:
-        holder = self.session.holder()
         sid = self._cluster_sid()
+        holder = self.session.holder(self._cluster_holder() or self.session.current_holder)
         return f"clusters {self._cluster_names()} · {holder.name + ' ' if holder else ''}{short_time(sid) or self.hc.name}"
 
     def make_zone_from_clusters(self):
         """A new zone of the holder whose painted squares are exactly the ticked clusters' pixels (one square of the
-        pixel pitch on each pixel), so members() returns those pixels and zones_all.json keeps its format."""
+        pixel pitch on each pixel), so members() returns those pixels and zones_all.json keeps its format. Only in the
+        holder the cube's stack belongs to: never another holder's zone made of these pixels."""
         cr, hc = self._cluster, self.hc
         ticked = self.ticked_clusters()
         if cr is None or hc is None or not ticked:
+            return None
+        owner = self._cluster_holder()
+        if owner is not None and owner != self.session.current_holder:
+            h = self.session.holder(owner)
+            self.status.setText(f"no zone made: the clusters are of a stack of holder {h.name if h else owner}; "
+                                f"pick that holder first")
             return None
         pix = np.where(np.isin(cr.labels, ticked))[0]
         squares = paint_squares(hc.x, hc.y, hc.pitch, pix)

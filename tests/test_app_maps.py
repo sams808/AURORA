@@ -58,3 +58,92 @@ def test_maps_perspective(qapp, fake_project):
     assert mp._cluster is not None and set(mp._cluster.labels) <= {0, 1}
     win.show_perspective("maps")
     win.close()
+
+
+# ----------------------------------------------------------------------------- a cube that lands late
+def _window(qapp, root):
+    from aurora.app.main import MainWindow
+    win = MainWindow()
+    win.home.set_project(Project.discover(root))
+    qapp.processEvents()
+    return win
+
+
+def _close(win):
+    win.session._save_timer.stop()
+    win.close()
+
+
+def test_a_cube_that_lands_after_a_holder_switch_is_not_shown(qapp, tmp_path):
+    """Load N5's cube, switch to N6 before it lands (its result is queued to the GUI thread, so the switch comes first,
+    as when a user moves on during a minutes-long load): N6 shows no cube, so no N6 zone can be made of N5's pixels."""
+    win = _window(qapp, testdata.make_fake_project(tmp_path / "two", n_holders=2))
+    ses, mp = win.session, win.maps
+    ses.set_holder("N5"); qapp.processEvents()
+    mp.load()
+    ses.set_holder("N6")
+    assert win.jobs.wait_idle(20000)
+    assert mp.hc is None
+    assert [mp.scan_combo.itemData(i) for i in range(mp.scan_combo.count())] == \
+        [ses.stack_id(s) for s in ses.stacks_of("N6")]
+    assert "not shown" in mp.status.text() and testdata.STACK in mp.status.text()
+    # back on N5 the cube opens from its cache
+    ses.set_holder("N5"); qapp.processEvents()
+    assert "cached" in mp.cube_estimate()
+    _close(win)
+
+
+def test_a_cube_that_lands_after_another_project_opened_is_not_shown(qapp, tmp_path):
+    a = testdata.make_fake_project(tmp_path / "a")
+    b = testdata.make_fake_project(tmp_path / "b")
+    win = _window(qapp, a)
+    mp = win.maps
+    mp.load()
+    win.home.set_project(Project.discover(b))
+    assert win.jobs.wait_idle(20000)
+    assert mp.hc is None
+    _close(win)
+
+
+def test_a_cube_that_lands_after_another_stack_was_picked_is_not_shown(qapp, tmp_path):
+    """Load stack A, pick stack B of the same holder and load it: B is shown, A (landing last) is dropped."""
+    root = testdata.make_fake_project(tmp_path / "p")
+    x, y = testdata.snake_grid()
+    testdata._write_stack(root / "raw" / testdata.DAY / "094000_LongOne_f_k_stack", "LongOne_f_k",
+                          testdata.ENERGIES, len(testdata.ENERGIES), x, y, np.random.default_rng(1),
+                          created="Thu Nov  5 09:40:00 2026")
+    win = _window(qapp, root)
+    mp = win.maps
+    sids = [mp.scan_combo.itemData(i) for i in range(mp.scan_combo.count())]
+    assert len(sids) == 2
+    mp.scan_combo.setCurrentIndex(0); mp.load()
+    mp.scan_combo.setCurrentIndex(1)
+    assert win.jobs.wait_idle(20000)
+    assert mp.hc is None                                          # A landed while B was picked
+    mp.load()
+    assert win.jobs.wait_idle(20000)
+    assert mp.hc is not None and win.session.stack_id(win.session.project.find(mp.hc.name)) == sids[1]
+    _close(win)
+
+
+def test_a_zone_from_clusters_goes_only_to_the_holder_of_the_cube(qapp, tmp_path):
+    """A cube of N5 on screen while N6 is the current holder (set directly): Make zone refuses instead of writing N5's
+    pixels into N6, and the label names the cube's own holder."""
+    from aurora.core.hypercube import ClusterResult
+    root = testdata.make_fake_project(tmp_path / "two", n_holders=2)
+    win = _window(qapp, root)
+    ses, mp = win.session, win.maps
+    ses.set_holder("N6"); qapp.processEvents()
+    proj = ses.project
+    hc = Hypercube.load(proj, proj.find(testdata.STACK))           # N5's stack
+    mp.set_hypercube(hc)
+    labels = np.arange(hc.n_pix) % 2
+    M = hc.pixel_matrix(None, 60, 75)
+    cr = ClusterResult(labels=labels, centres=np.array([M[labels == c].mean(axis=0) for c in (0, 1)]),
+                       scores=np.zeros((hc.n_pix, 2)), explained=np.array([0.6, 0.3]), E=hc.E[hc.valid], seed=0)
+    mp.show_clusters(cr, M, {"scan": hc.name})
+    assert mp._cluster_label().startswith("clusters 1+2 · N5 09:27")
+    assert mp.make_zone_from_clusters() is None
+    assert not ses.holder_zones("N6").zones and not ses.holder_zones("N5").zones
+    assert "N5" in mp.status.text()
+    _close(win)

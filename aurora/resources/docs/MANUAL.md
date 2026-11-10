@@ -780,7 +780,8 @@ and residual** plots the result. **Export…** writes the parameters with units,
 Maps is part of Advanced mode. The full hypercube of one stack: every channel of every detector at every energy.
 Choose the **stack**; **Load hypercube** reads the raw `.bin` files once, one energy at a time, into a cache on disk
 (8.5); a cancel keeps nothing. Before loading, the empty panel gives the size first (*up to 460 MB, cached under
-.aurora/cache*, or *cached, opens at once*).
+.aurora/cache*, or *cached, opens at once*). A cube that finishes after another holder, stack or project was picked is
+not shown (it stays cached, so **Load hypercube** opens it at once).
 
 Every sum in Maps uses each detector's own channels for the emission window. The four SDDs have their own gain and
 offset (`sdd_calibration.json`), so one eV window is a different channel range on each of them: on the 2026 beamtime
