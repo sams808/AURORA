@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
@@ -22,10 +22,12 @@ from aurora.app.help_text import HELP, explain, header_tips, labelled
 from aurora.app.library import Library
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_column, mark_easy, on_mode_changed
 from aurora.app.shortcuts import native_text
-from aurora.app.theme import CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, on_theme_changed, role_pen, set_tone, swatch_icon
+from aurora.app.theme import (CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, min_height, on_theme_changed,
+                              role_pen, set_tone, swatch_icon)
 from aurora.app.vocab import plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path,
-                                guarded_write, notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
+                                fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair, remember_dir,
+                                set_enabled, set_plot_hint)
 from aurora.core.compare import (E0_MODE_TEXT, E0_MODES, NORMS, derivative, difference, export_wide_csv,
                                  legacy_auto_windows, local_peaks, sidecar_path, stack_offsets)
 
@@ -164,13 +166,16 @@ class ComparePerspective(QWidget):
         h1 = QLabel("Compare"); h1.setObjectName("h1")
         sub = ElidedLabel("normalise, shift, stack and compare reduced spectra", Qt.ElideRight); sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
+        head_box = QWidget()                            # the buttons wrap onto a second line at a large Text size
+        head_row = FlowLayout(head_box, spacing=6)
+        head.addWidget(head_box)
         self.head_buttons: dict[str, QPushButton] = {}
         for text, fn, key in (("Add saved spectra…", self._add_folder, "add_folder"), ("Add CSV…", self._add_csv, "add_csv"),
                               ("References…", self._references, "references"),
                               ("Save config…", self._save_config, "save_config"),
                               ("Load config…", self._load_config, "load_config"),
                               ("Figure size…", self._figure_options, "figure_size"), ("Export…", self._export, "export")):
-            b = QPushButton(text); b.clicked.connect(fn); head.addWidget(b)
+            b = QPushButton(text); b.clicked.connect(fn); head_row.addWidget(b)
             explain(b, f"compare.{key}")
             self.head_buttons[text] = b
         self.export_btn = self.head_buttons["Export…"]
@@ -300,7 +305,11 @@ class ComparePerspective(QWidget):
         pc.body.addWidget(opts_box)
         self.plot = make_plot(x="incident energy (eV)", y="normalised, offset")
         self.plot.getViewBox().disableAutoRange()
+        self._trace_labels: list[tuple] = []           # (TextItem, energy, value): where each label belongs
+        self.plot.getViewBox().sigResized.connect(self._spread_labels)
+        self.plot.getViewBox().sigRangeChanged.connect(self._spread_labels)
         pc.body.addWidget(self.plot, 1)
+        min_height(self.plot, 150)
         self.status = QLabel(""); self.status.setObjectName("muted"); self.status.setWordWrap(True)
         pc.body.addWidget(self.status)
         self.easy_note = QLabel(easy_norm_text()); self.easy_note.setObjectName("muted"); self.easy_note.setWordWrap(True)
@@ -310,6 +319,7 @@ class ComparePerspective(QWidget):
         self.diag = make_plot(x="incident energy (eV)", y="raw signal", legend="inside")
         self.diag.getViewBox().disableAutoRange()
         dc.body.addWidget(self.diag, 1)
+        min_height(self.diag, 175)                      # a title, a legend and the axes over a readable data area
         self.diag_note = QLabel(""); self.diag_note.setObjectName("muted"); self.diag_note.setWordWrap(True)
         dc.body.addWidget(self.diag_note)
         self.peaks_label = QLabel(""); self.peaks_label.setObjectName("muted"); self.peaks_label.setWordWrap(True)
@@ -318,12 +328,15 @@ class ComparePerspective(QWidget):
         right.setSizes([560, 260])
         right.setStretchFactor(0, 3)
         right.setStretchFactor(1, 1)
-        dc.setMinimumHeight(200)
+        fit_height(pc); fit_height(dc)
         split.addWidget(right)
         split.setStretchFactor(0, 2)
         split.setStretchFactor(1, 3)
         split.setSizes([600, 900])
-        self.body = overlay_host(split)
+        # at 1200 x 760 or a larger Text size the cards need more height than the window has: the page scrolls
+        # vertically instead of squeezing the plots below their minimum
+        self.page_scroll = page_scroll(split)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState(EMPTY_TEXT[mode.is_advanced()],
                                       [("Add saved spectra…", self._add_folder), ("References…", self._references, True)],
@@ -922,6 +935,7 @@ class ComparePerspective(QWidget):
 
     def replot(self) -> None:
         self.plot.clear()
+        self._trace_labels = []
         traces = self.plot_traces()
         if not traces:
             self.status.setText("add saved spectra, or send a zone from Reduce")
@@ -962,6 +976,7 @@ class ComparePerspective(QWidget):
                     ti = pg.TextItem(t.text, color=label_for(t.colour), anchor=(1, 1))
                     ti.setPos(xa, float(np.interp(xa, e, v)))
                     self.plot.addItem(ti, ignoreBounds=True)
+                    self._trace_labels.append((ti, xa, float(np.interp(xa, e, v))))
             v = np.concatenate(ys)
             span = float(np.nanmax(v) - np.nanmin(v)) or 1.0
             self.plot.getViewBox().setRange(xRange=(x0, x1), yRange=(float(np.nanmin(v)), float(np.nanmax(v)) + 0.06 * span),
@@ -974,7 +989,38 @@ class ComparePerspective(QWidget):
                             + (f"; the signal falls across the edge on {', '.join(falling)} (negative edge step, kept as "
                                "measured)" if falling else ""))
         self.peaks_label.setText("peak maxima (shifted energies): " + " · ".join(peaks_txt) if peaks_txt else "")
+        self._spread_labels()
         self.update_actions()
+
+    def _spread_labels(self, *_a) -> None:
+        """Trace labels never print over each other: a label that would cover the one below (two traces close
+        together at the right edge, a short plot) moves up by at most one line; when that is not enough it is left
+        out until the plot is taller or zoomed in. Each label starts again from its trace's value on every zoom or
+        resize."""
+        vb = self.plot.getViewBox()
+        items = [(ti, x, y) for ti, x, y in self._trace_labels if ti.scene() is not None]
+        if not items or vb.width() <= 0 or vb.height() <= 0:
+            return
+        top = vb.sceneBoundingRect().top()
+        placed = []                                     # scene rects of the labels shown so far, lowest first
+        for ti, x, y in sorted(items, key=lambda it: -vb.mapViewToScene(QPointF(it[1], it[2])).y()):
+            p = vb.mapViewToScene(QPointF(x, y))
+            w = ti.textItem.boundingRect().width()
+            # its line as laid out (the font's height plus leading), not the text item's margins: with the bare font
+            # height two stacked labels shared a pixel row
+            h = ti.textItem.boundingRect().height() - 2 * ti.textItem.document().documentMargin()
+            bottom = p.y()
+            moved = True
+            while moved:                                # anchor (1, 1): the label's bottom right sits on the point
+                moved = False
+                for q in placed:
+                    if q.left() < p.x() and p.x() - w < q.right() and q.top() < bottom and bottom - h < q.bottom():
+                        bottom, moved = q.top(), True
+            fits = p.y() - bottom <= h and bottom - h >= top - 1
+            ti.setVisible(fits)
+            if fits:
+                placed.append(QRectF(p.x() - w, bottom - h, w, h))
+                ti.setPos(vb.mapSceneToView(QPointF(p.x(), bottom)))
 
     def _difference(self) -> None:
         rows = self.selected_rows()

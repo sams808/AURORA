@@ -266,6 +266,26 @@ def test_pixel_metrics_stay_in_cpp(qapp):
     cb.deleteLater(); rb.deleteLater()
 
 
+@pytest.mark.parametrize("sch", ["light", "dark"])
+def test_a_disabled_unticked_box_still_shows(qapp, sch):
+    """A disabled check box keeps an outline of >= 3:1 (the edge token): the 'line' border was 1.2:1 in light and
+    1.5:1 in dark, so the Rules dialog's unticked fields read as plain text."""
+    from PySide6.QtWidgets import QCheckBox
+    theme.apply_theme(qapp, appearance=sch)
+    t = theme.TOKENS
+    off = QCheckBox("flagged")
+    off.setEnabled(False)
+    off.setFocusPolicy(Qt.NoFocus)
+    off.resize(160, 30)
+    off.show()
+    qapp.processEvents()
+    img = off.grab().toImage()
+    assert t["edge"] in _colours(img) and t["action_disabled_bg"] in _colours(img)
+    assert theme.contrast(t["edge"], t["paper"]) >= 3.0 and theme.contrast(t["edge"], t["action_disabled_bg"]) >= 3.0
+    off.deleteLater()
+    theme.apply_theme(qapp, appearance="light")
+
+
 def test_make_plot_and_legend(qapp, monkeypatch):
     import pyqtgraph as pg
     theme.apply_theme(qapp, appearance="light")

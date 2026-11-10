@@ -25,13 +25,14 @@ from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QVBoxLayout, QWidg
 
 from aurora.app.help_text import explain, labelled
 from aurora.app.preview import PreviewPlot
-from aurora.app.theme import TOKENS, curve, dash, make_plot, mk_pen, on_theme_changed, pc, with_alpha
+from aurora.app.theme import TOKENS, curve, dash, make_plot, min_height, mk_pen, on_theme_changed, pc, with_alpha
 from aurora.app.vocab import DET_LABELS, plural
 from aurora.app.widgets import Card, ElidedLabel, FlowLayout, TaskBar, pair, set_plot_hint
 from aurora.core.constants import DETS, N_CH
 
 TITLE = "Zone preview"
-MIN_PANEL_PX = 120              # the emission and the XAS panel each get at least this
+MIN_PANEL_PX = 140              # the emission and the XAS panel each get at least this (px at the Text size): their
+EMISSION_PX = 150               # data areas keep 48 px (the XAS's sparse axis) and 80 px (the emission) for their ticks
 OPEN_TEXT = "Open in Reduce"
 NOT_LOADED = " (not loaded)"
 MSG_NO_SURVEY = "This holder has no survey map: draw the zones on the stack map in Reduce"
@@ -56,7 +57,7 @@ class EmissionPlot(QWidget):
         lay.setSpacing(2)
         self.plot = make_plot(x="channel", y="counts per point")
         self.plot.setLogMode(x=False, y=True)
-        self.plot.setMinimumHeight(MIN_PANEL_PX)
+        min_height(self.plot, EMISSION_PX)
         self.plot.getViewBox().disableAutoRange()
         self.plot.setAccessibleName("XRF emission of the zone's survey points")
         self.curves = [self.plot.plot([], [], pen=mk_pen(curve(i), 1.2, dash(i)), connect="finite")

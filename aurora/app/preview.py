@@ -6,23 +6,71 @@ same way): a zone being drawn redraws the preview at every stroke.
 
 What is drawn is chosen in one 'Show ▾' menu (SDDs, sum, TEY, I0, spikes), so the controls stay one row in a narrow
 column, and the hover readout is one elided line under the plots. The plots keep at least MIN_PLOT_PX (the
-fluorescence panel MIN_TOP_PX); below COMPACT_BELOW_PX of plot height the TEY and I0 panels hide and the fluorescence
+fluorescence panel MIN_TOP_PX); with the three panels shown, THREE_PANELS_PX at the Text size (so their ticks stay
+readable; the page scrolls). Below COMPACT_BELOW_PX of plot height the TEY and I0 panels hide and the fluorescence
 takes the whole height (compact), until 'TEY and I0 panels' in the menu brings them back. set_compact(True) keeps a
 preview compact (the Survey's zone preview)."""
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QMenu, QToolButton, QVBoxLayout, QWidget
 
-from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
+from aurora.app.theme import (DASH, PAL, curve, dash, min_height, on_theme_changed, pc, role_pen,  # noqa: F401
+                              style_plot, with_alpha)                     # PAL / DASH re-exported
 from aurora.core.spectra import ZoneTraces
 
-MIN_PLOT_PX = 180               # the three panels (or the compact fluorescence panel) never get less
+THREE_PANELS_PX = 300           # the three panels with readable ticks (g09; a page scrolls rather than squeeze them)
+MIN_PLOT_PX = 180               # the compact fluorescence panel never gets less (min_plot_px: the Survey's 120)
 MIN_TOP_PX = 110                # the fluorescence panel never gets less
 COMPACT_BELOW_PX = 260          # below this plot height, the TEY and I0 panels hide (compact)
 SHOW_TEXT = "Show ▾"
+
+
+class SparseAxis(pg.AxisItem):
+    """A y axis whose tick labels never print over each other on a short panel, and show at least two values where
+    they can. pyqtgraph keeps at least 2.25 major intervals whatever the height (a 56 px panel printed five labels into
+    56 px), and its step can leave a single label once the labels at the ends are dropped. Here the step moves along
+    1, 2, 2.5, 5, 10 ...: up while the labels are closer than 1.25 lines (never down to fewer than two labels), down
+    while one label only is shown (never closer than a line)."""
+
+    @staticmethod
+    def _mantissa(step: float) -> float:
+        return round(step / 10 ** math.floor(math.log10(step)), 2)
+
+    def tickSpacing(self, minVal, maxVal, size):
+        levels = super().tickSpacing(minVal, maxVal, size)
+        lo, hi = min(minVal, maxVal), max(minVal, maxVal)
+        if not levels or hi <= lo or size <= 0:
+            return levels
+        line = QFontMetricsF(self.style.get("tickFont") or QFont()).height()
+        edge = 0.5 * line * (hi - lo) / size                        # pyqtgraph drops a label this close to an end
+        count = lambda s: math.floor((hi - edge) / s) - math.ceil((lo + edge) / s) + 1      # noqa: E731  labels shown
+        pitch = lambda s: size * s / (hi - lo)                                              # noqa: E731  px apart
+        step = first = levels[0][0]
+        while pitch(step) < 1.25 * line:                            # too close: a larger step
+            nxt = step * (1.25 if self._mantissa(step) == 2 else 2.0)
+            if count(nxt) < 2:
+                break
+            step = nxt
+        while count(step) < 2:                                      # a single label: a smaller step
+            nxt = step / (1.25 if self._mantissa(step) == 2.5 else 2.0)
+            if pitch(nxt) < line:
+                break
+            step = nxt
+        if step == first:
+            return levels
+        return [(step, 0), (step / (4 if self._mantissa(step) == 2 else 5), 0)]
+
+    def tickStrings(self, values, scale, spacing):
+        # pyqtgraph gives a step of 0.25 one decimal ('0.2', '0.5', '0.8' at 0.25, 0.5, 0.75): one more for 2.5 steps
+        if spacing and self._mantissa(spacing * scale) == 2.5:
+            spacing = spacing / 10
+        return super().tickStrings(values, scale, spacing)
 
 
 class PreviewPlot(QWidget):
@@ -69,9 +117,9 @@ class PreviewPlot(QWidget):
         self.readout.setObjectName("muted")
         lay.addLayout(opts)
         self.gl = pg.GraphicsLayoutWidget()
-        self.top = self.gl.addPlot(row=0, col=0)
-        self.mid = self.gl.addPlot(row=1, col=0)
-        self.low = self.gl.addPlot(row=2, col=0)
+        self.top = self.gl.addPlot(row=0, col=0, axisItems={"left": SparseAxis("left")})
+        self.mid = self.gl.addPlot(row=1, col=0, axisItems={"left": SparseAxis("left")})
+        self.low = self.gl.addPlot(row=2, col=0, axisItems={"left": SparseAxis("left")})
         self.mid.setXLink(self.top)
         self.low.setXLink(self.top)
         self.top.setLabel("left", "fluorescence")
@@ -81,16 +129,20 @@ class PreviewPlot(QWidget):
         for p in (self.top, self.mid, self.low):
             p.showGrid(x=True, y=True, alpha=0.15)
             p.vb.disableAutoRange()
+        for p in (self.top, self.mid):                  # linked x: one row of energies, under the lowest panel
+            p.getAxis("bottom").setStyle(showValues=False)
         self.top.addLegend(offset=(10, 10))
         self.gl.ci.layout.setRowStretchFactor(0, 4)
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
         lay.addWidget(self.readout)
-        self.gl.setMinimumHeight(int(min_plot_px))
         self.top.setMinimumHeight(MIN_TOP_PX)
+        self._min_plot = int(min_plot_px)
         self._forced_compact: bool | None = None        # None: automatic (by the plot height)
         self._compact = False
+        self._apply_min()                               # g09: room for readable ticks
+        on_theme_changed(self, lambda _s: self._apply_min())   # ... at every Text size
         self._bottom_values = self.top.getAxis("bottom").style.get("showValues", True)
         self.gl.installEventFilter(self)
         self.show_panels.toggled.connect(lambda _on: self._layout_rows())
@@ -122,6 +174,12 @@ class PreviewPlot(QWidget):
             self._layout_rows()
         return False
 
+    def _apply_min(self) -> None:
+        """The plots' minimum height at the Text size: THREE_PANELS_PX with the three panels, min_plot_px compact."""
+        from aurora.app.theme import px
+        compact = self._forced_compact if self._forced_compact is not None else self._compact
+        self.gl.setMinimumHeight(px(self._min_plot if compact else max(self._min_plot, THREE_PANELS_PX)))
+
     def _layout_rows(self) -> None:
         if self._forced_compact is not None:
             want = self._forced_compact
@@ -131,6 +189,7 @@ class PreviewPlot(QWidget):
         if want == self._compact:
             return
         self._compact = want
+        self._apply_min()
         ci = self.gl.ci
         bottom = self.top.getAxis("bottom")
         if want:

@@ -21,7 +21,7 @@ import sys
 
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout, QWidget
 
 from aurora import APP_NAME, __version__
 
@@ -80,9 +80,10 @@ class UpdateDialog(QDialog):
         lay = QVBoxLayout(self)
         head = QLabel(f"<b>{APP_NAME} {info['version']}</b> is available; this is {APP_NAME} {__version__}.")
         lay.addWidget(head)
-        notes = QTextBrowser()
-        notes.setOpenExternalLinks(True)
+        from aurora.app.help import DocBrowser
+        self.notes = notes = DocBrowser()               # tables, code blocks and spacing as in the manuals
         notes.setMarkdown(info.get("notes") or "No release notes.")
+        notes.polish_document()
         notes.setAccessibleName("release notes")
         lay.addWidget(notes, 1)
         links = [f'<a href="{info["page"]}">the release page</a>'] if info.get("page") else []

@@ -26,11 +26,11 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
 
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain_all, header_tips, labelled
-from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
+from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.vocab import plural
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, TaskBar, default_dir, overlay_host, remember_dir,
-                                set_enabled)
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, fit_height,
+                                overlay_host, page_scroll, pair, remember_dir, set_enabled)
 from aurora.core import report as core_report
 from aurora.core.io.config import ZonesFile
 from aurora.core.io.textio import read_json
@@ -40,6 +40,7 @@ NO_PROJECT = "open a project first"
 IGNORED_KEY = "preflight_ignored"               # session ui value: ids of the findings ticked 'ignore'
 PROMPTED_KEY = "report_author_prompted"         # settings: the one-time author prompt was shown
 PRESET_ITEMS = (("Final", "final"), ("Draft", "draft"))
+ZOOMS = (("fit width", 0.0), ("100 %", 1.0), ("150 %", 1.5), ("200 %", 2.0))   # % of the page PNG's own pixels
 CHECK_DELAY_MS = 400                            # debounce of the check after an edit
 SHOW_COL = 2                                    # the findings column of the Show buttons
 
@@ -224,7 +225,7 @@ class ReportPerspective(QWidget):
         self.status = QLabel(""); self.status.setObjectName("muted"); self.status.setWordWrap(True)
         left.body.addWidget(self.status)
         left.body.addStretch(0)                        # takes the room of the hidden options in Easy mode only
-        self.left_split.addWidget(left)
+        self.left_split.addWidget(fit_height(left))   # the wrapped scope and author lines keep their height
 
         check = Card("Check before building", help_anchor="92-check-before-building")
         self.totals = QLabel("no project open"); self.totals.setWordWrap(True)
@@ -277,19 +278,34 @@ class ReportPerspective(QWidget):
         self.open_btn.clicked.connect(self._open_folder)
         self.pdf_btn = QPushButton("Open PDF")
         self.pdf_btn.clicked.connect(self._open_pdf)
+        self.zoom = QComboBox()                         # the page at the card's width, or larger (Ctrl+wheel too)
+        for text, z in ZOOMS:
+            self.zoom.addItem(text, z)
+        self.zoom.currentIndexChanged.connect(lambda _i: self._scale_page())
         for w in (self.prev_btn, self.next_btn, self.page_label):
             nav_row.addWidget(w)
-        nav_row.addStretch(1); nav_row.addWidget(self.open_btn); nav_row.addWidget(self.pdf_btn)
+        tail = QWidget()                                # zoom and the two Open buttons wrap below on a narrow card
+        tl = FlowLayout(tail, spacing=6)
+        self.zoom_pair = pair(labelled("zoom", self.zoom, "report.zoom"), self.zoom)   # Advanced (Easy: fit width)
+        for w in (self.zoom_pair, self.open_btn, self.pdf_btn):
+            tl.addWidget(w)
+        nav_row.addStretch(1)
+        nav_row.addWidget(tail)
         right.body.addLayout(nav_row)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setObjectName("pageview")
         self.page_view = QLabel(); self.page_view.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.page_view.setAccessibleName("page preview")
+        self._page_pm: QPixmap | None = None
         self.scroll.setWidget(self.page_view)
+        self.scroll.viewport().installEventFilter(self)      # fit width follows the card; Ctrl+wheel zooms
         right.body.addWidget(self.scroll, 1)
         split.addWidget(right)
         split.setStretchFactor(0, 1); split.setStretchFactor(1, 2)
         split.setSizes([460, 900])
-        self.body = overlay_host(split)
+        # at 1200 x 760 or a larger Text size the cards need more height than the window has: the page scrolls
+        # vertically instead of squeezing the options below their minimum
+        self.page_scroll = page_scroll(split)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState("No project open: the report is built from the zones drawn in Reduce.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
@@ -329,7 +345,8 @@ class ReportPerspective(QWidget):
         from aurora.app.theme import on_theme_changed
         on_theme_changed(self, lambda _s: self._fill_plan())
         # Easy mode: all groups and both appendices, stated read-only; the choices are Advanced
-        mark_advanced(self.scope_box)
+        mark_advanced(self.scope_box, self.zoom_pair)
+        on_mode_changed(self, lambda adv: adv or self.zoom.setCurrentIndex(0), call_now=False)     # Easy: fit width
         mark_advanced_tab(self.check_tabs, self.scope_page)
         mark_easy(self.scope_line)
         self._scope_text()
@@ -348,7 +365,7 @@ class ReportPerspective(QWidget):
         pages = len(self._result.page_pngs) if built else 0
         set_enabled(self.prev_btn, built and self._page > 0, "build the report first" if not built else "this is the first page")
         set_enabled(self.next_btn, built and self._page < pages - 1, "build the report first" if not built else "this is the last page")
-        for b in (self.open_btn, self.pdf_btn):
+        for b in (self.open_btn, self.pdf_btn, self.zoom):
             set_enabled(b, built, "build the report first")
         set_enabled(self.current_holder_btn, has and self.session.current_holder is not None, NO_PROJECT)
         self.empty_state.set_shown(not has)
@@ -829,10 +846,33 @@ class ReportPerspective(QWidget):
         i = max(0, min(i, len(pages) - 1))
         self._page = i
         pm = QPixmap(str(pages[i]))
-        if not pm.isNull():
-            self.page_view.setPixmap(pm.scaledToWidth(min(820, pm.width()), Qt.SmoothTransformation))
+        self._page_pm = None if pm.isNull() else pm
+        self._scale_page()
         self.page_label.setText(f"page {i + 1} of {len(pages)}")
         self.update_actions()
+
+    def _scale_page(self) -> None:
+        """The page at the zoom chosen: 'fit width' fills the card (it was a fixed 820 px, captions about 7 px tall),
+        100 / 150 / 200 % of the page image's own pixels."""
+        pm = self._page_pm
+        if pm is None:
+            return
+        z = float(self.zoom.currentData() or 0.0)
+        avail = self.scroll.viewport().width() - 2 * 8
+        width = max(200, avail) if z <= 0 else round(pm.width() * z)
+        cur = self.page_view.pixmap()
+        if cur is None or cur.isNull() or cur.width() != width:
+            self.page_view.setPixmap(pm.scaledToWidth(width, Qt.SmoothTransformation))
+
+    def eventFilter(self, obj, ev) -> bool:
+        if obj is self.scroll.viewport():
+            if ev.type() == QEvent.Resize and not self.zoom.currentData():
+                self._scale_page()
+            elif ev.type() == QEvent.Wheel and ev.modifiers() & Qt.ControlModifier and not self.zoom_pair.isHidden():
+                step = 1 if ev.angleDelta().y() > 0 else -1
+                self.zoom.setCurrentIndex(max(0, min(self.zoom.count() - 1, self.zoom.currentIndex() + step)))
+                return True
+        return super().eventFilter(obj, ev)
 
     def _open_folder(self) -> None:
         if self._result:

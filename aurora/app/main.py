@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QFontDatabase, QKeySequence
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton, QStackedWidget,
                                QToolButton, QVBoxLayout, QWhatsThis, QWidget)
 
@@ -191,6 +191,7 @@ class MainWindow(QMainWindow):
         self.show_perspective("home")
         central.setFocusPolicy(Qt.ClickFocus)      # at start the focus rests on the page, not on a top-bar button
         central.setFocus()
+        self.home.tab_after(central)               # ... and the first Tab reaches the welcome card's Open project…
 
     # ------------------------------------------------------------------ chrome
     def _top_bar(self) -> QWidget:
@@ -328,6 +329,8 @@ class MainWindow(QMainWindow):
                                                "View", "the previous holder of the project (wraps around)")
         self.next_holder_action = self._action(view, "&Next holder", lambda: self.step_holder(1), "Ctrl+PgDown",
                                                "View", "the next holder of the project (wraps around)")
+        self.prev_holder_action.setShortcuts(shortcuts.holder_keys(-1))     # + Option-Command-arrow on macOS
+        self.next_holder_action.setShortcuts(shortcuts.holder_keys(1))
         goto = view.addMenu("&Go to")
         self.goto_actions: dict[str, QAction] = {}
         self._hint_actions: dict[str, QAction] = {}
@@ -338,7 +341,8 @@ class MainWindow(QMainWindow):
                                  "Go to")
                 self._hint_actions[key] = h
         self.menu_anchors["view"] = view.addSeparator()       # shortcuts.add(menu='view') inserts above Full screen
-        self._action(view, "&Full screen", self.toggle_fullscreen, "F11", "View")
+        self.fullscreen_action = self._action(view, "&Full screen", self.toggle_fullscreen, None, "View")
+        self.fullscreen_action.setShortcuts(shortcuts.fullscreen_keys())      # F11; Ctrl+Cmd+F on macOS
         # ---- window actions without a menu entry
         self.primary_action = self._action(None, "Run the main action of the page", self.click_primary, "Ctrl+Return",
                                            "General", "clicks the highlighted button of the current perspective")
@@ -706,9 +710,11 @@ class AuroraApplication(QApplication):
 
 
 def open_sent_path(win: MainWindow, path: Path) -> None:
-    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown."""
+    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown.
+    The discovery runs under 'discover:<n>' (home.open_path), so the one in progress is found by its prefix."""
     win.show_perspective("home")
-    job = win.jobs.job("discover")
+    reading = [k for k in win.jobs.running() if k.startswith("discover:")]
+    job = win.jobs.job(reading[-1]) if reading else None
     if job is not None:
         job.add_callbacks(on_end=lambda _state: win.home.open_path(path))
     else:
@@ -725,7 +731,11 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     app.setApplicationVersion(__version__)
     app.setWindowIcon(app_icon())
     f = QFont()
-    f.setFamilies(["Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", "Arial"])
+    from aurora.app.theme import UI_FAMILIES
+    families = list(UI_FAMILIES)
+    if sys.platform == "darwin":                     # the system font (San Francisco), not Helvetica Neue
+        families.insert(0, QFontDatabase.systemFont(QFontDatabase.GeneralFont).family())
+    f.setFamilies(families)
     f.setPointSize(10)
     app.setFont(f)
     apply_theme(app)                 # Fusion + palette + style sheet of the light or dark scheme (Settings > appearance)

@@ -351,9 +351,13 @@ class Plan:
         return [f for f in self.findings if f.id not in ign]
 
     def totals(self, ignored=()) -> str:
-        """'14 zones · 31 spectra · 3 warnings' (ignored findings are not counted)."""
-        return " · ".join([_plural(self.n_zones, "zone"), _plural(self.n_spectra, "spectrum", "spectra"),
-                           _plural(len(self.open_findings(ignored)), "warning")])
+        """'14 zones · 31 spectra · 3 warnings · 1 note' (ignored findings are not counted). Notes (NOTE_KINDS, the
+        findings that drop no data, shown with the muted dot) are counted apart, and only when there is one."""
+        found = self.open_findings(ignored)
+        notes = sum(1 for f in found if f.kind in NOTE_KINDS)
+        parts = [_plural(self.n_zones, "zone"), _plural(self.n_spectra, "spectrum", "spectra"),
+                 _plural(len(found) - notes, "warning")]
+        return " · ".join(parts + ([_plural(notes, "note")] if notes else []))
 
     def by_group(self) -> dict[str, list[PlannedZone]]:
         out: dict[str, list[PlannedZone]] = {}

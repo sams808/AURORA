@@ -73,6 +73,8 @@ class AboutDialog(QDialog):
         self.licences_btn = buttons.addButton("Licences…", QDialogButtonBox.ActionRole)
         self.licences_btn.setToolTip("AURORA's licence, the credits and the third-party licences")
         self.licences_btn.clicked.connect(self._licences)
+        self.licences_btn.setAutoDefault(False)          # Enter closes About; Licences… needs a click or Tab
+        buttons.button(QDialogButtonBox.Close).setDefault(True)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         from aurora.app.help_text import explain_buttons

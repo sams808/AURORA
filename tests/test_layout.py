@@ -1,6 +1,8 @@
 """No clipped control at 1200 x 760 or 1500 x 940: with the demo loaded, in Easy and in Advanced mode, for every
 perspective and every Fit and Maps tab, every visible button and combo box and every one-line label gets at least its
-size hint (2 px tolerance), or is an ElidedLabel that keeps its full text in the tooltip.
+size hint (2 px tolerance), or is an ElidedLabel that keeps its full text in the tooltip. Once more at the Larger text
+size at 1200 x 760. A page that scrolls (PageScroll) may hide part of a control below the fold, never cut it by its
+card: there the control must lie inside every panel around it.
 
 Offscreen Qt measures text only with real fonts: conftest points QT_QPA_FONTDIR at the system fonts folder, and this
 module skips when no font is available (the metrics would be meaningless)."""
@@ -10,7 +12,7 @@ import pytest
 
 pytest.importorskip("pyqtgraph")
 
-from PySide6.QtCore import QSize  # noqa: E402
+from PySide6.QtCore import QPoint, QRect, QSize  # noqa: E402
 from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QLabel,  # noqa: E402
                                QScrollArea, QTabBar, QWidget)
 
@@ -41,6 +43,30 @@ def _inside(w: QWidget, root: QWidget, types) -> bool:
     return False
 
 
+def _in_page_scroll(w: QWidget, page: QWidget):
+    """The content widget of the PageScroll around `w` (None when there is none, or an inner scroll area first)."""
+    from aurora.app.widgets import PageScroll
+    p = w.parentWidget()
+    while p is not None and p is not page:
+        if isinstance(p, PageScroll):
+            return p.widget()
+        if isinstance(p, QScrollArea):
+            return None
+        p = p.parentWidget()
+    return None
+
+
+def _cut_by_a_panel(w: QWidget, top: QWidget) -> bool:
+    """Whether a panel between `w` and `top` (the scrolling page) cuts `w` (2 px tolerance)."""
+    rect = QRect(w.mapTo(top, QPoint(0, 0)), w.size())
+    p = w.parentWidget()
+    while p is not None and p is not top:
+        if not QRect(p.mapTo(top, QPoint(0, 0)), p.size()).adjusted(-2, -2, 2, 2).contains(rect):
+            return True
+        p = p.parentWidget()
+    return False
+
+
 def clipped(page: QWidget) -> list[str]:
     from aurora.app.widgets import ElidedLabel
     bad = []
@@ -58,8 +84,12 @@ def clipped(page: QWidget) -> list[str]:
             continue
         need = w.sizeHint().width()
         text = w.currentText() if isinstance(w, QComboBox) else w.text()
+        content = _in_page_scroll(w, page)
         if w.width() < need - 2:
             bad.append(f"{type(w).__name__} {text[:40]!r}: {w.width()} < {need}")
+        elif content is not None:                                # the page scrolls: no card may cut the control
+            if _cut_by_a_panel(w, content):
+                bad.append(f"{type(w).__name__} {text[:40]!r}: cut by its panel")
         elif not _inside(w, page, (QScrollArea,)):               # a scrolling panel may hide part of it: never clip
             shown = w.visibleRegion().boundingRect()
             if shown.width() < w.width() - 2 or shown.height() < w.height() - 2:
@@ -116,13 +146,41 @@ def test_nothing_clipped(qapp, demo, size, advanced):
     assert not problems, "\n".join(problems)
 
 
+def test_nothing_clipped_at_the_larger_text_size(qapp, demo):
+    """View > Text size > Larger at the smallest window: the pages scroll, no control is cut or squeezed."""
+    from demo_window import pump
+    from aurora.app.main import PERSPECTIVES
+    win = demo
+    win.set_text_size("larger")
+    problems = []
+    try:
+        for advanced in (False, True):
+            mode.set_advanced(advanced)
+            win.resize(1200, 760)
+            pump(qapp, 5)
+            for key, _t in PERSPECTIVES:
+                if mode.perspective_hidden(key):
+                    continue
+                for tab in _views(win, key):
+                    win.show_perspective(key)
+                    if tab is not None:
+                        win.pages[key].tabs.setCurrentIndex(tab)
+                    pump(qapp, 5)
+                    problems += [f"{'adv' if advanced else 'easy'} {key}[{tab}] {p}" for p in clipped(win.pages[key])]
+    finally:
+        win.set_text_size("normal")
+        mode.set_advanced(False)
+    assert not problems, "\n".join(problems)
+
+
 @pytest.mark.parametrize("size", SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
 @pytest.mark.parametrize("advanced", [False, True], ids=["easy", "advanced"])
 def test_preview_height_at_minimum_size(qapp, tmp_path, size, advanced):
     """The zone previews keep a usable height down to the smallest window, in both modes: Reduce's plots at least
-    MIN_PLOT_PX (180 px) with the fluorescence panel at least MIN_TOP_PX (110 px), the controls above them one row; the
-    Survey's Zone preview with its XRF emission and its XAS at least 120 px each, the card whole on screen (the
-    column scrolls below it, if anything)."""
+    MIN_PLOT_PX (180 px; THREE_PANELS_PX with the three panels, the page scrolls) with the fluorescence panel at least
+    MIN_TOP_PX (110 px), never squeezed below their minimum, the controls above them one row; the Survey's Zone
+    preview with its XRF emission and its XAS at least 120 px each, the card whole on screen (the column scrolls
+    below it, if anything)."""
     from PySide6.QtCore import QPoint
     from aurora.app.preview import MIN_PLOT_PX, MIN_TOP_PX
     from aurora.app.zone_preview import MIN_PANEL_PX
@@ -155,8 +213,7 @@ def test_preview_height_at_minimum_size(qapp, tmp_path, size, advanced):
         if advanced:
             assert pv.show_btn.isVisible() and pv.all_scans.isVisible()
             assert abs(pv.show_btn.geometry().center().y() - pv.all_scans.geometry().center().y()) <= 4   # one row
-        shown = rd.preview_card.visibleRegion().boundingRect()
-        assert shown.height() >= rd.preview_card.height() - 2           # never cut by its panel
+        assert rd.preview_card.height() >= rd.preview_card.minimumSizeHint().height() - 2   # never squeezed
     finally:
         mode.set_advanced(False)
         close(win)

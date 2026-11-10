@@ -554,6 +554,9 @@ HELP: dict[str, tuple[str, str, str]] = {
     "report.next": ("Next page of the preview.", "Next page", "93-what-a-build-writes"),
     "report.open_folder": ("Open the folder of the last build.", "Open folder", "93-what-a-build-writes"),
     "report.open_pdf": ("Open the PDF.", "Open PDF", "93-what-a-build-writes"),
+    "report.zoom": ("Size of the page preview: the width of the card, or 100 / 150 / 200 % of the page image "
+                    "(Ctrl+wheel over the page steps through them). The PDF itself is vector: Open PDF for full detail.",
+                    "page preview zoom", "93-what-a-build-writes"),
     "report.preset": ("Final: every holder, Appendix A and B, figures at 600 dpi. Draft: the current holder, no "
                       "Appendix A or B, figures at 110 dpi. The options below can still be changed.", "preset",
                       "91-options"),

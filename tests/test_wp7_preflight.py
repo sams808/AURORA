@@ -38,8 +38,10 @@ def test_exactly_the_three_findings(tmp_path):
     assert texts["no_included"] == "'3 gamma' (N5) has no included scan, so it is left out."
     assert "covered by no zone" in texts["uncovered_stack"]
     p = plan(proj, zf)
-    assert (p.n_zones, p.n_spectra) == (2, 2) and p.totals() == "2 zones · 2 spectra · 3 warnings"
-    assert p.totals(ignored={found[0].id}) == "2 zones · 2 spectra · 2 warnings"
+    # 'ungrouped' drops no data: a note (the muted dot), counted apart from the two warnings
+    assert (p.n_zones, p.n_spectra) == (2, 2) and p.totals() == "2 zones · 2 spectra · 2 warnings · 1 note"
+    assert found[0].kind == "ungrouped" and p.totals(ignored={found[0].id}) == "2 zones · 2 spectra · 2 warnings"
+    assert p.totals(ignored={found[1].id}) == "2 zones · 2 spectra · 1 warning · 1 note"
     skipped = {z.label: z.skip for z in p.zones}
     assert skipped == {"1 alpha": "", "2 beta": "", "3 gamma": "no included scan"}
     assert list(p.by_group()) == ["Minerals", "Ungrouped"]
@@ -138,7 +140,7 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     rp = win.report
     lst = rp.preflight_list
-    assert lst.topLevelItemCount() == 3 and rp.totals.text() == "2 zones · 2 spectra · 3 warnings"
+    assert lst.topLevelItemCount() == 3 and rp.totals.text() == "2 zones · 2 spectra · 2 warnings · 1 note"
     assert rp.check_tabs.tabText(0) == "Findings (3)" and rp.check_tabs.tabText(1) == "Contents (2)"
     # the Contents tree: group ▸ holder ▸ zone, a skipped zone with the warning icon and the reason
     groups = [rp.contents.topLevelItem(i) for i in range(rp.contents.topLevelItemCount())]
@@ -192,7 +194,7 @@ def test_the_check_runs_again_after_an_edit(qapp, tmp_path, monkeypatch):
     proj = project(tmp_path)
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     rp = win.report
-    assert rp.totals.text().endswith("2 warnings")
+    assert rp.totals.text().endswith("1 warning · 1 note")
     ses = win.session
     with ses.edit("give zone 2 a group"):
         ses.holder_zones("N5").zones[1].group = "Minerals"
@@ -226,7 +228,8 @@ def test_many_findings_fill_in_one_batch_and_a_tick_moves_one_row(qapp, tmp_path
     n = lst.topLevelItemCount()
     assert n == 250 and len(inserted) == 1                       # one batch, not one insertion per finding
     assert all(lst.itemWidget(lst.topLevelItem(i), 2) is None for i in range(n))
-    assert rp.totals.text().endswith("250 warnings") and rp.check_tabs.tabText(0) == "Findings (250)"
+    # every third finding drops data (a warning), the other two are notes (NOTE_KINDS), counted apart
+    assert rp.totals.text().endswith("84 warnings · 166 notes") and rp.check_tabs.tabText(0) == "Findings (250)"
     before = [lst.topLevelItem(i) for i in range(n)]
     first = before[0]
     fid = first.data(0, Qt.UserRole)
@@ -236,11 +239,11 @@ def test_many_findings_fill_in_one_batch_and_a_tick_moves_one_row(qapp, tmp_path
     assert after[-1] is first and all(a is b for a, b in zip(after[:-1], before[1:]))       # moved, not rebuilt
     assert first.data(0, Qt.UserRole) == fid and first.checkState(1) == Qt.Checked
     assert first.toolTip(1).startswith("ignored") and first.data(0, Qt.ForegroundRole) is not None     # dimmed
-    assert rp.totals.text().endswith("249 warnings") and rp.check_tabs.tabText(0) == "Findings (249)"
+    assert rp.totals.text().endswith("83 warnings · 166 notes") and rp.check_tabs.tabText(0) == "Findings (249)"
     first.setCheckState(1, Qt.Unchecked)                         # back: first again, no longer dimmed
     pump(qapp)
     assert lst.topLevelItem(0) is first and first.data(0, Qt.ForegroundRole) is None
-    assert rp.totals.text().endswith("250 warnings")
+    assert rp.totals.text().endswith("84 warnings · 166 notes")
     close(win)
 
 

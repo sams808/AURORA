@@ -1,7 +1,8 @@
 """Reduce perspective: the zone tool. Stack map with the zone tool bar (Draw / Erase x Move / Rectangle / Brush / Lasso /
 Polygon, zone_tools.ZoneToolBar, the Survey's too), the XRF windows of step 2, the zone card, per-scan settings with
 copy and rules, preview. The preview follows a stroke while it is drawn (preview_draft, throttled by
-zone_tools.PreviewThrottle) and keeps a usable height at the smallest window (the zone card scrolls first).
+zone_tools.PreviewThrottle) and keeps a usable height at the smallest window (the page scrolls rather than squeeze
+it).
 
 Easy mode shows John Bussey's four numbered steps: '1 ·' the scans of the holder, '2 ·' the XRF window, '3 ·' the
 region (navigate / rectangle / lasso, Clear, New sample, Delete, the sample label), '4 ·' a read-only line of the
@@ -26,12 +27,12 @@ from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, ma
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
-from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
+from aurora.app.theme import curve, min_height, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.trace_cache import zone_traces_cached
 from aurora.app.zone_tools import PreviewThrottle, ZoneEditor, ZoneToolBar, fast_settings, register_shortcuts, zone_name
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair,
-                                set_enabled)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, fit_height, overlay_host,
+                                page_scroll, pair, set_enabled)
 from aurora.core import rules as rl
 from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
@@ -348,7 +349,7 @@ class ReducePerspective(QWidget):
         self.window_card = XrfWindowCard(session, self.taskbar)
         self.window_card.committed.connect(self._window_committed)
         self.window_card.remember_requested.connect(self.remember_windows)
-        left.addWidget(self.window_card)
+        left.addWidget(fit_height(self.window_card))
         left.setStretchFactor(0, 1); left.setStretchFactor(1, 3)
         left.setSizes([170, 470])
         split.addWidget(left)
@@ -422,6 +423,7 @@ class ReducePerspective(QWidget):
         self.map.context_requested.connect(self._context)
         self.map.hovered.connect(self._hover)
         self.zone_split.addWidget(self.map)
+        min_height(self.map, 200)
         self.zone_split.setStretchFactor(0, 0); self.zone_split.setStretchFactor(1, 1)
         self.zone_split.setSizes([120, 480])
         centre.body.addWidget(self.zone_split, 1)
@@ -485,12 +487,7 @@ class ReducePerspective(QWidget):
         for edit in (self.z_label, self.z_label.lineEdit(), self.z_group, self.z_group.lineEdit(), self.z_comment):
             edit.installEventFilter(self._undo_keys)
         self.z_comment.editingFinished.connect(self._zone_edited)
-        self.zone_scroll = QScrollArea()                # at the smallest window the zone card scrolls, not the preview
-        self.zone_scroll.setWidgetResizable(True)
-        self.zone_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.zone_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.zone_scroll.setWidget(self.zone_card)
-        right.addWidget(self.zone_scroll)
+        right.addWidget(fit_height(self.zone_card))
         self.cards_area = QScrollArea(); self.cards_area.setWidgetResizable(True)
         self.cards_area.setAccessibleName("settings of each scan of the zone")
         self.cards_box = QWidget(); self.cards_lay = QVBoxLayout(self.cards_box); self.cards_lay.setContentsMargins(0, 0, 0, 0)
@@ -503,17 +500,19 @@ class ReducePerspective(QWidget):
         self.preview.all_scans.toggled.connect(self.update_preview)
         pc.body.addWidget(self.preview, 1)
         right.addWidget(pc)
-        self.cards_area.setMinimumHeight(120)
-        self.zone_scroll.setMinimumHeight(90)           # the card's title and first row
-        right.setCollapsible(0, False)
-        right.setCollapsible(2, False)                  # the preview keeps its minimum (preview.MIN_PLOT_PX)
+        min_height(self.cards_area, 120)                # one scan card row and its line row at every Text size
+        right.setCollapsible(2, False)                  # the preview keeps its minimum (preview.THREE_PANELS_PX)
         right.setStretchFactor(0, 0); right.setStretchFactor(1, 2); right.setStretchFactor(2, 3)
         right.setSizes([190, 230, 420])
         split.addWidget(right)
-        left.setMinimumWidth(250)
+        # no fixed minimum width on the left column: its cards' own minimum (about 260 px, 310 px at Larger text)
+        # keeps 'spectrum of' and its combo box whole; a fixed 250 let the splitter cut them at Larger text
         split.setStretchFactor(0, 0); split.setStretchFactor(1, 3); split.setStretchFactor(2, 2)
         split.setSizes([280, 650, 530])                 # the scan cards need about 420 px; the map is square
-        self.body = overlay_host(split)
+        # at 1200 x 760 or a larger Text size the columns need more height than the window has: the page scrolls
+        # vertically instead of squeezing the preview and the map below their minimum
+        self.page_scroll = page_scroll(split)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
 
         for w in (self.map_line, self.map_sdd, self.map_mode):
@@ -566,37 +565,15 @@ class ReducePerspective(QWidget):
         card._top.insertWidget(0, lab)
         self._badges.append(lab)
 
-    @staticmethod
-    def _min_height(card: Card) -> int:
-        """The height a card needs at its width: wrapped rows at their wrapped height, the plot at its minimum."""
-        lay = card.layout()
-        m = lay.contentsMargins()
-        w = card.width() - m.left() - m.right()
-        hs = []
-        for i in range(lay.count()):
-            it = lay.itemAt(i)
-            wid = it.widget()
-            if wid is not None and wid.isHidden():
-                continue
-            if wid is not None and wid is getattr(card, "plot", None):
-                hs.append(wid.minimumHeight())
-            elif it.hasHeightForWidth():
-                hs.append(it.heightForWidth(w))
-            else:
-                hs.append(max(it.minimumSize().height(), it.sizeHint().height() if it.layout() is not None else 0))
-        return sum(hs) + lay.spacing() * max(0, len(hs) - 1) + m.top() + m.bottom()
-
     def fit_cards(self) -> None:
-        """The splitters ignore wrapped rows: give the zone card and the XRF window card the height their rows need at
-        their width, so no control is cut at the smallest window."""
+        """The splitters ignore wrapped rows: the zone card and the XRF window card get the height their rows need at
+        their width, so no control is cut at the smallest window. widgets.fit_height keeps it so on every resize of a
+        card and every change of its rows (a Text size change too); this call refits them now."""
         import shiboken6
         for card in (self.zone_card, self.window_card):
             if not shiboken6.isValid(self) or not shiboken6.isValid(card):    # a deferred call after the window died
                 return
-            if card.width() > 0:
-                need = self._min_height(card)
-                if need > 0 and need != card.minimumHeight():
-                    card.setMinimumHeight(need)
+            fit_height(card)
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
@@ -613,14 +590,9 @@ class ReducePerspective(QWidget):
     def _mode_changed(self, adv: bool) -> None:
         self.map_card.set_title("Stack map" if adv else "Region")
         self.zone_card.set_title("Zone" if adv else "Reduce")
-        h = self.right_split.height() if self.right_split.height() > 100 else 600
-        need = self.preview_card.minimumSizeHint().height()      # Easy: step 4 is short, the preview takes the rest
-        if adv:
-            pv = max(int(0.43 * h), need)
-            cards = max(self.cards_area.minimumHeight(), int(0.27 * h))
-            self.right_split.setSizes([max(0, h - pv - cards), cards, pv])
-        else:
-            self.right_split.setSizes([170, 0, max(need, h - 170)])
+        h = max(self.right_split.height(), 600)          # Easy: step 4 is short, the preview takes the rest
+        # the splitter keeps every pane at its minimum (the preview's plots: preview.THREE_PANELS_PX); the page scrolls
+        self.right_split.setSizes([int(0.3 * h), int(0.27 * h), int(0.43 * h)] if adv else [170, 0, h - 170])
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self.fit_cards)
         self._refresh_easy()
@@ -1057,7 +1029,7 @@ class ReducePerspective(QWidget):
         return sd.x, sd.y, sd.pitch, name
 
     def _makes_new_zone(self, add: bool) -> bool:
-        """Whether an adding tool starts a new zone: no zone selected, or 'rect+ starts a new zone' ticked (the rule
+        """Whether an adding tool starts a new zone: no zone selected, or 'every stroke starts a new zone' ticked (the rule
         of the legacy signals; strokes follow ZoneEditor.target_for)."""
         return add and (self.session.zone() is None or self.target_new.isChecked())
 
