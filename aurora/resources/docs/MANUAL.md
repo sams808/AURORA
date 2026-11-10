@@ -390,7 +390,7 @@ undo step, and the session is backed up just before.
 ### 4.4 The zone card
 
 - Easy mode (**4 · Reduce**): a read-only line of the settings used, for example *I0 mcc ch1 (Au mesh) · TEY mcc ch4 ·
-  zone sum · fluorescence / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3 saturated, left out)*, and **Add to
+  zone mean (John Bussey's reduction) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)*, and **Add to
   Check** (**Ctrl+Return**), which queues the selected sample on the current scan for Check (disabled while the region
   holds no point). Settings that do not exist yet are made from the Easy defaults.
 - When a sample's settings differ from the Easy defaults (set in Advanced, or by a rule), Easy mode shows the chip
@@ -597,6 +597,7 @@ energy (his GUI summed the others). bad_point is True at every such energy. On h
 his `_full_reduced.csv` in every sdd1–4, I0 and TEY value (relative 1e-12). Compare reads the files as sdd-scaled,
 sdd_total and TEY (each / I0). A zone using IPFY is written as counts too (the header says so): read back, sdd_total /
 I0 is the PFY of that line.
+Unlike his GUI's default (its *Detect spikes* is off), the files of Easy mode hold de-spiked values (step 4 says so; in Advanced mode the scan card's *de-spike, k* switches it off, 4.5). His spike_z key keeps his meaning, the robust-z threshold of *Detect spikes*: AURORA does not run that detector and writes None; its own de-spike is under despike in the header and despike_k in the `aurora` block. His *Drop energy ranges* and *Drop point indices* have no AURORA equivalent (both keys are written empty). The zone mean of the files and the zone sum of AURORA's traces give the same / I0 spectra.
 
 ## 6. Compare
 

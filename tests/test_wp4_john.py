@@ -87,6 +87,10 @@ def test_written_files_follow_johns_layout(fake, tmp_path):
     assert list(gui)[:7] == ["rois", "params", "stack_h5", "survey_h5", "spike_z", "drop_energy_ranges", "drop_indices"]
     assert gui["rois"] == WINDOWS and gui["params"] == {"i0": "ch1", "mode": "mean", "tey": "ch4"}
     assert gui["aurora"]["roi_points"] == [4, 12] and gui["aurora"]["settings"]["dsm"] == "coherent"
+    # spike_z is John's robust-z threshold of his 'Detect spikes' (None when off): AURORA never runs that detector,
+    # so his key says None and AURORA's de-spike (a MAD multiple) has keys of its own
+    assert gui["spike_z"] is None and "# spike_z: None" in head
+    assert gui["aurora"]["despike_k"] == 6.0 and "# despike: coherent, k = 6 (no spikes found)" in head
     # the files load back in Compare as sdd-scaled, sdd_total and TEY
     assert {s.signal for s in load_spectra(paths[0])} == {"sdd-scaled", "sdd_total", "TEY"}
     assert load_spectra(paths[0])[0].label == "1 alpha"

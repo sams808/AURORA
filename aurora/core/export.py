@@ -12,7 +12,9 @@ it has, NaN when it has none, as in his GUI: on the stack's fixed bins too, whos
 - energies whose I0 is below I0_LOW_FRAC of its median keep their counts and get an empty I0 (AURORA's / I0 traces
   leave them out, and Compare divides by this column);
 - sdd_total and sdd_mean are over the detectors ticked in the zone settings, empty when one of them is missing;
-- bad_point is True at every spike, low-I0 and incomplete energy (one without a value, too).
+- bad_point is True at every spike, low-I0 and incomplete energy (one without a value, too);
+- spike_z keeps John's meaning, the robust-z threshold of his 'Detect spikes' (None when off): AURORA never runs that
+  detector, so it is None; AURORA's de-spike (k MADs) is under 'despike' and the aurora block's 'despike_k'.
 Files are written atomically; nothing is ever written inside a scan folder or a beamline raw/ folder.
 """
 from __future__ import annotations
@@ -338,7 +340,7 @@ def header_lines(fr: JohnFrame, *, label: str, zone: Zone, sid: str, settings: S
              f"# roi_points: {fr.n} / {fr.N}",
              "# bad_point_reference: AURORA de-spike of each detector, the sum, TEY and I0; I0 below "
              f"{I0_LOW_FRAC:.0%} of its median; incomplete energies",
-             f"# spike_z: {settings.k:g}" if settings.despike else "# spike_z: off",
+             "# spike_z: None",                     # John's robust-z 'Detect spikes', which AURORA does not run
              "# processing: per-trace de-spike interpolation only; no I0 division; no normalization",
              f"# reduced_with: AURORA {__version__}",
              f"# despike: {ds}" + (f" ({spikes} interpolated)" if spikes else (" (no spikes found)" if settings.despike else "")),
@@ -413,13 +415,14 @@ def write_john(zone: Zone, sid: str, stack, settings: ScanSettings, out_dir=None
         "params": {"i0": MCC_NAMES[I0_COL], "mode": fr.mode, "tey": MCC_NAMES[TEY_COL]},
         "stack_h5": str(getattr(scan, "h5", "") or "") if scan is not None else "",
         "survey_h5": str(survey_h5 or ""),
-        "spike_z": float(settings.k) if settings.despike else None,
+        "spike_z": None,                            # his robust-z 'Detect spikes' (not run); AURORA's k: despike_k
         "drop_energy_ranges": "",
         "drop_indices": "",
         "aurora": {"version": __version__, "sid": sid, "holder": holder,
                    "zone": {"id": zone.id, "label": zone.label, "group": zone.group, "comment": zone.comment},
                    "settings": settings.to_json(), "roi_points": [fr.n, fr.N],
                    "despike_mode": getattr(settings, "despike_mode", "classic"),
+                   "despike_k": float(settings.k) if settings.despike else None,
                    "spikes_eV": fr.spikes_ev, "i0_masked_eV": fr.low_ev, "incomplete_eV": fr.incomplete_ev,
                    "detectors_in_total": fr.dets_in_total, "data_source": fr.source,
                    "polygon": ("the zone's polygon" if zone.polys else

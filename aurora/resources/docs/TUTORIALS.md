@@ -53,8 +53,8 @@ headless listing and the tree agree.
    the time.
 5. **New sample**, **rect+**, drag over the right half; label `2 beta`. A click inside the first zone selects it
    again.
-6. Step **4 · Reduce** states the settings in force (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · fluorescence /
-   I0, edge jump = 1 · de-spike k = 6 · SDD1-4*). Select zone 1 and press **Add to Check**; do the same for zone 2.
+6. Step **4 · Reduce** states the settings in force (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · fluorescence /
+   I0, edge jump = 1 · de-spike k = 6 (John Bussey's default: off) · SDD1-4*). Select zone 1 and press **Add to Check**; do the same for zone 2.
 7. *Advanced*: switch with **Ctrl+Shift+A**. The cards lose their numbers; the **Zone** card shows **group**, filled
    from the sample sheet when the label was picked (`Minerals` for zone 1, `Simple Glass` for zone 2). The scan card below shows **include** ticked, SDD1–4 ticked,
    line F Kα, fluorescence */ I0, edge jump = 1*, **de-spike** with k = 6, I0 own. Untick **SDD3** and watch the

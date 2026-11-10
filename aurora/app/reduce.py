@@ -1419,8 +1419,10 @@ class ReducePerspective(QWidget):
         return easy_scan_settings(scan, self.session.flags_of(scan), labels=list(sd.labels) if sd is not None else None)
 
     def step4_text(self, sid: str | None = None) -> str:
-        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3
-        saturated, left out)': the Easy settings of the current stack, read-only."""
+        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · / I0, edge jump = 1 · de-spike
+        k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)': the Easy settings of the current stack,
+        read-only. The zone mean is what the saved files hold (the / I0 traces of the zone sum are the same); the
+        de-spike, on in Easy, was off by default in his GUI, so the line says so."""
         sd = self.current_stack()
         sid = sid or (sd.id if sd is not None else None)
         easy = self.easy_settings_for(sid) if sid else None
@@ -1431,8 +1433,9 @@ class ReducePerspective(QWidget):
         sat = sorted(saturated_dets(self.session.flags_of(scan)))
         dets = "SDD1-4" + (f" ({', '.join(d.upper() for d in sat)} saturated, left out)" if sat else "")
         i0 = "I0 mcc ch1 (Au mesh)" + (" · good-I0 mean (I0 invalid)" if easy.i0_source == "good" else "")
-        return " · ".join([i0, "TEY mcc ch4", "zone sum", f"fluorescence {NORM_LABELS.get(easy.fluo_norm, easy.fluo_norm)}",
-                           f"de-spike k = {easy.k:g}", dets])
+        ds = f"de-spike k = {easy.k:g} (John Bussey's default: off)" if easy.despike else "de-spike off"
+        return " · ".join([i0, "TEY mcc ch4", "zone mean (John Bussey's reduction)",
+                           f"fluorescence {NORM_LABELS.get(easy.fluo_norm, easy.fluo_norm)}", ds, dets])
 
     def zone_differences(self, z: Zone | None = None) -> dict[str, list[str]]:
         """sid -> the fields of the zone's settings that differ from the Easy defaults (empty lists left out)."""
