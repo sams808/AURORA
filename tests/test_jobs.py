@@ -242,3 +242,58 @@ def test_closing_during_a_job_exits_cleanly_in_a_process(tmp_path):
     assert r.returncode == 0, (r.returncode, r.stdout[-2000:], r.stderr[-2000:])
     closed = float(r.stdout.split("closed in ")[1].split()[0])
     assert closed < 6.0 and time.monotonic() - t0 < 40
+
+
+class _Big:
+    """Stands for a StackData or a cube: what a finished job must not keep alive."""
+
+
+def test_finished_jobs_are_freed(qapp):
+    """A finished job lets go of its result, its function (and what it captured) and its callbacks once they ran;
+    at most the 16 most recent finished jobs stay, older ones are deleted with their threads."""
+    import gc
+    import weakref
+    from PySide6.QtCore import QEvent, QThread
+    from aurora.app.jobs import Job, JobManager
+    host = QWidget()
+    mgr = JobManager(host)
+    results, inputs, got = [], [], []
+
+    def make(cb):
+        b = _Big()
+        results.append(weakref.ref(b))
+        return b
+    for i in range(20):
+        big = _Big()
+        inputs.append(weakref.ref(big))
+        mgr.submit(f"k{i}", lambda cb, b=big: (b, make(cb))[1], on_done=lambda r: got.append(type(r).__name__))
+        del big
+        assert mgr.wait_idle(10000)
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+    assert got == ["_Big"] * 20                                   # every callback had its result
+    assert [r() for r in results] == [None] * 20 and [r() for r in inputs] == [None] * 20
+    assert len(mgr.findChildren(Job)) <= 16 and len(mgr.findChildren(QThread)) <= 16
+    host.deleteLater()
+
+
+@pytest.mark.allow_excepthook
+def test_a_runtime_error_in_a_callback_is_reported(qapp, excepthook_collector):
+    """Only a callback whose Qt owner is gone is skipped quietly; any other RuntimeError reaches sys.excepthook."""
+    from PySide6.QtCore import QEvent
+    from aurora.app.jobs import JobManager
+    host = QWidget()
+    mgr = JobManager(host)
+    gone = QPushButton("gone")
+    gone.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)          # the button is deleted now
+
+    def bug(_r):
+        raise RuntimeError("dictionary changed size during iteration")
+    mgr.submit("a", lambda cb: 1, on_done=lambda r: gone.setText("x"))         # deleted owner: skipped
+    assert mgr.wait_idle(5000) and not excepthook_collector
+    mgr.submit("b", lambda cb: 1, on_done=bug)
+    assert mgr.wait_idle(5000)
+    assert [str(e) for _t, e, _tb in excepthook_collector] == ["dictionary changed size during iteration"]
+    excepthook_collector.clear()
+    host.deleteLater()
