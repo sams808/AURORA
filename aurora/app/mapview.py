@@ -17,9 +17,14 @@ code (scripts, the self-test). A zone editor opts in to the zone-aware mouse rul
 - a right-drag, or a drag started with Shift held, applies the opposite mode (Draw <-> Erase) with the same shape;
 - a drag shorter than 0.5 pitch is a stray drag and is ignored (set_points gives the pitch);
 - a right-click emits context_requested(x, y, zone id or None) for the caller's menu.
-Esc (and Ctrl+Z) during a stroke cancels it before any window shortcut sees the key.
-Without it (Survey, Maps) the map behaves as it always did; set_context_menus(True) alone gives a map the right-click
-signal (Survey can reuse Reduce's zone menu).
+Esc (and Ctrl+Z) during a stroke cancels it before any window shortcut sees the key. In navigate, a double-click
+emits double_clicked(x, y) (Survey: open the stack under a zone in Reduce).
+Without it (Maps) the map behaves as it always did; set_context_menus(True) alone gives a map the right-click signal.
+
+Feedback while drawing (the zone editor drives it): set_hint (a sentence over the top-left of the map),
+show_stroke_preview (the points a stroke adds or removes: one scatter item per kind, cheap on a survey of thousands of
+points), set_brush_footprint (the n x n brush square that follows the pointer, snapped to the nearest point), and the
+cursor of the tool (a cross for the outlines, none over the map for the brush, whose square is the cursor).
 """
 from __future__ import annotations
 
@@ -78,6 +83,7 @@ class _ToolViewBox(pg.ViewBox):
     stroke_changed = Signal(object)                     # Stroke (the same object, grown)
     stroke_finished = Signal(object)                    # Stroke (finished=True)
     stroke_cancelled = Signal()
+    double_clicked = Signal(float, float)               # navigate on a zone map: a double-click
 
     def __init__(self):
         super().__init__(enableMenu=False)
@@ -208,6 +214,8 @@ class _ToolViewBox(pg.ViewBox):
     def hover(self, x: float, y: float) -> None:
         if self.drawing() == "polygon":
             self._show_trace([x, y])
+        if self.owner is not None:
+            self.owner._move_footprint(x, y)
 
     # ------------------------------------------------------------------ drags
     def mouseDragEvent(self, ev, axis=None):
@@ -340,6 +348,9 @@ class _ToolViewBox(pg.ViewBox):
                 mods = ev.modifiers()
                 shift = bool(mods & Qt.ShiftModifier)
                 if self.tool == "navigate":
+                    if ev.double():
+                        self.double_clicked.emit(x, y)
+                        return
                     zid = self.owner.zone_at(x, y) if self.owner is not None else None
                     if zid is not None and zid != self.owner.selected_zone:
                         self.zone_clicked.emit(int(zid))
@@ -384,6 +395,7 @@ class MapView(pg.GraphicsLayoutWidget):
     stroke_changed = Signal(object)
     stroke_finished = Signal(object)
     stroke_cancelled = Signal()
+    double_clicked = Signal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -427,6 +439,15 @@ class MapView(pg.GraphicsLayoutWidget):
         self.vb.stroke_changed.connect(self.stroke_changed)
         self.vb.stroke_finished.connect(self.stroke_finished)
         self.vb.stroke_cancelled.connect(self.stroke_cancelled)
+        self.vb.double_clicked.connect(self.double_clicked)
+        self._member_sets: dict[int, set] = {}                    # zone id -> members on the points (zone_at)
+        self._stroke_items: dict[str, pg.ScatterPlotItem] = {}    # 'add' / 'remove': the stroke's provisional points
+        self._footprint = QGraphicsRectItem()                     # the brush square under the pointer
+        self._footprint.setZValue(58)
+        self._footprint.hide()
+        self.plot.addItem(self._footprint, ignoreBounds=True)
+        self._footprint_n = 0                                     # 0: no brush footprint
+        self._footprint_erase = False
         self.scene().sigMouseMoved.connect(self._moved)
         self._hint = QLabel(self)                                # the map hint, over the top-left of the map
         self._hint.setObjectName("maphint")
@@ -440,6 +461,15 @@ class MapView(pg.GraphicsLayoutWidget):
             self.vb.cancel_path()
         self.vb.tool = tool
         self.vb.setMouseEnabled(x=tool == "navigate", y=tool == "navigate")
+        shape = tool.rstrip("+-")
+        if shape == "navigate":
+            self.vb.unsetCursor()
+        elif shape == "brush" and self.zone_tools:
+            self.vb.setCursor(Qt.BlankCursor)               # the brush square is the cursor
+        else:
+            self.vb.setCursor(Qt.CrossCursor)
+        if shape != "brush":
+            self.set_brush_footprint(0)
 
     def set_zone_tools(self, on: bool) -> None:
         """Zone-aware clicks, stray-drag filter and right-click menus (the Reduce zone editor)."""
@@ -452,9 +482,12 @@ class MapView(pg.GraphicsLayoutWidget):
 
     def set_points(self, x, y, pitch) -> None:
         """The stack's pixel centres and pitch (mm): hit tests use the members, drags are measured in pitches."""
+        self._member_sets = {}
         if x is None:
             self._px = self._py = None
             self.pitch = None
+            self.clear_stroke_preview()
+            self._footprint.hide()
             return
         self._px, self._py = np.asarray(x, float), np.asarray(y, float)
         self.pitch = (float(pitch[0]), float(pitch[1]))
@@ -490,15 +523,18 @@ class MapView(pg.GraphicsLayoutWidget):
         super().keyPressEvent(ev)
 
     # ------------------------------------------------------------------ hint
-    def set_hint(self, text: str) -> None:
+    def set_hint(self, text: str, idle: bool = False) -> None:
         """A short sentence over the top-left of the map (what a stroke will do, why it wrote nothing); hidden when
-        empty. Screen readers get it as the map's accessible description."""
+        empty. idle=True (what a drag does, between strokes): shown only while the pointer is over the map, so it
+        never sits on a small map's data. Screen readers get it as the map's accessible description."""
         text = text or ""
-        if text == self._hint.text() and self._hint.isVisible() == bool(text):
+        self._hint_idle = bool(idle)
+        show = bool(text) and (not idle or self.underMouse())
+        if text == self._hint.text() and self._hint.isVisible() == show:
             return
         self._hint.setText(text)
         self.setAccessibleDescription(text)
-        if not text:
+        if not show:
             self._hint.hide()
             return
         bg = with_alpha(TOKENS["map_bg"], 0.8)
@@ -510,6 +546,11 @@ class MapView(pg.GraphicsLayoutWidget):
 
     def hint_text(self) -> str:
         return self._hint.text()
+
+    def enterEvent(self, ev) -> None:
+        super().enterEvent(ev)
+        if getattr(self, "_hint_idle", False) and self._hint.text() and not self._hint.isVisible():
+            self.set_hint(self._hint.text(), idle=True)
 
     def _place_hint(self) -> None:
         w = max(120, int(0.6 * self.width()), min(self.width() - 16, 280))     # a narrow map: fewer lines
@@ -556,10 +597,12 @@ class MapView(pg.GraphicsLayoutWidget):
         cands = []
         for z in self._zones:
             if i is not None:
-                m = members(z, self._px, self._py, self.pitch)
-                if i in set(m.tolist()):
+                m = self._member_sets.get(id(z))
+                if m is None:
+                    m = self._member_sets[id(z)] = set(members(z, self._px, self._py, self.pitch).tolist())
+                if i in m:
                     bb = zone_bbox(z)
-                    cands.append((m.size, (bb[1] - bb[0]) * (bb[3] - bb[2]) if bb else 0.0, -z.id, z.id))
+                    cands.append((len(m), (bb[1] - bb[0]) * (bb[3] - bb[2]) if bb else 0.0, -z.id, z.id))
             elif self._contains(z, x, y, self.pitch):
                 bb = zone_bbox(z)
                 cands.append((0, (bb[1] - bb[0]) * (bb[3] - bb[2]) if bb else 0.0, -z.id, z.id))
@@ -634,6 +677,7 @@ class MapView(pg.GraphicsLayoutWidget):
             self.plot.removeItem(it)
         self._overlays.clear()
         self._zones.clear()
+        self._member_sets = {}
         self.selected_zone = None
 
     def add_casing(self, path: QPainterPath, colour: str, width: float, z: float = 10) -> None:
@@ -739,17 +783,107 @@ class MapView(pg.GraphicsLayoutWidget):
                 self.add_label(x, y, zone.label, colour)
 
     def draw_pixels(self, x: np.ndarray, y: np.ndarray, pitch: tuple[float, float], colour: str) -> None:
-        """Outline every pixel square (used to show the members of a zone on the stack map); no casing, which would
-        draw a dark grid over the pixels."""
-        px, py = pitch
-        for xi, yi in zip(x, y):
-            self.add_rect(xi - px / 2, xi + px / 2, yi - py / 2, yi + py / 2, colour, 0.8, z=5, casing=False)
+        """Outline every pixel square (used to show the members of a zone on the stack map) as one scatter item of
+        pitch-sized squares, however many pixels; no casing, which would draw a dark grid over the pixels."""
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        if x.size == 0:
+            return
+        it = pg.ScatterPlotItem(x=x, y=y, symbol=_cell_symbol(pitch), size=max(pitch), pxMode=False,
+                                pen=pg.mkPen(colour, width=0.8), brush=pg.mkBrush(0, 0, 0, 0))
+        it.setZValue(5)
+        self.plot.addItem(it, ignoreBounds=True)
+        self._overlays.append(it)
+
+    # ------------------------------------------------------------------ stroke feedback
+    def show_stroke_preview(self, add_xy, remove_xy, pitch, colour: str) -> None:
+        """The points a stroke in progress would add (filled in the target zone's colour) and remove (crossed in the
+        erase colour): one scatter item per kind, updated with setData."""
+        from aurora.app.theme import MAP_OVERLAY
+        if pitch is None:
+            self.clear_stroke_preview()
+            return
+        size = 0.9 * min(pitch)
+        for kind, xy in (("add", add_xy), ("remove", remove_xy)):
+            it = self._stroke_items.get(kind)
+            if it is None:
+                it = pg.ScatterPlotItem(pxMode=False)
+                it.setZValue(57)
+                self.plot.addItem(it, ignoreBounds=True)
+                self._stroke_items[kind] = it
+            x, y = (np.asarray(xy[0], float), np.asarray(xy[1], float)) if xy is not None else (np.zeros(0), np.zeros(0))
+            if kind == "add":
+                it.setData(x=x, y=y, symbol="s", size=size, pen=pg.mkPen(colour, width=1.2),
+                           brush=pg.mkBrush(with_alpha(colour, 0.45)))
+            else:
+                it.setData(x=x, y=y, symbol="x", size=size, pen=pg.mkPen(MAP_OVERLAY["erase"], width=1.2),
+                           brush=pg.mkBrush(MAP_OVERLAY["erase"]))
+            it.setVisible(bool(x.size))
+
+    def clear_stroke_preview(self) -> None:
+        for it in self._stroke_items.values():
+            it.setData(x=[], y=[])
+            it.setVisible(False)
+
+    def stroke_preview_counts(self) -> tuple[int, int]:
+        """(points shown as added, points shown as removed) of the stroke preview."""
+        out = []
+        for kind in ("add", "remove"):
+            it = self._stroke_items.get(kind)
+            out.append(len(it.data) if it is not None and it.isVisible() else 0)
+        return out[0], out[1]
+
+    def set_brush_footprint(self, n: int, erase: bool = False) -> None:
+        """Show the n x n brush square under the pointer (0 hides it), in the add or the erase colour."""
+        from aurora.app.theme import MAP_OVERLAY
+        self._footprint_n = max(0, int(n))
+        self._footprint_erase = bool(erase)
+        if not self._footprint_n:
+            self._footprint.hide()
+            return
+        pen = QPen(QColor(MAP_OVERLAY["erase"] if erase else MAP_OVERLAY["rect_add"]), 1.5, Qt.DashLine)
+        pen.setCosmetic(True)
+        self._footprint.setPen(pen)
+
+    def footprint_rect(self) -> QRectF | None:
+        """The brush square shown under the pointer (mm), None when hidden."""
+        return self._footprint.rect() if self._footprint.isVisible() else None
+
+    def _move_footprint(self, x: float, y: float) -> None:
+        n = self._footprint_n
+        if not n or self.pitch is None or self._px is None or self._px.size == 0:
+            self._footprint.hide()
+            return
+        from aurora.core.zones import brush_squares
+        sq = brush_squares(self._px, self._py, self.pitch, x, y, n)
+        if not sq:                                   # out of the brush's reach: nothing would be painted
+            self._footprint.hide()
+            return
+        px, py = self.pitch
+        xs, ys = [s[0] for s in sq], [s[1] for s in sq]
+        self._footprint.setRect(QRectF(min(xs) - px / 2, min(ys) - py / 2, max(xs) - min(xs) + px, max(ys) - min(ys) + py))
+        self._footprint.show()
 
     def _moved(self, pos) -> None:
         if self.plot.sceneBoundingRect().contains(pos):
             p = self.vb.mapSceneToView(pos)
             self.vb.hover(float(p.x()), float(p.y()))
             self.hovered.emit(float(p.x()), float(p.y()))
+
+    def leaveEvent(self, ev) -> None:
+        self._footprint.hide()
+        if getattr(self, "_hint_idle", False):
+            self._hint.hide()
+        super().leaveEvent(ev)
+
+
+def _cell_symbol(pitch) -> QPainterPath:
+    """A pixel square of a pitch (px, py) as a scatter symbol: pyqtgraph scales a symbol by `size` (here max(pitch)),
+    so the path is the cell in units of that size, its sides in the pitch's own ratio."""
+    px, py = float(pitch[0]), float(pitch[1])
+    s = max(px, py) or 1.0
+    path = QPainterPath()
+    path.addRect(QRectF(-0.5 * px / s, -0.5 * py / s, px / s, py / s))
+    return path
 
 
 def _union(rects, polys, squares) -> QPainterPath:

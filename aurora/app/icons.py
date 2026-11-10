@@ -21,6 +21,16 @@ _PATHS = {
                 'M4.9 19.1L7 17M17 7l2.1-2.1"/>',
     "folder": '<path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>',
     "refresh": '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
+    # the zone tool bar (Survey and Reduce): mode and shapes
+    "draw": '<path d="M4 20l1-5L16 4l4 4L9 19z M14 6l4 4"/>',
+    "erase": '<path d="M8 20h12 M4 15l9-9 6 6-7 7H8z M9 10l6 6"/>',
+    "move": '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>',
+    "rect": '<rect x="4" y="5" width="16" height="14" rx="1" stroke-dasharray="3 2"/>',
+    "brush": '<rect x="5" y="5" width="6" height="6"/><rect x="13" y="5" width="6" height="6"/>'
+             '<rect x="5" y="13" width="6" height="6"/><rect x="13" y="13" width="6" height="6"/>',
+    "lasso": '<path d="M12 4c5 0 8 2.5 8 6s-3.5 6-8 6-8-2.5-8-6 3-6 8-6z M7 15c-1 2 0 4 2 5"/>',
+    "polygon": '<path d="M12 3l8 6-3 11H7L4 9z"/>',
+    "undo": '<path d="M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3"/>',
 }
 
 
