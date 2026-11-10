@@ -2,42 +2,71 @@
 
 A redraw whose traces have the structure of those drawn (one trace, the same detectors, settings, toggles and scheme)
 moves the existing curves with setData instead of rebuilding the plots (update_traces, and set_traces, which goes the
-same way): a zone being drawn redraws the preview at every stroke."""
+same way): a zone being drawn redraws the preview at every stroke.
+
+What is drawn is chosen in one 'Show ▾' menu (SDDs, sum, TEY, I0, spikes), so the controls stay one row in a narrow
+column, and the hover readout is one elided line under the plots. The plots keep at least MIN_PLOT_PX (the
+fluorescence panel MIN_TOP_PX); below COMPACT_BELOW_PX of plot height the TEY and I0 panels hide and the fluorescence
+takes the whole height (compact), until 'TEY and I0 panels' in the menu brings them back. set_compact(True) keeps a
+preview compact (the Survey's zone preview)."""
 from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QMenu, QToolButton, QVBoxLayout, QWidget
 
 from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
 from aurora.core.spectra import ZoneTraces
 
+MIN_PLOT_PX = 180               # the three panels (or the compact fluorescence panel) never get less
+MIN_TOP_PX = 110                # the fluorescence panel never gets less
+COMPACT_BELOW_PX = 260          # below this plot height, the TEY and I0 panels hide (compact)
+SHOW_TEXT = "Show ▾"
+
 
 class PreviewPlot(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, min_plot_px: int = MIN_PLOT_PX, overlay: bool = True):
+        """overlay False: no 'all scans' check box (a preview of one scan only, the Survey's Zone preview)."""
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
         opts = QHBoxLayout()
-        self.toggles = QWidget()                       # display toggles: Advanced mode
-        from aurora.app.widgets import ElidedLabel, FlowLayout
-        tl = FlowLayout(self.toggles, spacing=6)
-        self.show_sdd = QCheckBox("SDDs"); self.show_sdd.setChecked(True)
-        self.show_sum = QCheckBox("sum"); self.show_sum.setChecked(True)
-        self.show_tey = QCheckBox("TEY"); self.show_tey.setChecked(True)
-        self.show_i0 = QCheckBox("I0"); self.show_i0.setChecked(True)
-        self.show_spikes = QCheckBox("spikes"); self.show_spikes.setChecked(True)
-        for c in (self.show_sdd, self.show_sum, self.show_tey, self.show_i0, self.show_spikes):
-            tl.addWidget(c)
-        opts.addWidget(self.toggles)
+        from aurora.app.help_text import HELP, explain
+        from aurora.app.widgets import ElidedLabel
+        self.show_btn = QToolButton()                   # display toggles, one menu: Advanced mode
+        self.show_btn.setText(SHOW_TEXT)
+        self.show_btn.setPopupMode(QToolButton.InstantPopup)
+        self.show_btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")    # the ▾ says it
+        explain(self.show_btn, "preview.show")
+        self.show_menu = QMenu(self.show_btn)
+        self.show_menu.setToolTipsVisible(True)
+        self.show_btn.setMenu(self.show_menu)
+
+        def toggle(text: str, key: str, on: bool = True):
+            a = self.show_menu.addAction(text)
+            a.setCheckable(True)
+            a.setChecked(on)
+            a.setToolTip(HELP[key][0])
+            a.setStatusTip(HELP[key][0])
+            return a
+        self.show_sdd = toggle("SDDs", "preview.sdd")
+        self.show_sum = toggle("sum", "preview.sum")
+        self.show_tey = toggle("TEY", "preview.tey")
+        self.show_i0 = toggle("I0", "preview.i0")
+        self.show_spikes = toggle("spikes", "preview.spikes")
+        self.show_menu.addSeparator()
+        self.show_panels = toggle("TEY and I0 panels", "preview.panels", on=False)
+        self.show_panels.setVisible(False)              # offered while the preview is compact
+        self.toggles = self.show_btn
+        opts.addWidget(self.show_btn)
         self.all_scans = QCheckBox("all scans of the zone")
-        opts.addWidget(self.all_scans)
+        if overlay:
+            opts.addWidget(self.all_scans)
         opts.addStretch(1)
-        self.readout = ElidedLabel("", Qt.ElideRight)
+        self.readout = ElidedLabel("", Qt.ElideRight)   # under the plots (added below): the row never wraps
         self.readout.setObjectName("muted")
-        opts.addWidget(self.readout, 1)
         lay.addLayout(opts)
         self.gl = pg.GraphicsLayoutWidget()
         self.top = self.gl.addPlot(row=0, col=0)
@@ -57,6 +86,14 @@ class PreviewPlot(QWidget):
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
+        lay.addWidget(self.readout)
+        self.gl.setMinimumHeight(int(min_plot_px))
+        self.top.setMinimumHeight(MIN_TOP_PX)
+        self._forced_compact: bool | None = None        # None: automatic (by the plot height)
+        self._compact = False
+        self._bottom_values = self.top.getAxis("bottom").style.get("showValues", True)
+        self.gl.installEventFilter(self)
+        self.show_panels.toggled.connect(lambda _on: self._layout_rows())
         style_plot(self.gl)
         on_theme_changed(self, lambda _s: self.redraw())
         self._traces: list[tuple[str, ZoneTraces, dict]] = []
@@ -66,11 +103,52 @@ class PreviewPlot(QWidget):
         self.top.scene().sigMouseMoved.connect(self._moved)
         from aurora.app.help_text import explain_all
         from aurora.app.mode import mark_advanced
-        explain_all([(self.show_sdd, "preview.sdd"), (self.show_sum, "preview.sum"), (self.show_tey, "preview.tey"),
-                     (self.show_i0, "preview.i0"), (self.show_spikes, "preview.spikes"),
-                     (self.all_scans, "preview.all_scans")])
+        explain_all([(self.all_scans, "preview.all_scans")])
         self.gl.setAccessibleName("preview of the zone's traces")
         mark_advanced(self.toggles)
+
+    # ------------------------------------------------------------------ compact
+    def set_compact(self, on: bool | None) -> None:
+        """True: the fluorescence panel only, whatever the height (the Survey's zone preview); False: always the three
+        panels; None: automatic (compact below COMPACT_BELOW_PX of plot height)."""
+        self._forced_compact = on
+        self._layout_rows()
+
+    def is_compact(self) -> bool:
+        return self._compact
+
+    def eventFilter(self, obj, ev) -> bool:
+        if obj is self.gl and ev.type() == QEvent.Resize:
+            self._layout_rows()
+        return False
+
+    def _layout_rows(self) -> None:
+        if self._forced_compact is not None:
+            want = self._forced_compact
+        else:
+            want = self.gl.height() < COMPACT_BELOW_PX and not self.show_panels.isChecked()
+        self.show_panels.setVisible(self._forced_compact is None and (want or self.show_panels.isChecked()))
+        if want == self._compact:
+            return
+        self._compact = want
+        ci = self.gl.ci
+        bottom = self.top.getAxis("bottom")
+        if want:
+            for p in (self.mid, self.low):
+                p.setXLink(None)                        # a hidden panel without geometry would drag the x range
+                ci.removeItem(p)
+                p.hide()
+            self.top.setLabel("bottom", "energy (eV)")
+            bottom.setStyle(showValues=True)
+        else:
+            for row, p in ((1, self.mid), (2, self.low)):
+                p.show()
+                ci.addItem(p, row=row, col=0)
+                p.setXLink(self.top)
+            ci.layout.setRowStretchFactor(1, 2)
+            ci.layout.setRowStretchFactor(2, 2)
+            bottom.showLabel(False)
+            bottom.setStyle(showValues=self._bottom_values)
 
     def set_traces(self, traces: list[tuple[str, ZoneTraces, dict]], waiting: str = "") -> None:
         """[(name, traces, meta)] where meta may hold 'edge_ev' and 'edge'. waiting: what an empty preview is still
@@ -164,6 +242,8 @@ class PreviewPlot(QWidget):
             return
         x0, x1 = min(xs), max(xs)
         for plot, arrays in ((self.top, top), (self.mid, mid), (self.low, low)):
+            if self._compact and plot is not self.top:
+                continue
             vals = np.concatenate([np.asarray(a, float) for a in arrays]) if arrays else np.array([])
             vals = vals[np.isfinite(vals)]
             if vals.size:

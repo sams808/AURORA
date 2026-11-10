@@ -165,6 +165,11 @@ HELP: dict[str, tuple[str, str, str]] = {
                    "45-one-card-per-attached-scan"),
     "reduce.post": ("Post-edge window in eV, '700-720' style; blank = the last 20 % of the energies.",
                     "post-edge window", "45-one-card-per-attached-scan"),
+    "preview.show": ("What the preview draws: the four detectors, their sum, TEY, I0 and the repaired spikes. On a "
+                     "short preview the TEY and I0 panels hide (TEY and I0 panels brings them back).", "Show",
+                     "47-preview"),
+    "preview.panels": ("Show the TEY and I0 panels under the fluorescence, even on a short preview.",
+                       "TEY and I0 panels", "47-preview"),
     "preview.sdd": ("Show the four detectors.", "show the detectors", "47-preview"),
     "preview.sum": ("Show the sum of the ticked detectors.", "show the sum", "47-preview"),
     "preview.tey": ("Show the TEY panel's curve.", "show TEY", "47-preview"),
