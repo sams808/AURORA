@@ -33,7 +33,7 @@ from aurora.app.mode import mark_advanced, on_mode_changed
 from aurora.app.session import CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
-from aurora.app.vocab import DET_LABELS
+from aurora.app.vocab import DET_LABELS, plural
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, set_enabled,
                                 set_plot_hint)
 from aurora.core import export, qc
@@ -1127,7 +1127,7 @@ class CheckPerspective(QWidget):
                 for f in folders:
                     n_added += len(self.library.add_folder(f))
             flat = [p for paths in written for p in paths]
-            msg = f"{len(written)} spectrum(s) saved in John Bussey's format and added to Compare ({n_added} rows)" + (
+            msg = f"{plural(len(written), 'spectrum')} saved in John Bussey's format and added to Compare ({n_added} rows)" + (
                 "; " + "; ".join(notes) if notes else "")
             if flat:
                 notify_saved(self.queue_note, flat)                 # 'wrote … → folder · Open folder' (rich text)

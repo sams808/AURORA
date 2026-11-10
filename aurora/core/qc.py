@@ -441,7 +441,8 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
     Ported checks: the region's points (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values or a
     signal zero everywhere (bad), missing energies, I0 zero or missing, I0 varying by more than I0_VARIES_FACTOR, TEY
     without finite values, and the fraction of energies flagged bad (spikes plus masked energies, BAD_POINT_FRACTION).
-    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source) and the de-spike notes.
+    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source; before the counting
+    checks, so that the first warning, Check's headline, is the most serious one) and the de-spike notes.
     `stack` (a StackData) or `n_total` gives the stack's pixel count for 'N of M points'."""
     if n_total is None and stack is not None:
         n_total = getattr(stack, "n_pix", None)
@@ -474,6 +475,23 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
                 msgs.append(("bad", f"{DETS[k].upper()}: signal is zero everywhere - check its window ({window(k)})"))
         if not ticked:
             msgs.append(("warn", "no detector is ticked: no fluorescence trace"))
+    # the scan's flags before the counting checks: the first warning is the row's headline in Check
+    in_sum = {DETS[k] for k in ticked}
+    for f in flags or []:
+        src = getattr(f, "source", "")
+        if f.kind == "sdd_saturated":
+            if set(f.dets) & in_sum:
+                msgs.append(("warn", f"{f.text} ({src}) and in the fluorescence sum: its fluorescence is not usable; "
+                                     "TEY is"))
+            else:
+                msgs.append(("ok", f"{f.text} ({src}): left out of the sum"))
+        elif f.kind == "high_rate":
+            msgs.append(("warn", f"{f.text} ({src}): dead time or pile-up likely, compare with TEY"))
+        elif f.kind == "i0_invalid":
+            if st is not None and st.i0_source == "good":
+                msgs.append(("ok", f"I0 invalid ({src}): divided by the good-I0 mean"))
+            else:
+                msgs.append(("warn", f"I0 invalid ({src}): the / I0 traces are not meaningful; use the good-I0 mean"))
     sum_ok = np.ones(nE, bool)
     for k in ticked:
         if traces.det_raw[k] is not None:
@@ -507,22 +525,6 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
             msgs.append(("warn", note))
         elif note.startswith("signal: IPFY") or note.startswith("IPFY:"):
             msgs.append(("ok", note))
-    in_sum = {DETS[k] for k in ticked}
-    for f in flags or []:
-        src = getattr(f, "source", "")
-        if f.kind == "sdd_saturated":
-            if set(f.dets) & in_sum:
-                msgs.append(("warn", f"{f.text} ({src}) and in the fluorescence sum: its fluorescence is not usable; "
-                                     "TEY is"))
-            else:
-                msgs.append(("ok", f"{f.text} ({src}): left out of the sum"))
-        elif f.kind == "high_rate":
-            msgs.append(("warn", f"{f.text} ({src}): dead time or pile-up likely, compare with TEY"))
-        elif f.kind == "i0_invalid":
-            if st is not None and st.i0_source == "good":
-                msgs.append(("ok", f"I0 invalid ({src}): divided by the good-I0 mean"))
-            else:
-                msgs.append(("warn", f"I0 invalid ({src}): the / I0 traces are not meaningful; use the good-I0 mean"))
     return msgs
 
 
