@@ -11,6 +11,5 @@ in this folder.
 | [TUTORIALS.md](../aurora/resources/docs/TUTORIALS.md) | new users | nine tutorials: eight on the demo beamtime (`aurora demo <folder>`), then the real-beamtime recipe |
 | [INSTALL.md](../aurora/resources/docs/INSTALL.md) | users, administrators | the Windows setup and zip, the macOS disk images, the command line, storage locations, source install, building, CI, releases |
 | [DEVELOPER.md](DEVELOPER.md) | developers | the two layers, modules, formats, tests, Qt rules, how to add a perspective |
-| [BRAINSTORM.md](BRAINSTORM.md) | developers | feature universe, architecture, roadmap |
 | [DESIGN.md](DESIGN.md) | developers | design language |
 | [make_screenshots.py](make_screenshots.py) | developers | regenerates the screenshots of the manuals in `aurora/resources/docs/img/` (`python docs/make_screenshots.py`; `--scheme dark --out DIR` for a dark set) |

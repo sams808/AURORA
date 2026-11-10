@@ -67,9 +67,10 @@ def error_dialogs(monkeypatch):
     monkeypatch.setattr(crash, "show_error", lambda title, text, details="": calls.append((title, text, details)))
     yield calls
 
-# the Windows default only on Windows: elsewhere os.pathsep is ':' and would split 'C:\...' in AURORA_PROTECT_DIRS
-_REAL_DEFAULT = r"<beamtime folder>" if os.name == "nt" else "/nonexistent/my_beamtime"
-REAL_PROJECT = Path(os.environ.get("AURORA_REAL_PROJECT", _REAL_DEFAULT))
+from local_paths import local_path  # noqa: E402  (tests/: AURORA_REAL_PROJECT, else tests/local_paths.json)
+
+# no beamtime on this machine: a folder that does not exist, so the real-data tests skip and the guard below still holds
+REAL_PROJECT = local_path("AURORA_REAL_PROJECT") or Path("/nonexistent/my_beamtime")
 # the real beamtime is read-only for the whole test session: every AURORA write path refuses it (aurora.core.io.safety)
 os.environ["AURORA_PROTECT_DIRS"] = os.pathsep.join(filter(None, [os.environ.get("AURORA_PROTECT_DIRS", ""), str(REAL_PROJECT)]))
 

@@ -6,8 +6,9 @@ from aurora.core.compare import (TraceRequest, derivative_e0, export_wide_csv, f
                                  load_spectra, local_peaks, normalise_larch, normalise_legacy, normalise_tey_line,
                                  process, save_config, stack_offsets)
 from aurora.core.fit import itfa, lcf, mcr_als, pca, prepare_matrix
+from local_paths import john_gui
 
-JB_LEGACY = r"<repository>\legacy\CLS_GUI_JohnBussey\gui_outputs\reduced\BO3_LiSO3F_LR_fluorine_k"
+JOHN = john_gui()                   # John Bussey's GUI folder (tests/local_paths.py), None when absent
 
 
 def _edge(E, e0=690.0, width=1.0, white=0.6, slope=0.002):
@@ -43,9 +44,8 @@ def test_readers(tmp_path):
 
 
 def test_john_reduced_csv_from_legacy_folder():
-    import pathlib
-    folder = pathlib.Path(JB_LEGACY)
-    if not folder.exists():
+    folder = JOHN / "gui_outputs" / "reduced" / "BO3_LiSO3F_LR_fluorine_k" if JOHN else None
+    if folder is None or not folder.exists():
         pytest.skip("John's legacy outputs not present")
     specs = load_spectra(next(folder.glob("*_full_reduced.csv")))
     assert {s.signal for s in specs} == {"sdd-scaled", "sdd_total", "TEY"}

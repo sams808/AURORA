@@ -27,10 +27,18 @@ htmlcov/
 # The two parent code bases are kept locally only (not ours to republish)
 legacy/CLS_GUI_JohnBussey/
 legacy/SGM_Beamline_Analysis/
+# The beamtime scripts with the lab's sample sheet and plate layouts (local copies, never published)
+legacy/sgm_report_v2.5/
 
 # Internal planning material with collaborator names and endpoints
 docs/HANDOFF.md
 docs/sources/
+docs/BRAINSTORM.md
+# Notes for the coding assistant
+CLAUDE.md
+
+# The real-data folders of this machine for the tests (tests/local_paths.example.json is the template)
+tests/local_paths.json
 
 # OS / editor
 .DS_Store

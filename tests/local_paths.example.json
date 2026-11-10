@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy to tests/local_paths.json (untracked) and set the folders of this machine; an environment variable of the same name wins. Leave a key out to skip its tests.",
+  "AURORA_REAL_PROJECT": "C:\\Data\\my_beamtime",
+  "AURORA_LEGACY": "C:\\Data\\AURORA_legacy"
+}
