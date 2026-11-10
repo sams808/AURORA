@@ -1442,7 +1442,6 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
 
     def report_():
         import re
-        from PySide6.QtWidgets import QToolButton
         rp = win.report
         win.show_perspective("report")
         pump(5)
@@ -1454,7 +1453,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         assert re.fullmatch(r"\d+ zones? · \d+ spectr(um|a) · \d+ warnings?", total), total
         n = lst.topLevelItemCount()
         if n:
-            lst.itemWidget(lst.topLevelItem(0), 2).findChild(QToolButton).click()
+            rp.show_delegate.click(lst.topLevelItem(0))
             pump(5)
             assert win.stack.currentWidget() is win.reduce
         return f"'{total}', {n} finding(s)" + (", Show opens Reduce" if n else "")

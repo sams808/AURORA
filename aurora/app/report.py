@@ -17,14 +17,15 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, QTimer, QUrl, Qt
-from PySide6.QtGui import QDesktopServices, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSpinBox, QSplitter,
-                               QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QPersistentModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QTimer, QUrl, Qt
+from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QMouseEvent, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
+                               QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
+                               QSpinBox, QSplitter, QStyle, QStyledItemDelegate, QTabWidget, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
-from aurora.app.help_text import explain, explain_all, header_tips, labelled
+from aurora.app.help_text import explain_all, header_tips, labelled
 from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
 from aurora.app.session import Session
 from aurora.app.vocab import plural
@@ -40,6 +41,89 @@ IGNORED_KEY = "preflight_ignored"               # session ui value: ids of the f
 PROMPTED_KEY = "report_author_prompted"         # settings: the one-time author prompt was shown
 PRESET_ITEMS = (("Final", "final"), ("Draft", "draft"))
 CHECK_DELAY_MS = 400                            # debounce of the check after an edit
+SHOW_COL = 2                                    # the findings column of the Show buttons
+
+
+class _ShowDelegate(QStyledItemDelegate):
+    """The Show button of each finding, painted like the style sheet's QToolButton (padding 5 px 12 px, 1 px border,
+    8 px corners). A QToolButton widget per row cost the GUI thread about 6 ms a finding: seconds for the 250
+    findings of a real beamtime. A click on the button calls on_click(finding id) once the click is handled.
+    The cell's size is the item's size hint (cell_size), not a Python sizeHint: Qt measures every row again and
+    again while a style sheet is applied."""
+
+    def __init__(self, view: QTreeWidget, on_click):
+        super().__init__(view)
+        self.view = view
+        self.on_click = on_click
+        self._pressed: QPersistentModelIndex | None = None
+        self._size: tuple[str, QSize] = ("", QSize())    # (font key, button size)
+
+    def button_rect(self, cell: QRect, font) -> QRect:
+        """The button at the top of its cell (a tall, wrapped row keeps the button at its own height)."""
+        key = font.key()
+        if self._size[0] != key:
+            fm = QFontMetrics(font)
+            self._size = (key, QSize(fm.horizontalAdvance("Show") + 26, fm.height() + 12))
+        return QRect(cell.topLeft() + QPoint(2, 2), self._size[1])
+
+    def cell_size(self) -> QSize:
+        b = self.button_rect(QRect(), self.view.font())
+        return QSize(b.width() + 6, b.height() + 4)
+
+    def paint(self, painter, option, index) -> None:
+        from aurora.app.theme import TOKENS
+        super().paint(painter, option, index)            # the row's background and selection (the cell has no text)
+        down = self._pressed is not None and self._pressed == index
+        b = QRectF(self.button_rect(option.rect, option.font)).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(TOKENS["action" if option.state & QStyle.State_MouseOver else "edge"]), 1.0))
+        painter.setBrush(QColor(TOKENS["select" if down else "card"]))
+        painter.drawRoundedRect(b, 8.0, 8.0)
+        painter.setPen(QColor(TOKENS["select_fg" if down else "ink"]))
+        painter.setFont(option.font)
+        painter.drawText(b, int(Qt.AlignCenter), "Show")
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        kind = event.type()
+        if kind not in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick):
+            return super().editorEvent(event, model, option, index)
+        inside = (event.button() == Qt.LeftButton
+                  and self.button_rect(option.rect, option.font).contains(event.position().toPoint()))
+        if kind == QEvent.MouseButtonPress:
+            self._pressed = QPersistentModelIndex(index) if inside else None
+        elif kind == QEvent.MouseButtonRelease:
+            hit = inside and self._pressed is not None and self._pressed == index
+            self._pressed = None
+            if hit:                                       # after the click: the jump may refill the list
+                fid = index.siblingAtColumn(0).data(Qt.UserRole)
+                QTimer.singleShot(0, self, lambda: self.on_click(fid))
+        self.view.viewport().update(option.rect)
+        return inside                                     # a press on the button neither selects nor jumps twice
+
+    def click(self, item: QTreeWidgetItem) -> None:
+        """Click the Show button of `item` as the mouse does (press and release on the viewport): the self-test."""
+        idx = self.view.indexFromItem(item, SHOW_COL)
+        pos = QPointF(self.button_rect(self.view.visualRect(idx), self.view.font()).center())
+        vp = self.view.viewport()
+        for kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
+            buttons = Qt.LeftButton if kind == QEvent.MouseButtonPress else Qt.NoButton
+            QApplication.sendEvent(vp, QMouseEvent(kind, pos, vp.mapToGlobal(pos), Qt.LeftButton, buttons, Qt.NoModifier))
+
+
+class _FindingsList(QTreeWidget):
+    """The findings: Enter or Return on a row shows it in Reduce (as a double-click or its Show button does)."""
+
+    def __init__(self, on_enter, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.on_enter = on_enter
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.currentItem() is not None:
+            self.on_enter(self.currentItem())
+            return
+        super().keyPressEvent(e)
 
 
 class ReportPerspective(QWidget):
@@ -135,8 +219,10 @@ class ReportPerspective(QWidget):
         self.totals = QLabel("no project open"); self.totals.setWordWrap(True)
         check.body.addWidget(self.totals)
         self.check_tabs = QTabWidget()
-        self.preflight_list = QTreeWidget()
+        self.preflight_list = _FindingsList(self._jump_item)
         self.preflight_list.setColumnCount(3)
+        self.show_delegate = _ShowDelegate(self.preflight_list, self._jump_id)
+        self.preflight_list.setItemDelegateForColumn(SHOW_COL, self.show_delegate)
         self.preflight_list.setHeaderLabels(["Finding", "Ignore", ""])
         self.preflight_list.setRootIsDecorated(False)
         self.preflight_list.setUniformRowHeights(False)
@@ -152,7 +238,7 @@ class ReportPerspective(QWidget):
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.preflight_list.itemChanged.connect(self._ignore_changed)
-        self.preflight_list.itemDoubleClicked.connect(lambda it, _c: self._jump_item(it))
+        self.preflight_list.itemDoubleClicked.connect(lambda it, c: c != SHOW_COL and self._jump_item(it))
         self.contents = QTreeWidget()
         self.contents.setColumnCount(3)
         self.contents.setHeaderLabels(["Group / holder / zone", "Edge", "Scans"])
@@ -488,9 +574,17 @@ class ReportPerspective(QWidget):
             self._plan_again = False
             self.schedule_check()
 
+    @staticmethod
+    def _order(plan: Plan, ign: set[str]) -> list:
+        """The findings as listed: warnings first, ignored ones last (otherwise in the plan's order)."""
+        return sorted(plan.findings, key=lambda f: (f.id in ign, f.tone != "warn"))
+
     def _fill_plan(self) -> None:
-        """Fill the findings, the contents tree and the totals line from the last plan (also after a theme change)."""
-        from aurora.app.theme import set_item_tone, status_icon
+        """Fill the findings, the contents tree and the totals line from the last plan (also after a theme change).
+        The rows are built, sized and then added in one call: added one by one, each re-laid out the whole
+        word-wrapped list, and 250 findings of the real beamtime froze the window for seconds."""
+        from aurora.app.help_text import HELP
+        from aurora.app.theme import status_icon
         plan = self._plan
         ign = self.ignored()
         lst = self.preflight_list
@@ -503,28 +597,24 @@ class ReportPerspective(QWidget):
             self.check_tabs.setTabText(0, "Findings")
             self.check_tabs.setTabText(1, "Contents")
             return
-        order = sorted(plan.findings, key=lambda f: (f.id in ign, f.tone != "warn"))
-        for f in order:
+        icons, show_tip, show_size = {}, HELP["report.jump"][0], self.show_delegate.cell_size()
+        items = []
+        for f in self._order(plan, ign):
             it = QTreeWidgetItem([f.text, "", ""])
             it.setData(0, Qt.UserRole, f.id)
             it.setToolTip(0, f.text)
-            it.setIcon(0, status_icon(f.tone))
+            if f.tone not in icons:
+                icons[f.tone] = status_icon(f.tone)
+            it.setIcon(0, icons[f.tone])
             it.setFlags((it.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-            it.setCheckState(1, Qt.Checked if f.id in ign else Qt.Unchecked)
-            it.setToolTip(1, "ignored: not counted in the warnings" if f.id in ign else "tick to ignore this finding")
-            if f.id in ign:
-                set_item_tone(it, "muted", 0, icon=False)
-            lst.addTopLevelItem(it)
-            cell = QWidget()                                 # keeps the button at its own height on a tall row
-            cl = QVBoxLayout(cell); cl.setContentsMargins(2, 2, 4, 2)
-            btn = QToolButton()
-            btn.setText("Show")
-            explain(btn, "report.jump")
-            btn.clicked.connect(lambda _c=False, ff=f: self.jump(ff))
-            cl.addWidget(btn); cl.addStretch(1)
-            lst.setItemWidget(it, 2, cell)
+            it.setToolTip(SHOW_COL, show_tip)
+            it.setSizeHint(SHOW_COL, show_size)
+            it.setData(SHOW_COL, Qt.AccessibleTextRole, "Show in Reduce")
+            self._tone_finding(it, f.id in ign)
+            items.append(it)
+        self._wrap_rows(items)
+        lst.addTopLevelItems(items)
         lst.blockSignals(False)
-        self._wrap_rows()
         self._findings = {f.id: f for f in plan.findings}
         for g, zs in plan.by_group().items():
             gi = QTreeWidgetItem([g, "", str(sum(z.included for z in zs))])
@@ -548,25 +638,48 @@ class ReportPerspective(QWidget):
             for hi in holders.values():
                 hi.setText(2, str(sum(int(hi.child(j).text(2)) for j in range(hi.childCount()))))
         self.contents.expandAll()
+        self._count_findings(ign)
+
+    def _count_findings(self, ign: set[str]) -> None:
+        plan = self._plan
         self.totals.setText(plan.totals(ign))
         n_open = len(plan.open_findings(ign))
         self.check_tabs.setTabText(0, f"Findings ({n_open})" if n_open else "Findings")
         self.check_tabs.setTabText(1, f"Contents ({plan.n_zones})")
 
-    def _wrap_rows(self) -> None:
-        """Row heights that fit each finding's text wrapped at the width of the Finding column."""
+    @staticmethod
+    def _tone_finding(it: QTreeWidgetItem, ignored: bool) -> None:
+        """The Ignore tick, its tooltip and the dimmed text of an ignored finding."""
+        from aurora.app.theme import set_item_tone
+        it.setCheckState(1, Qt.Checked if ignored else Qt.Unchecked)
+        it.setToolTip(1, "ignored: not counted in the warnings" if ignored else "tick to ignore this finding")
+        if ignored:
+            set_item_tone(it, "muted", 0, icon=False)
+        else:
+            set_item_tone(it, None, 0, icon=False)
+            it.setData(0, Qt.ForegroundRole, None)
+
+    def _wrap_rows(self, items: list[QTreeWidgetItem] | None = None) -> None:
+        """Row heights that fit each finding's text wrapped at the width of the Finding column (the rows of a fill
+        before they are added, else every row after the column was resized)."""
         lst = self.preflight_list
         fm = lst.fontMetrics()
         width = max(60, lst.header().sectionSize(0) - lst.iconSize().width() - 24)
-        btn_h = 0
-        for i in range(lst.topLevelItemCount()):
-            it = lst.topLevelItem(i)
-            cell = lst.itemWidget(it, 2)
-            if cell is not None:
-                btn_h = max(btn_h, cell.sizeHint().height())
-            text_h = fm.boundingRect(QRect(0, 0, width, 10000), int(Qt.TextWordWrap), it.text(0)).height()
-            it.setSizeHint(0, QSize(width, max(text_h + 10, btn_h)))       # a valid size (width > 0) or Qt ignores it
-        lst.doItemsLayout()
+        shown = items is None
+        if shown:
+            items = [lst.topLevelItem(i) for i in range(lst.topLevelItemCount())]
+        model = lst.model()
+        model.blockSignals(shown)       # one layout below instead of one per row (each re-measured its row)
+        try:
+            for it in items:
+                text_h = fm.boundingRect(QRect(0, 0, width, 10000), int(Qt.TextWordWrap), it.text(0)).height()
+                hint = QSize(width, text_h + 10)             # a valid size (width > 0) or Qt ignores it
+                if it.sizeHint(0) != hint:
+                    it.setSizeHint(0, hint)
+        finally:
+            model.blockSignals(False)
+        if shown:
+            lst.doItemsLayout()
 
     def _ignore_changed(self, item: QTreeWidgetItem, col: int) -> None:
         if col != 1:
@@ -578,10 +691,42 @@ class ReportPerspective(QWidget):
         else:
             ign.discard(fid)
         self.session.set_ui_value(IGNORED_KEY, sorted(ign))
-        QTimer.singleShot(0, self._fill_plan)                # re-sort and recount after the click is handled
+        QTimer.singleShot(0, self, lambda: self._ignore_applied(fid))      # after the click is handled
+
+    def _ignore_applied(self, fid: str) -> None:
+        """One tick: dim or restore that row, move it to its sorted place and recount. Only a list that is not in
+        the order of the current plan is filled again (a refill of every row took seconds on a real beamtime)."""
+        plan, lst = self._plan, self.preflight_list
+        if plan is None:
+            return
+        ign = self.ignored()
+        order = [f.id for f in self._order(plan, ign)]
+        ids = [lst.topLevelItem(i).data(0, Qt.UserRole) for i in range(lst.topLevelItemCount())]
+        if fid not in ids or sorted(ids) != sorted(order):
+            self._fill_plan()
+            return
+        i, j = ids.index(fid), order.index(fid)
+        lst.blockSignals(True)
+        item = lst.topLevelItem(i)
+        self._tone_finding(item, fid in ign)
+        if i != j:
+            current = lst.currentItem() is item
+            lst.takeTopLevelItem(i)
+            lst.insertTopLevelItem(j, item)
+            if current:
+                lst.setCurrentItem(item)
+        lst.blockSignals(False)
+        ids.insert(j, ids.pop(i))
+        if ids != order:                                    # several ticks at once, or ignored ids set elsewhere
+            self._fill_plan()
+            return
+        self._count_findings(ign)
 
     def _jump_item(self, item: QTreeWidgetItem) -> None:
-        f = getattr(self, "_findings", {}).get(item.data(0, Qt.UserRole))
+        self._jump_id(item.data(0, Qt.UserRole))
+
+    def _jump_id(self, fid) -> None:
+        f = getattr(self, "_findings", {}).get(fid)
         if f is not None:
             self.jump(f)
 
@@ -616,8 +761,13 @@ class ReportPerspective(QWidget):
         self._builder = builder
         self.status.setText("building …")
         jobs.of(self).submit("report", lambda cb: builder.build(progress=cb), on_done=self._on_done,
-                             on_failed=self._on_failed, on_end=lambda _s: self.update_actions(),
+                             on_failed=self._on_failed, on_end=self._build_ended,
                              label="building the report", taskbar=self.taskbar, pause_gc=True)
+        self.update_actions()
+
+    def _build_ended(self, state: str) -> None:
+        if state == "cancelled":
+            self.status.setText("report cancelled: nothing half-written is kept")
         self.update_actions()
 
     def _on_done(self, result: ReportResult) -> None:
