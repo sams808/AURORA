@@ -535,6 +535,10 @@ listed under the plot.
 `processed/reduced/<sample>/`, then adds those folders to Compare. Files that already exist are only overwritten after
 a question (Yes overwrites, No skips those spectra). A row with a problem is reported as not saved. When one sample has
 several ticked scans, the folder name adds the holder and the scan time (`<sample>_N5_0927`).
+Labels that differ only in letter case (`1 alpha`, `1 ALPHA`) count as one sample, since Windows and macOS keep
+them in one folder, and two zones of one scan with that name get `_2`, `_3`. The four files of a sample are
+replaced together or not at all: one held by another program (Excel) leaves them as they were, the other samples
+are saved, and one calm message names the file.
 
 ### 5.2 The holder checks (Advanced)
 
@@ -586,7 +590,7 @@ For one zone and scan, Check's **Save ticked → Compare** writes into `processe
 | `<sample>_full_reduced.csv` | his header keys (sample_label, source_h5, survey_h5, scan_name, sdd_roi_channels, use_sdd_calibration, mcc_i0_channel, mcc_tey_channel, spatial_reduction, roi_points 'n / N', bad_point_reference, spike_z, processing) plus reduced_with (AURORA and its version), despike, detectors_in_total, zone, data_source and, when they apply, i0_source, i0_masked, incomplete, signal; columns energy, sdd1, sdd1_roi_lo, sdd1_roi_hi, … sdd4_roi_hi, I0, TEY, sdd_total, sdd_mean, bad_point |
 | `<sample>_absorption.csv` | the same header; energy, sdd_total, TEY, I0, bad_point |
 | `<sample>_polygon_roi.json` | the zone as his polygon: its one polygon, or the corners of its one rectangle widened by 0.45 pitch (AURORA's membership rule, so his strict test takes the same pixels) |
-| `<sample>_zone.json` | instead of the polygon file when the zone is anything else; it says so in its `_comment` and holds AURORA's zone definition |
+| `<sample>_zone.json` | instead of the polygon file when the zone is anything else; it says so in its `_comment` and holds AURORA's zone definition; an overwrite removes the other of the two files, so the folder describes one zone |
 | `<sample>_gui_settings.json` | his keys (rois, params {i0, mode, tey}, stack_h5, survey_h5, spike_z, drop_energy_ranges, drop_indices) plus an `aurora` block (version, zone, settings, points, spikes, masked and incomplete energies) |
 
 The numbers follow his reduction: per detector the mean over the zone pixels of the counts in channels [lo, hi) (his
@@ -686,7 +690,8 @@ matplotlib at exactly that size, on white with the series colours and dashes, wh
 shown traces with their offsets, the x range, the labels and axis titles with units. PDF text uses embedded TrueType
 fonts and SVG text stays text, so both can be edited.
 
-**Export…** writes a wide CSV (energy, every shown trace as processed, John Bussey's layout), the figure in the chosen
+**Export…** writes a wide CSV (energy, every shown trace as processed, John Bussey's layout; with **first derivative**
+ticked the derivative the figure shows, in `<label>-d/dE <signal>` columns), the figure in the chosen
 formats, and the config JSON (with its `_spectra.npz` when some traces have no file).
 
 ### 6.5 Reference spectra
@@ -876,7 +881,8 @@ three cards: **Options**, **Check before building** and **Pages**.
 ### 9.1 Options
 
 - **title** (default `AURORA report · <project>`), **output** folder (default `<project>/reports/aurora`,
-  **Browse…**). Each build goes into its own folder inside it, so nothing earlier is overwritten (9.3).
+  **Browse…**). Each build goes into its own folder inside it, so nothing earlier is overwritten (9.3). A folder that
+  cannot be written (read-only, protected) gives one calm message that names it and points to **Browse…**.
 - A muted line names the author: *Author: A. Name, from Settings* or *Author: A. Name, from the system account*, or *No
   author line (Settings > report author)*.
 - Easy mode states what the report contains, read-only, for example *The report covers every holder and all groups,
@@ -999,7 +1005,7 @@ aurora scan <scan folder>       one scan's metadata and first energy (no Qt)
 aurora report <project> [--zones zones_all.json] [--out folder] [--title T] [--groups A B]
                                 [--holders N5 N6] [--days 2026-11-05] [--preset final|draft]
                                 [--author NAME] [--no-appendix] [--no-maps] [--dpi 600]
-aurora demo <folder>            a small synthetic beamtime for the tutorials
+aurora demo <folder>            a small synthetic beamtime for the tutorials (a new or empty folder only)
 aurora --selftest [--out report.json] [--platform offscreen|native] [--keep] [--no-gui]
 aurora --distcheck              fast offscreen smoke test of an installation
 aurora --version

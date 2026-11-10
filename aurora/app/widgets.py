@@ -670,6 +670,29 @@ class WriteGuard:
     error: Exception | None = None
 
 
+def held_file(err: BaseException) -> bool:
+    """A refusal of the system on a file (not a folder, not AURORA's protected-folder rule): most often the file is
+    open in another program (Excel holds the CSVs it shows)."""
+    from aurora.core.io.safety import ProtectedPathError
+    if not isinstance(err, PermissionError) or isinstance(err, ProtectedPathError):
+        return False
+    name = getattr(err, "filename", None)
+    return not (name and Path(name).is_dir())
+
+
+def write_error_text(label: str, err: BaseException, verb: str = "write") -> str:
+    """'Could not write lcf.csv: Permission denied. Is it open in another program?': the system's reason without the
+    exception's name; a folder that refuses asks whether it is read-only."""
+    from aurora.core.io.safety import ProtectedPathError
+    reason = (getattr(err, "strerror", None) or str(err) or type(err).__name__).strip().rstrip(".")
+    hint = ""
+    if held_file(err):
+        hint = " Is it open in another program?"
+    elif isinstance(err, PermissionError) and not isinstance(err, ProtectedPathError):
+        hint = " Is the folder read-only?"
+    return f"Could not {verb} {label}: {reason}.{hint}"
+
+
 @contextmanager
 def guarded_write(widget: QWidget | None, label: str):
     """Turn OSError / ValueError raised while writing `label` into one calm dialog:
@@ -680,9 +703,7 @@ def guarded_write(widget: QWidget | None, label: str):
         yield g
     except (OSError, ValueError) as err:
         g.ok, g.error = False, err
-        reason = (getattr(err, "strerror", None) or str(err) or type(err).__name__).strip().rstrip(".")
-        hint = " Is it open in another program?" if isinstance(err, PermissionError) else ""
-        text = f"Could not write {label}: {reason}.{hint}"
+        text = write_error_text(label, err)
         log.warning("%s (%r)", text, err)
         QMessageBox.warning(widget, "Could not write", text)
 

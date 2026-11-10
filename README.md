@@ -51,7 +51,7 @@ aurora <beamtime folder>               # the application on that beamtime
 aurora project <beamtime folder>       # headless listing of days, holders, scans, status and flags
 aurora scan <scan folder>              # one scan's metadata and first energy
 aurora report <beamtime folder>        # the group-organised report, headless, from the saved session or a zones file
-aurora demo <folder>                   # a synthetic beamtime for the tutorials
+aurora demo <folder>                   # a synthetic beamtime for the tutorials (a new or empty folder only)
 aurora --selftest                      # every core path and perspective; the exit code is the number of failures
 packaging\build_win.bat                # Windows: dist\AURORA, the per-user setup and the zip (Inno Setup 6)
 packaging/build_mac.sh                 # macOS: dist/AURORA.app and the disk image of this Mac's architecture

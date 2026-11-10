@@ -20,8 +20,8 @@ from pathlib import Path
 from PySide6.QtCore import QRect, QSize, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSpinBox, QSplitter,
-                               QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+                               QSplitter, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain, explain_all, header_tips, labelled
@@ -40,6 +40,17 @@ IGNORED_KEY = "preflight_ignored"               # session ui value: ids of the f
 PROMPTED_KEY = "report_author_prompted"         # settings: the one-time author prompt was shown
 PRESET_ITEMS = (("Final", "final"), ("Draft", "draft"))
 CHECK_DELAY_MS = 400                            # debounce of the check after an edit
+
+
+def _in_or_above(path, folder: Path) -> bool:
+    """True when `path` is `folder`, inside it or one of its parents: a write error of the report's own folder."""
+    if not path:
+        return False
+    try:
+        p, f = Path(path).resolve(), Path(folder).resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    return p == f or f in p.parents or p in f.parents
 
 
 class ReportPerspective(QWidget):
@@ -615,10 +626,32 @@ class ReportPerspective(QWidget):
                                 sheet_rows=list(self.session.sheet_rows), **extra)
         self._builder = builder
         self.status.setText("building …")
-        jobs.of(self).submit("report", lambda cb: builder.build(progress=cb), on_done=self._on_done,
+
+        def job(cb):
+            try:
+                return builder.build(progress=cb)
+            except OSError as err:                      # the output folder cannot be written: a calm message
+                if not _in_or_above(getattr(err, "filename", None), out):
+                    raise
+                return err
+
+        def done(result):
+            if isinstance(result, OSError):
+                self._not_written(out, result)
+            else:
+                self._on_done(result)
+        jobs.of(self).submit("report", job, on_done=done,
                              on_failed=self._on_failed, on_end=lambda _s: self.update_actions(),
                              label="building the report", taskbar=self.taskbar, pause_gc=True)
         self.update_actions()
+
+    def _not_written(self, out: Path, err: OSError) -> None:
+        """The report's folder refused the build (read-only, protected, no space): one calm dialog that names it and
+        points to Browse…, not the error dialog. The build left nothing behind (ReportBuilder.build)."""
+        reason = (getattr(err, "strerror", None) or str(err) or type(err).__name__).strip().rstrip(".")
+        text = f"Could not build the report: {out} cannot be written ({reason}). Choose another output folder with Browse…"
+        self.status.setText(text)
+        QMessageBox.warning(self, "Could not build the report", text)
 
     def _on_done(self, result: ReportResult) -> None:
         self._result = result

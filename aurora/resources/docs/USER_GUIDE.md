@@ -165,7 +165,7 @@ aurora <project folder>       the application on that project
 aurora project <project>      list days, holders, scans, status and flags
 aurora scan <scan folder>     one scan's metadata and first energy
 aurora report …               the report, headless
-aurora demo <folder>          a synthetic beamtime for the tutorials
+aurora demo <folder>          a synthetic beamtime for the tutorials (a new or empty folder only)
 aurora --selftest             every core path and perspective on a synthetic beamtime (also Help > Run self-test…)
 ```
 
