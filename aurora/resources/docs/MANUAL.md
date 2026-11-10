@@ -119,7 +119,8 @@ program, no permission) gives one calm dialog that names it.
 - **Help**: **User guide**, **Manual**, **Tutorials**, **Installation and sharing**; **Help on this page** (**F1**);
   **Keyboard shortcuts** (**Ctrl+/**, generated from the window, so it always lists every shortcut); **What's this?**
   (**Shift+F1**, then click a control to read what it does); **Open the demo beamtime**; **Run self-test…** (checks
-  every part of this installation on a synthetic beamtime in the background, then shows the summary with **Copy** and
+  every part of this installation on a synthetic beamtime in the background, with its progress and **Cancel** in the
+  status bar, then shows the summary with **Copy** and
   **Open folder**; see INSTALL §4); **Report a problem…** (what to send, **Copy diagnostics** with the versions, the
   project, the settings location and the last 200 log lines, **Open the log folder**, and the GitHub issues
   address as a link; the issues are public, so the diagnostics write the home folder as ~ and the dialog asks you to read them before posting); **Check for updates…** (asks GitHub whether a newer AURORA exists, or says that no release is published yet; nothing is downloaded or installed);
@@ -251,6 +252,8 @@ mode the panel on the right also shows the full error.
 At start, AURORA reopens the last project when *open the last project at start* is on (Settings); if that fails, the
 path line says so in one sentence (*the last project, my_beamtime, could not be opened: the folder does not exist, or
 the share that holds it is not reachable now. Pick another one below.*) and the welcome page stays.
+Opening a project while another one is still being read (a share that does not answer can take 20 s) cancels that
+one and opens the new one.
 
 ### 2.2 Project and scan summaries
 
@@ -600,7 +603,8 @@ follow it too, unless that field was changed on a card: one undo step, named in 
 
 **I0 of the holder's scans (per-pixel mean)** scores every scan's I0 curve: level, biggest step, roughness, number of
 non-positive points. Tick the good ones, or **Auto-select good I0**; their mean is what scans set to *good-I0 mean*
-in Reduce are divided by. **normalise to the level** overlays the curves on one scale.
+in Reduce are divided by. **normalise to the level** overlays the curves on one scale. Scans ticked good but not
+loaded yet are read in the background first (*reading the good-I0 scans …*, with **Cancel**).
 
 **The four detectors on the selected zone** compares SDD1–4 on the zone chosen in Reduce and the scan selected in the
 table, each with its pre-edge subtracted and scaled to its own range. A detector that differs by more than 25 % of the
@@ -947,7 +951,7 @@ are not counted). Three tabs:
 
 - **Findings** (the number of open findings in the tab title). Each row has an icon, the Finding, an **Ignore** tick
   and a **Show** button that opens Reduce on that holder and zone (and selects the scan when the finding names one).
-  Double-clicking a row does the same. An ignored finding is dimmed, sorted last, and remembered with the session
+  Double-clicking a row, or Enter, does the same. An ignored finding is dimmed, sorted last, and remembered with the session
   (session.json `ui` block, key `preflight_ignored`). The check looks for:
   - zones without a group (they go under *Ungrouped*);
   - zones without an included scan (left out);

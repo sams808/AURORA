@@ -129,7 +129,7 @@ def test_the_manifest_and_appendix_c_carry_the_scans_without_settings(tmp_path):
 
 def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypatch):
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QToolButton
+    from PySide6.QtTest import QTest
     from aurora.app.report import IGNORED_KEY
     from aurora.core import report as core_report
     monkeypatch.setattr(core_report, "os_full_name", lambda: "Test User")
@@ -153,7 +153,8 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     item = next(lst.topLevelItem(i) for i in range(lst.topLevelItemCount()) if "has no group" in lst.topLevelItem(i).text(0))
     fid = item.data(0, Qt.UserRole)          # read now: a check run on the way back rebuilds the list's items
     win.session.set_holder("N6")
-    lst.itemWidget(item, 2).findChild(QToolButton).click()
+    r = rp.show_delegate.button_rect(lst.visualRect(lst.indexFromItem(item, 2)), lst.font())
+    QTest.mouseClick(lst.viewport(), Qt.LeftButton, Qt.NoModifier, r.center())      # the row's Show button
     pump(qapp)
     assert win.session.current_holder == "N5" and win.session.current_zone == 2
     assert win.stack.currentWidget() is win.reduce
@@ -200,4 +201,62 @@ def test_the_check_runs_again_after_an_edit(qapp, tmp_path, monkeypatch):
     win.jobs.wait_idle(60000)
     pump(qapp)
     assert rp.totals.text().endswith("1 warning")
+    close(win)
+
+
+def test_many_findings_fill_in_one_batch_and_a_tick_moves_one_row(qapp, tmp_path, monkeypatch):
+    """250 findings, as many as the real beamtime gave: the rows are added in one batch with painted Show buttons (no
+    widget per row), and an Ignore tick dims and moves that one row and recounts, without rebuilding the others.
+    Added one by one with a widget each, and rebuilt at every tick, they froze the window for 8 s (threads-4)."""
+    from PySide6.QtCore import Qt
+    from aurora.core import report as core_report
+    from aurora.core.report import Finding, Plan
+    monkeypatch.setattr(core_report, "os_full_name", lambda: "Test User")
+    proj = project(tmp_path)
+    win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
+    rp, lst = win.report, win.report.preflight_list
+    finds = [Finding(id=f"k|N5|{i}", kind="ungrouped" if i % 3 else "no_settings",
+                     text=f"'{i} zone' (N5): a finding long enough to wrap over two lines of the Finding column " * (1 + i % 3),
+                     holder="N5", zone_id=1) for i in range(250)]
+    rp._plan = Plan(zones=list(rp._plan.zones), findings=finds)
+    inserted = []
+    lst.model().rowsInserted.connect(lambda *a: inserted.append(a))
+    rp._fill_plan()
+    pump(qapp)
+    n = lst.topLevelItemCount()
+    assert n == 250 and len(inserted) == 1                       # one batch, not one insertion per finding
+    assert all(lst.itemWidget(lst.topLevelItem(i), 2) is None for i in range(n))
+    assert rp.totals.text().endswith("250 warnings") and rp.check_tabs.tabText(0) == "Findings (250)"
+    before = [lst.topLevelItem(i) for i in range(n)]
+    first = before[0]
+    fid = first.data(0, Qt.UserRole)
+    first.setCheckState(1, Qt.Checked)                           # the user's tick
+    pump(qapp)
+    after = [lst.topLevelItem(i) for i in range(n)]
+    assert after[-1] is first and all(a is b for a, b in zip(after[:-1], before[1:]))       # moved, not rebuilt
+    assert first.data(0, Qt.UserRole) == fid and first.checkState(1) == Qt.Checked
+    assert first.toolTip(1).startswith("ignored") and first.data(0, Qt.ForegroundRole) is not None     # dimmed
+    assert rp.totals.text().endswith("249 warnings") and rp.check_tabs.tabText(0) == "Findings (249)"
+    first.setCheckState(1, Qt.Unchecked)                         # back: first again, no longer dimmed
+    pump(qapp)
+    assert lst.topLevelItem(0) is first and first.data(0, Qt.ForegroundRole) is None
+    assert rp.totals.text().endswith("250 warnings")
+    close(win)
+
+
+def test_a_cancelled_build_says_so(qapp, tmp_path, monkeypatch):
+    """The status line next to Build says 'report cancelled' after a Cancel (it kept 'building …', threads-10)."""
+    from aurora.core import report as core_report
+    monkeypatch.setattr(core_report, "os_full_name", lambda: "Test User")
+    quick(monkeypatch)
+    proj = project(tmp_path)
+    win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
+    rp = win.report
+    rp.out_dir.setText(str(tmp_path / "reports"))
+    rp.build()
+    assert rp.status.text() == "building …" and win.jobs.cancel("report")
+    assert win.jobs.wait_idle(60000)
+    pump(qapp)
+    assert rp.status.text() == "report cancelled: nothing half-written is kept" and rp._result is None
+    assert not any(p.name.startswith(core_report.BUILDING_PREFIX) for p in (tmp_path / "reports").glob("*"))
     close(win)

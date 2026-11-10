@@ -255,6 +255,7 @@ class Session(QObject):
         self._fresh: set[str] = set()                   # stacks loaded since the last touch()
         self._generation = 0                            # +1 at every project open: a stack read for the previous one
         self._cache_lock = threading.Lock()             # is never stored (stack() runs in a worker)
+        self._good_unreadable: dict[str, str] = {}      # good-I0 sid -> why it could not be read (not tried again)
         # saving
         self._dirty = False
         self._user_edits = False                        # dirty through an edit of the user (not only a stack load)
@@ -299,7 +300,8 @@ class Session(QObject):
         with self._cache_lock:
             self.project = project
             self._generation += 1
-            for cache in (self._stacks, self._surveys, self._coords, self._stack_stamp, self._fresh):
+            for cache in (self._stacks, self._surveys, self._coords, self._stack_stamp, self._fresh,
+                          self._good_unreadable):
                 cache.clear()
         self.undo_stack.clear()
         self.read_only = self._newer = False
@@ -337,6 +339,7 @@ class Session(QObject):
         self.holder_keys = self._keys_for(project, {**self._file_preferences(),
                                                     **{(day, h.name): k for k, (day, h) in old_keys.items()}})
         kept = dropped = 0
+        self._good_unreadable.clear()                   # a Reload tries an unreadable good-I0 stack again
         for sid in list(self._stacks):
             if sid.startswith("stitched_"):
                 continue
@@ -1290,10 +1293,45 @@ class Session(QObject):
             self._settings_defaults.append(fn)
 
     # ------------------------------------------------------------------ good I0
+    def good_i0_missing(self) -> list[str]:
+        """The good-I0 stacks not loaded yet (good_curve_for would read them), less those that could not be read."""
+        return [sid for sid, good in self.zones.good_i0.items()
+                if good and sid not in self._stacks and sid not in self._good_unreadable]
+
+    def ensure_good_i0(self, widget, on_ready, taskbar=None) -> bool:
+        """True when good_curve_for needs no stack read. Otherwise one job ('stacks:good-i0', progress and Cancel on
+        `taskbar`) reads the missing good-I0 stacks and calls on_ready() once they are in, and this returns False:
+        the GUI thread never reduces a stack (16 good-I0 stacks without sgm_report caches froze the window 13 s)."""
+        missing = self.good_i0_missing()
+        if not missing:
+            return True
+        from aurora.app import jobs
+
+        def read(cb) -> dict[str, str]:
+            n, failed = len(missing), {}
+            for i, sid in enumerate(missing):
+                msg = f"reading the good-I0 scans ({i + 1} of {n}: {split_stack_id(sid)[1]})"
+                cb(i * 100, n * 100, msg)
+                try:                                   # the progress of each stack: Cancel stops within one energy
+                    self.stack(sid, progress=lambda j, m, _t="", i=i: cb(i * 100 + int(100 * j / max(m, 1)), n * 100, msg))
+                except Exception as err:               # noqa: BLE001  left out of the curve, as before (Cancelled passes)
+                    failed[sid] = f"{type(err).__name__}: {err}"
+            return failed
+
+        def done(failed: dict[str, str]) -> None:
+            for sid, why in failed.items():
+                log.warning("good-I0 stack %s left out: %s", sid, why)
+            self._good_unreadable.update(failed)
+            on_ready()
+        jobs.of(widget).submit("stacks:good-i0", read, on_done=done, label="reading the good-I0 scans", taskbar=taskbar)
+        return False
+
     def good_curve_for(self, E: np.ndarray) -> np.ndarray | None:
+        """The mean I0 of the stacks marked good, on E. A stack not loaded yet is read here: on the GUI thread, call
+        ensure_good_i0 first (it reads them in a job)."""
         curves = []
         for sid, good in self.zones.good_i0.items():
-            if not good:
+            if not good or sid in self._good_unreadable:
                 continue
             sd = self._stacks.get(sid)
             if sd is None:

@@ -193,6 +193,18 @@ class FitPerspective(QWidget):
             return True
         return False
 
+    def _submit(self, key: str, fn, on_done, status: QLabel, what: str):
+        """A fit job whose status line says 'LCF cancelled' after a Cancel and 'LCF failed: <error>' after a failure
+        (a finished fit writes its own result line)."""
+        def failed(text: str) -> None:
+            status.setText(f"{what} failed: " + (text.strip().splitlines() or ["unknown error"])[-1])
+
+        def ended(state: str) -> None:
+            if state == "cancelled":
+                status.setText(f"{what} cancelled")
+        return jobs.of(self).submit(key, fn, on_done=on_done, on_failed=failed, on_end=ended, label=what,
+                                    taskbar=self.taskbar)
+
     # ------------------------------------------------------------------ data
     def fit_rows(self):
         return self.lib.processed(lambda r: r.fit)
@@ -357,8 +369,7 @@ class FitPerspective(QWidget):
             except ValueError as err:                  # a calm message, not an error dialog
                 return err
         self.lcf_info.setText("fitting …")
-        return jobs.of(self).submit("fit:lcf", work, on_done=lambda r: self._lcf_done(r, tname, comps, origin),
-                                    label="LCF", taskbar=self.taskbar)
+        return self._submit("fit:lcf", work, lambda r: self._lcf_done(r, tname, comps, origin), self.lcf_info, "LCF")
 
     def _lcf_done(self, r, tname: str, comps: list[str], origin: str) -> None:
         if isinstance(r, Exception):
@@ -586,9 +597,9 @@ class FitPerspective(QWidget):
         k = min(self.n_comp.value(), len(labels))
         max_iter, tol, clip = self.max_iter.value(), self.tol.value(), self.clip_neg.isChecked()
         self.mcr_status.setText(f"MCR-ALS on {plural(len(labels), 'spectrum', 'spectra')} …")
-        return jobs.of(self).submit("fit:mcr", lambda progress: mcr_als(D, k, max_iter, tol, clip_negative=clip,
-                                                                        progress=progress, E=E, labels=labels),
-                                    on_done=self._mcr_done, label="MCR-ALS", taskbar=self.taskbar)
+        return self._submit("fit:mcr", lambda progress: mcr_als(D, k, max_iter, tol, clip_negative=clip,
+                                                                progress=progress, E=E, labels=labels),
+                            self._mcr_done, self.mcr_status, "MCR-ALS")
 
     def _mcr_done(self, m: McrResult) -> None:
         self.mcr_result, self._mcr_E, self._mcr_labels = m, m.E, list(m.labels)
@@ -756,8 +767,8 @@ class FitPerspective(QWidget):
             self.itfa_status.setText("add at least one anchored target"); return None
         max_iter, tol = self.max_iter.value(), self.tol.value()
         self.itfa_status.setText("ITFA …")
-        return jobs.of(self).submit("fit:itfa", lambda progress: itfa(None, m, fixed, max_iter, tol, progress=progress),
-                                    on_done=lambda r: self._itfa_done(r, len(fixed)), label="ITFA", taskbar=self.taskbar)
+        return self._submit("fit:itfa", lambda progress: itfa(None, m, fixed, max_iter, tol, progress=progress),
+                            lambda r: self._itfa_done(r, len(fixed)), self.itfa_status, "ITFA")
 
     def _itfa_done(self, r: McrResult, n_fixed: int) -> None:
         self.itfa_result = r

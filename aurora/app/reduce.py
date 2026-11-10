@@ -755,12 +755,13 @@ class ReducePerspective(QWidget):
         session = self.session
 
         def job(cb):
+            n = len(sids)
             for i, sid in enumerate(sids):
-                cb(i, len(sids), f"reading {split_stack_id(sid)[1]}")
-                try:
-                    session.stack(sid)
+                cb(i * 100, n * 100, f"reading {split_stack_id(sid)[1]}")
+                try:                                    # each energy folder reports: Cancel stops within one
+                    session.stack(sid, progress=lambda j, m, t="", i=i: cb(i * 100 + int(100 * j / max(m, 1)), n * 100, t))
                 except Exception as err:
-                    cb(i, len(sids), f"{split_stack_id(sid)[1]}: {err}")
+                    cb(i * 100 + 99, n * 100, f"{split_stack_id(sid)[1]}: {err}")
             return sids
 
         self.status_label.setText(f"reading {plural(len(sids), 'scan')} …")
@@ -1711,13 +1712,16 @@ class ReducePerspective(QWidget):
         if z is None or self.library is None:
             return 0
         n = 0
-        waiting = 0
+        waiting = good_wait = 0
         for sid, st in z.settings.items():
             sd = self.session.stack_loaded(sid)
             if sd is None or not st.include:
                 continue
             if st.roi and not self._ensure_windows(sd, st.roi):
                 waiting += 1
+                continue
+            if st.i0_source == "good" and not self._ensure_good_i0(redraw=False):
+                good_wait += 1
                 continue
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
@@ -1729,8 +1733,15 @@ class ReducePerspective(QWidget):
         msg = f"{plural(n, 'trace')} sent to Compare" if n else "nothing to send: load the zone's scans first"
         if waiting:
             msg += f" ({plural(waiting, 'scan')} still reading its XRF windows: send again in a moment)"
+        if good_wait:
+            msg += f" ({plural(good_wait, 'scan')} waiting for the good-I0 scans being read: send again in a moment)"
         self.status_label.setText(msg)
         return n
+
+    def _ensure_good_i0(self, redraw: bool = True) -> bool:
+        """True when the stacks marked good I0 are loaded; otherwise a job reads them (progress and Cancel in the
+        strip) and the preview is drawn again when they are in."""
+        return self.session.ensure_good_i0(self, self.update_preview if redraw else (lambda: None), taskbar=self.taskbar)
 
     # ------------------------------------------------------------------ preview
     def update_preview(self) -> None:
@@ -1746,6 +1757,7 @@ class ReducePerspective(QWidget):
         else:
             sids = [s for s in z.settings if self.session.stack_loaded(s) is not None][:1]
         traces = []
+        waiting = ""
         for sid in sids:
             sd = self.session.stack_loaded(sid)
             if sd is None:
@@ -1753,9 +1765,12 @@ class ReducePerspective(QWidget):
             st = z.settings[sid]
             if st.roi and not self._ensure_windows(sd, st.roi):
                 continue                                # drawn when the windows are read
+            if st.i0_source == "good" and not self._ensure_good_i0():
+                waiting = "reading the good-I0 scans …"
+                continue                                # drawn when they are read
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
             t = zone_traces(sd, pix, st, good)
             if t is not None:
                 traces.append((short_time(sid) or sd.name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text}))
-        self.preview.set_traces(traces)
+        self.preview.set_traces(traces, waiting=waiting)
