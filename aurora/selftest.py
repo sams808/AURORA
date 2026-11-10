@@ -324,7 +324,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         assert energy_regions([680, 683, 686, 689, 692]) == [(680.0, 692.0, 3.0)]
         rows = dict(overview.scan_rows(st, proj, incomplete=[]))
         assert rows["time per map"] == "6 s per map", rows.get("time per map")
-        assert rows["energy regions"] == "680–692 eV in 3 eV steps", rows.get("energy regions")
+        assert rows["energy regions"] == "660–740 eV in 2 eV steps", rows.get("energy regions")   # the demo's stack
         assert overview.incomplete_energies(st) == []
         prow = dict(overview.project_rows(proj))
         assert any("holder" in k.lower() for k in prow), list(prow)
@@ -858,7 +858,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         kinds = sorted(f.kind for f in found)
         assert kinds == ["no_included", "uncovered_stack", "ungrouped"], kinds
         p = plan(proj, zf)
-        assert p.totals() == "2 zones · 2 spectra · 3 warnings", p.totals()
+        assert p.totals() == "2 zones · 2 spectra · 2 warnings · 1 note", p.totals()
         out = base / "plan reports"
         draft = ReportBuilder(proj, zf, out, preset="draft")
         assert draft.png_dpi == 110 and not draft.appendix and not draft.maps
@@ -1470,7 +1470,6 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
 
     def report_():
         import re
-        from PySide6.QtWidgets import QToolButton
         rp = win.report
         win.show_perspective("report")
         pump(5)
@@ -1479,10 +1478,11 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         pump(5)
         lst = rp.preflight_list
         total = rp.totals.text()
-        assert re.fullmatch(r"\d+ zones? · \d+ spectr(um|a) · \d+ warnings?", total), total
+        assert re.fullmatch(r"\d+ zones? · \d+ spectr(um|a) · \d+ warnings?( · \d+ notes?)?", total), total
         n = lst.topLevelItemCount()
         if n:
-            lst.itemWidget(lst.topLevelItem(0), 2).findChild(QToolButton).click()
+            first = lst.topLevelItem(0)                 # several findings of one kind sit under a plain parent row
+            rp.show_delegate.click(first.child(0) if first.childCount() else first)
             pump(5)
             assert win.stack.currentWidget() is win.reduce
         return f"'{total}', {n} finding(s)" + (", Show opens Reduce" if n else "")

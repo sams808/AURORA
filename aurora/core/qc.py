@@ -454,7 +454,8 @@ MSG_FEW = "only {n} inside the outline: the spectrum will be noisy"
 MSG_PIXELS = "{n} inside the outline"
 MSG_NO_DET_DATA = "this stack has no detector counts for the {line} window"
 MSG_DET_NAN = "{det} has no valid counts: its files may be missing"
-MSG_DET_ZERO = "{det} counts nothing in the window ({window}): check the window in step 2 of Reduce"
+MSG_DET_ZERO = ("{det} counts nothing in the window ({window}): check the window in step 2 of Reduce, or leave a "
+                "dead detector out of the sum on the scan card (Advanced mode)")
 MSG_NO_DET = "no detector left in the sum: there is no fluorescence spectrum (the electron yield, TEY, is still made)"
 MSG_MISSING = "{n} missing (their maps were not recorded)"
 MSG_I0_ZERO = "the beam intensity (I0) is zero or missing at {n}"
@@ -477,11 +478,16 @@ MSG_IPFY = ("inverse yield (IPFY): the spectrum is the beam intensity ÷ the {li
 MSG_IPFY_OTHER = ("inverse yield (IPFY): the spectrum is computed from the {line} counts and the beam intensity (an "
                   "earlier form, named in Advanced mode); the detector curves dip at the edge while the spectrum rises")
 MSG_IPFY_LEFT = "inverse yield (IPFY): {rest}"
+MSG_IPFY_RESONANT = ("inverse yield (IPFY) on the edge element's own line ({line}): beam ÷ these counts is not an "
+                     "inverse yield; choose the line of another element in step 2 (O Kα across the F K-edge)")
+MSG_PRE_SHORT = ("the range before the edge used to scale the spectrum was fitted to this scan (it starts close to the "
+                 "edge)")
+MSG_STEP_NEGATIVE = "the signal falls across the edge instead of rising: kept as measured, worth a look"
 NOTE_PREFIXES = ("inverse yield",)            # ok messages that head a row (Check's Messages column)
 TEMPLATES = (MSG_NO_PIXEL, MSG_FEW, MSG_PIXELS, MSG_NO_DET_DATA, MSG_DET_NAN, MSG_DET_ZERO, MSG_NO_DET, MSG_MISSING,
              MSG_I0_ZERO, MSG_I0_VARIES, MSG_TEY_NAN, MSG_NO_BAD, MSG_MANY_BAD, MSG_SOME_BAD, MSG_SOME_LOW,
              MSG_LOW_PART, MSG_SAT_IN_SUM, MSG_SAT_OUT, MSG_HIGH, MSG_I0_GOOD, MSG_I0_BAD, MSG_IPFY, MSG_IPFY_OTHER,
-             MSG_IPFY_LEFT)
+             MSG_IPFY_LEFT, MSG_IPFY_RESONANT, MSG_PRE_SHORT, MSG_STEP_NEGATIVE)
 
 
 def det_phrase(dets) -> str:
@@ -518,8 +524,9 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
     Ported checks: the outline's pixels (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values or a
     signal zero everywhere (bad), missing energies, I0 zero or missing, I0 varying by more than I0_VARIES_FACTOR, TEY
     without finite values, and the fraction of energies flagged bad (spikes plus masked energies, BAD_POINT_FRACTION).
-    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source on the Msg), the
-    inverse-yield note and the de-spike notes. `stack` (a StackData) or `n_total` gives the stack's pixel count."""
+    AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source on the Msg; before the
+    counting checks, so that the first warning, Check's headline, is the most serious one), the inverse-yield note and
+    the de-spike notes. `stack` (a StackData) or `n_total` gives the stack's pixel count."""
     if n_total is None and stack is not None:
         n_total = getattr(stack, "n_pix", None)
     if traces is None or traces.n_pix == 0:
@@ -552,10 +559,30 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
             y = np.asarray(y, float)
             if not np.isfinite(y).any():
                 msgs.append(("bad", Msg(MSG_DET_NAN.format(det=det_phrase([DETS[k]])))))
-            elif np.nanmax(y) <= 0:
+            elif np.nanmax(y) <= 0:             # bad by the item spec (I23); the earlier SGM XAS GUI only warned
                 msgs.append(("bad", Msg(MSG_DET_ZERO.format(det=det_phrase([DETS[k]]), window=window(k)))))
         if not ticked:
             msgs.append(("warn", Msg(MSG_NO_DET)))
+    # the scan's flags before the counting checks: the first warning is the row's headline in Check
+    in_sum = {DETS[k] for k in ticked}
+    for f in flags or []:
+        src = getattr(f, "source", "")
+        dets = tuple(getattr(f, "dets", ()) or ())
+        if f.kind == "sdd_saturated":
+            if set(dets) & in_sum:
+                still = [d for d in dets if d in in_sum]
+                msgs.append(("warn", Msg(MSG_SAT_IN_SUM.format(det=det_phrase(still),
+                                                               its="its" if len(still) == 1 else "their"), src)))
+            else:
+                # saturated and out of the sum: fine, unless nothing is left in the sum (the 'no detector' headline)
+                msgs.append(("warn" if not in_sum else "ok", Msg(MSG_SAT_OUT.format(det=det_phrase(dets)), src)))
+        elif f.kind == "high_rate":
+            msgs.append(("warn", Msg(MSG_HIGH.format(det=det_phrase(dets)), src)))
+        elif f.kind == "i0_invalid":
+            if st is not None and st.i0_source == "good":
+                msgs.append(("ok", Msg(MSG_I0_GOOD, src)))
+            else:
+                msgs.append(("warn", Msg(MSG_I0_BAD, src)))
     sum_ok = np.ones(nE, bool)
     for k in ticked:
         if traces.det_raw[k] is not None:
@@ -588,27 +615,14 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
     for note in traces.notes:
         if "near the edge" in note:
             msgs.append(("warn", Msg(note)))
+        elif note.startswith("IPFY of the resonant line"):
+            msgs.append(("warn", Msg(MSG_IPFY_RESONANT.format(line=traces.line), note)))
         elif note.startswith("IPFY:"):
             msgs.append(("ok", Msg(MSG_IPFY_LEFT.format(rest=note[len("IPFY:"):].strip()))))
-    in_sum = {DETS[k] for k in ticked}
-    for f in flags or []:
-        src = getattr(f, "source", "")
-        dets = tuple(getattr(f, "dets", ()) or ())
-        if f.kind == "sdd_saturated":
-            if set(dets) & in_sum:
-                still = [d for d in dets if d in in_sum]
-                msgs.append(("warn", Msg(MSG_SAT_IN_SUM.format(det=det_phrase(still),
-                                                               its="its" if len(still) == 1 else "their"), src)))
-            else:
-                # saturated and out of the sum: fine, unless nothing is left in the sum (the 'no detector' headline)
-                msgs.append(("warn" if not in_sum else "ok", Msg(MSG_SAT_OUT.format(det=det_phrase(dets)), src)))
-        elif f.kind == "high_rate":
-            msgs.append(("warn", Msg(MSG_HIGH.format(det=det_phrase(dets)), src)))
-        elif f.kind == "i0_invalid":
-            if st is not None and st.i0_source == "good":
-                msgs.append(("ok", Msg(MSG_I0_GOOD, src)))
-            else:
-                msgs.append(("warn", Msg(MSG_I0_BAD, src)))
+        elif note.startswith("pre-edge window"):
+            msgs.append(("ok", Msg(MSG_PRE_SHORT, note)))
+        elif "step negative" in note or "area negative" in note:     # kept as measured: worth a look
+            msgs.append(("warn", Msg(MSG_STEP_NEGATIVE, note)))
     return msgs
 
 

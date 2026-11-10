@@ -490,7 +490,10 @@ def mcr_als(D: np.ndarray, n_components: int, max_iter: int = 100, tol_err_chang
             c_fixed: dict[int, np.ndarray] | None = None, progress=None, E: np.ndarray | None = None,
             labels: list[str] | None = None) -> McrResult:
     """Alternating least squares D = C ST with non-negativity on both (NNLS), John's defaults.
-    `c_fixed` = {sample index: concentration row} rows held fixed (ITFA). The result keeps E, D and the labels."""
+    `c_fixed` = {sample index: concentration row} rows held fixed (ITFA). The result keeps E, D and the labels.
+    It stops when the RMSE changes by less than `tol_err_change` times itself between two iterations (a relative
+    change, so scaling D changes nothing; John Bussey's GUI, through pymcr, compared the absolute change of the
+    error with 1e-8), or when the RMSE is at the rounding level of D (exact data); 0 runs every iteration."""
     D_in = np.asarray(D, float)
     D = np.clip(D_in, 0, None) if clip_negative else D_in
     n, m = D.shape
@@ -500,6 +503,7 @@ def mcr_als(D: np.ndarray, n_components: int, max_iter: int = 100, tol_err_chang
     err: list[float] = []
     converged = False
     c_fixed = c_fixed or {}
+    floor = 1e4 * np.finfo(float).eps * float(np.sqrt(np.mean(D ** 2)))    # an error at the rounding level of D
     for it in range(max_iter):
         _tick(progress, it, max_iter, f"MCR-ALS iteration {it + 1} of {max_iter}")
         for i in range(n):
@@ -516,11 +520,12 @@ def mcr_als(D: np.ndarray, n_components: int, max_iter: int = 100, tol_err_chang
                 ST[:, j] = np.linalg.lstsq(C, D[:, j], rcond=None)[0]
         e = float(np.sqrt(np.mean((D - C @ ST) ** 2)))
         err.append(e)
-        if len(err) > 1 and abs(err[-2] - e) < tol_err_change:
+        if len(err) > 1 and tol_err_change > 0 and (e <= floor or abs(err[-2] - e) < tol_err_change * err[-2]):
             converged = True
             break
-    msg = "" if converged else (f"max iterations reached ({max_iter}); the error still changed by "
-                                f"{abs(err[-2] - err[-1]) if len(err) > 1 else float('nan'):.2g} per iteration")
+    rel = abs(err[-2] - err[-1]) / err[-2] if len(err) > 1 and err[-2] else float("nan")
+    msg = "" if converged else (f"max iterations reached ({max_iter}); the error still changed by {rel:.2g} of "
+                                "itself per iteration")
     return McrResult(C=C, ST=ST, err=err, n_iter=len(err), converged=converged, rmse=err[-1] if err else float("nan"),
                      E=None if E is None else np.asarray(E, float), D=D_in, labels=list(labels or []), message=msg,
                      clip_negative=clip_negative)

@@ -337,7 +337,7 @@ def test_step4_sentence(qapp, easy_demo):
     text = rd.step4_line.plain_text()
     assert "divided by the beam intensity (I0)" in text and "the four detectors" in text
     assert not any(w in text for w in ("mcc", "Au mesh", "k =", "SDD1-4"))
-    assert rd.step4_line.toolTip().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum")
+    assert rd.step4_line.toolTip().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean")
     st = rd.settings_in_force(sid)
     st.sdd = [True, True, False, True]
     from aurora.core.flags import Flag
@@ -450,7 +450,7 @@ def test_compare_easy_unscaled_rows(qapp, tmp_path):
         assert dashed, "the unscaled row is drawn"
         mode.set_advanced(True)
         cmp_.replot()
-        assert "normalisation failed (all NaN)" in cmp_.status.text()
+        assert "could not normalise" in cmp_.status.text() and "Pre / Post" in cmp_.status.text()
         assert not cmp_.plot.listDataItems()
     finally:
         mode.set_advanced(False)
@@ -627,9 +627,9 @@ def test_findings_grouped_by_kind(qapp):
         assert parent.childCount() == 5 and not parent.isExpanded() and parent.data(0, Qt.UserRole) is None
         assert core_report.FINDING_KINDS["uncovered_stack"] in parent.toolTip(0)
         single = next(t for t in tops if not t.childCount())
-        assert single.data(0, Qt.UserRole) == "g1" and lst.itemWidget(single, 2) is not None
+        assert single.data(0, Qt.UserRole) == "g1" and single.data(2, Qt.AccessibleTextRole) == "Show in Reduce"
         child = parent.child(0)
-        assert child.data(0, Qt.UserRole) == "u0" and lst.itemWidget(child, 2) is not None
+        assert child.data(0, Qt.UserRole) == "u0" and child.data(2, Qt.AccessibleTextRole) == "Show in Reduce"
     finally:
         dispose(rp)
 

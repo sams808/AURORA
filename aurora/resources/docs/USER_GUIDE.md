@@ -115,17 +115,21 @@ Easy mode shows the four steps as numbered cards, in plain words:
 2. **2 · Which X-rays to count**: keep the fixed window of your element (*F Kα (fixed window)*) or drag the band over
    the emission line; **from** / **to** are in detector channels (to excluded). The caption says what the plot is.
 3. **3 · Outline the sample**: draw the sample with **rect+** or **lasso+**; a click inside another sample selects it;
-   **New sample** starts the next one; the caption counts the pixels (*Region: 6 of 12 pixels of …*). Zones are in
-   mm, so every scan of the holder that covers the area attaches to the zone automatically, loaded or not.
+   **New sample** starts the next one; the caption counts the pixels (*Region: 6 of 12 pixels of …*). Unlike John
+   Bussey's GUI, a rectangle also takes the edge pixels whose square it touches; lasso+ takes only the pixels whose
+   centre is inside (his rule). Zones are in mm, so every scan of the holder that covers the area attaches to the zone
+   automatically, loaded or not.
 4. **4 · Send to Check**: one sentence says how the spectrum is made (the exact settings are in its tooltip); press
-   **Add to Check**, then follow **Go to Check ›**.
+   **Add to Check**, then follow **Go to Check ›**. **Load polygon…** reads a polygon saved by John Bussey's GUI
+   (`_polygon_roi.json`) into a new sample. Name the sample before saving it in Check: a sample still called *zone 1*
+   is saved under that name.
 
 Made a mistake? **Ctrl+Z** undoes the last zone or settings change (**Edit > Undo** names it), **Ctrl+Y** redoes it;
 the zones are saved by themselves within a second.
 
 Advanced mode adds **rect-** (remove a rectangle), **brush+** / **brush-** (paint or erase single pixels),
 **polygon+**, **Load all**, **Propose zones** (a first guess from the sgm_report summary or the bright pads of the
-survey), **Stitch…** (overlapping tiles into one stack), **Load polygon…** / **Save polygon…** (John Bussey's
+survey), **Stitch…** (overlapping tiles into one stack), **Save polygon…** (John Bussey's
 `_polygon_roi.json`), the group and comment of the zone, and one settings card per attached scan: include, which SDDs,
 which line, PFY or IPFY, fluorescence normalisation (raw counts, / I0, / I0, pre-edge = 0, / I0, edge jump = 1, / I0,
 area = 1, / I0, maximum = 1), TEY and its normalisation, de-spike threshold k, I0 source (own, or the good-I0 mean of
@@ -152,7 +156,7 @@ plots mesh, photodiode, their ratio and TEY of any stack, the photodiode tests i
 
 A library of spectra, saved with the project. Easy mode is John Bussey's Compare: **Add saved spectra…** reads the
 John-format files saved by Check, and the table shows Show, Fit, Label, Signal, Shift eV and Colour; every row is the
-raw signal / I0 normalised the larch way (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened). The
+raw signal / I0 normalised the larch way (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened; AURORA's windows, John Bussey's GUI used −10..−5 and +10..+34 eV, and the Easy line under the plot says so). As in his GUI, a file's TEY row starts hidden. The
 diagnostics panel shows how each row was normalised. Advanced mode adds every column (normalisation, windows, E0
 choice and value, flatten, spacing, scale), other file layouts, references (**References…**, from the folder set in
 Settings) and configs. **Figure size…** sets the exported figure (3.5 × 4.5 in, 600 dpi, PNG + SVG + PDF by default);
@@ -161,7 +165,7 @@ Settings) and configs. **Figure size…** sets the exported figure (3.5 × 4.5 i
 ## 6. Fit
 
 Works on the rows ticked Fit in Compare, with their shifts and normalisation. Easy mode shows the LCF tab with its
-options stated (*coefficients sum to 1 · no negative coefficients · ± from 200 bootstrap draws*).
+options stated (*coefficients sum to 1 · no negative coefficients · ± from 200 bootstrap draws*), AURORA's defaults: John Bussey's GUI left the sum free, allowed negative coefficients and fitted 685–705 eV.
 
 - **LCF**: target and ticked components, fit range (blank: the Compare x range), coefficients ≥ 0 and summing to 1
   (both optional); a weighted fit with χ²ν, the R-factor and uncertainties that hold on correlated residuals

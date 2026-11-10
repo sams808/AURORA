@@ -57,6 +57,20 @@ def test_check_zone_ports_johns_messages():
     assert "the electron yield (TEY) has no valid values" in levels(check_zone(build_traces(sums(tey=np.full(len(E), np.nan)), st)), "warn")
 
 
+def test_a_dead_detector_names_itself_and_the_way_out():
+    """A ticked SDD with zero counts everywhere makes the row bad (the item spec; John Bussey's GUI only warned): the
+    message names the detector, the window and how to leave it out, and says John's GUI warned; unticked, the row is
+    clean."""
+    st = ScanSettings(line="F Kα", despike_mode="coherent")
+    det = sums().det["F Kα"].copy(); det[:, 2] = 0.0
+    msgs = check_zone(build_traces(sums(det=det), st), n_total=12)
+    assert worst(msgs) == "bad"
+    assert levels(msgs, "bad") == ["detector 3 (SDD3) counts nothing in the window (F Kα): check the window in step 2 "
+                                   "of Reduce, or leave a dead detector out of the sum on the scan card (Advanced mode)"]
+    off = ScanSettings(line="F Kα", despike_mode="coherent", sdd=[True, True, False, True])
+    assert worst(check_zone(build_traces(sums(det=det), off), n_total=12)) == "ok"
+
+
 def test_bad_point_fraction_and_flags():
     st = ScanSettings(line="F Kα", despike_mode="coherent")
     i0 = np.full(len(E), 10.0)
@@ -78,6 +92,10 @@ def test_bad_point_fraction_and_flags():
     assert "detector 2 (SDD2) saturated (too many X-rays): left out of the sum" in levels(msgs, "ok")
     assert ("this scan's beam reading (I0) cannot be trusted: the average beam of the good scans is used instead"
             in levels(msgs, "ok"))
+    # the row's headline is its first warning: a saturated SDD in the sum comes before the missing energies
+    det3 = sums().det["F Kα"].copy(); det3[[5, 6], :] = np.nan
+    warn = levels(check_zone(build_traces(sums(det=det3), st), flags=[sat]), "warn")
+    assert warn[0].startswith("detector 2 (SDD2) saturated") and "2 energies missing (their maps were not recorded)" in warn[1:]
 
 
 # ----------------------------------------------------------------------------- the page on the demo
@@ -209,6 +227,7 @@ def test_save_ticked_to_compare(qapp, demo):
     added = lib.requests[before:]
     assert added and {r.label for r in added} == {z.label} and {r.signal for r in added} <= {"sdd-scaled", "sdd_total", "TEY"}
     assert "added to Compare" in ck.queue_note.text() and not asked
+    assert "1 spectrum saved in processed/reduced/" in ck.queue_note.text()
     # a second save asks before overwriting; 'no' skips the spectrum
     ck.ask_overwrite = lambda paths: asked.append(paths) or "no"
     ck.save_btn.click()
@@ -272,3 +291,81 @@ def test_a_stack_that_cannot_be_read_gives_an_error_row(qapp, fake_project, erro
     assert error_dialogs                                   # the failed read was reported once, calmly
     win.session._save_timer.stop()
     win.close()
+
+
+def test_the_queue_survives_reload_and_a_restart(qapp, fake_project, monkeypatch):
+    """The queue is saved with the session: File > Reload keeps it and a restart brings it back, with the first
+    verdict applied once (a bad row ticked again by hand stays ticked)."""
+    from aurora.app import check
+    from aurora.app.main import MainWindow
+    from aurora.core.model import Project
+    from wp3_helpers import close, open_window, pump
+    monkeypatch.setattr(check.qc, "check_zone", lambda traces, stack=None, flags=(), n_total=None:
+                        [("bad", "SDD1: no finite values (missing files?)")])
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        rd, ses, ck = win.reduce, win.session, win.check
+        x0, x1, y0, y1 = ses.stack_loaded(sid).bbox
+        rd.map.rect_drawn.emit(x0, x1, y0, y1)
+        pump(qapp)
+        z = ses.zone()
+        assert rd.add_to_check() == 1
+        win.show_perspective("check")
+        assert win.jobs.wait_idle(30000)
+        pump(qapp)
+        assert len(ck.queue_rows()) == 1 and z.settings[sid].include is False     # the first verdict: unticked
+        ck.set_all_ok(True)                                                       # ticked again by hand
+        win.home.set_project(Project.discover(fake_project))                      # File > Reload
+        pump(qapp)
+        assert win.jobs.wait_idle(30000)
+        pump(qapp)
+        assert len(ses.check_queue) == 1 and len(ck.queue_rows()) == 1 and not ck.queue_state.isVisible()
+        assert ses.zone(z.id).settings[sid].include is True
+    finally:
+        close(win)
+    win2 = MainWindow()                                                           # a restart
+    win2.resize(1500, 940)
+    win2.show()
+    try:
+        win2.home.set_project(Project.discover(fake_project))
+        pump(qapp)
+        win2.show_perspective("check")
+        assert win2.jobs.wait_idle(30000)
+        pump(qapp)
+        ses2 = win2.session
+        assert [(it.zone_id, it.sid) for it in ses2.check_queue] == [(z.id, sid)]
+        assert len(win2.check.queue_rows()) == 1 and not win2.check.queue_state.isVisible()
+        assert ses2.zone(z.id).settings[sid].include is True                     # not unticked a second time
+    finally:
+        close(win2)
+
+
+def test_looking_at_an_empty_queue_writes_nothing(qapp, fake_project):
+    """The saved queue must not make a look at Check an edit: open, show Check, close: no session.json (I15)."""
+    from aurora.app.main import MainWindow
+    from aurora.core.model import Project
+    from wp3_helpers import pump
+    win = MainWindow()
+    win.show()
+    try:
+        win.home.set_project(Project.discover(fake_project))
+        pump(qapp)
+        win.show_perspective("check")
+        assert win.jobs.wait_idle(30000)
+        pump(qapp)
+        assert win.check.queue_state.isVisible() and not win.session.dirty
+    finally:
+        win.jobs.wait_idle(30000)
+        win.close()
+    assert not (fake_project / ".aurora" / "session.json").exists()
+
+
+def test_the_saved_note_names_the_folder_of_every_file(qapp, tmp_path):
+    """Two samples are two folders: the note points at the folder that holds both, not at the first one."""
+    from PySide6.QtWidgets import QLabel
+    from aurora.app.widgets import notify_saved
+    a, b = tmp_path / "reduced" / "1 alpha" / "1 alpha_full_reduced.csv", tmp_path / "reduced" / "2 beta" / "2 beta_full_reduced.csv"
+    lab = QLabel()
+    plain = notify_saved(lab, [a, b])
+    assert plain.endswith(f"→ {tmp_path / 'reduced'}") and "1 alpha_full_reduced.csv, 2 beta_full_reduced.csv" in plain
+    assert notify_saved(QLabel(), [a]).endswith(f"→ {a.parent}")

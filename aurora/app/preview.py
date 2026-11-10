@@ -1,12 +1,16 @@
 """Preview of a zone's traces: fluorescence (four SDDs + sum), TEY, I0 in three linked panels, spikes marked."""
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QVBoxLayout, QWidget
 
-from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
+from aurora.app.theme import (DASH, PAL, curve, dash, min_height, on_theme_changed, pc, role_pen,  # noqa: F401
+                              style_plot, with_alpha)                     # PAL / DASH re-exported
 from aurora.core.spectra import ZoneTraces
 
 TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
@@ -15,6 +19,48 @@ TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
 SUM_NAME = "sum of the detectors in use"
 SPIKES_NAME = "repaired points (spikes)"          # the legend draws the red dot itself
 BANDS_NOTE = "Grey bands: the energy ranges before and after the edge used to scale the spectrum."
+
+
+class SparseAxis(pg.AxisItem):
+    """A y axis whose tick labels never print over each other on a short panel, and show at least two values where
+    they can. pyqtgraph keeps at least 2.25 major intervals whatever the height (a 56 px panel printed five labels into
+    56 px), and its step can leave a single label once the labels at the ends are dropped. Here the step moves along
+    1, 2, 2.5, 5, 10 ...: up while the labels are closer than 1.25 lines (never down to fewer than two labels), down
+    while one label only is shown (never closer than a line)."""
+
+    @staticmethod
+    def _mantissa(step: float) -> float:
+        return round(step / 10 ** math.floor(math.log10(step)), 2)
+
+    def tickSpacing(self, minVal, maxVal, size):
+        levels = super().tickSpacing(minVal, maxVal, size)
+        lo, hi = min(minVal, maxVal), max(minVal, maxVal)
+        if not levels or hi <= lo or size <= 0:
+            return levels
+        line = QFontMetricsF(self.style.get("tickFont") or QFont()).height()
+        edge = 0.5 * line * (hi - lo) / size                        # pyqtgraph drops a label this close to an end
+        count = lambda s: math.floor((hi - edge) / s) - math.ceil((lo + edge) / s) + 1      # noqa: E731  labels shown
+        pitch = lambda s: size * s / (hi - lo)                                              # noqa: E731  px apart
+        step = first = levels[0][0]
+        while pitch(step) < 1.25 * line:                            # too close: a larger step
+            nxt = step * (1.25 if self._mantissa(step) == 2 else 2.0)
+            if count(nxt) < 2:
+                break
+            step = nxt
+        while count(step) < 2:                                      # a single label: a smaller step
+            nxt = step / (1.25 if self._mantissa(step) == 2.5 else 2.0)
+            if pitch(nxt) < line:
+                break
+            step = nxt
+        if step == first:
+            return levels
+        return [(step, 0), (step / (4 if self._mantissa(step) == 2 else 5), 0)]
+
+    def tickStrings(self, values, scale, spacing):
+        # pyqtgraph gives a step of 0.25 one decimal ('0.2', '0.5', '0.8' at 0.25, 0.5, 0.75): one more for 2.5 steps
+        if spacing and self._mantissa(spacing * scale) == 2.5:
+            spacing = spacing / 10
+        return super().tickStrings(values, scale, spacing)
 
 
 class PreviewPlot(QWidget):
@@ -43,22 +89,25 @@ class PreviewPlot(QWidget):
         opts.addWidget(self.readout, 1)
         lay.addLayout(opts)
         self.gl = pg.GraphicsLayoutWidget()
-        self.top = self.gl.addPlot(row=0, col=0)
-        self.mid = self.gl.addPlot(row=1, col=0)
-        self.low = self.gl.addPlot(row=2, col=0)
+        self.top = self.gl.addPlot(row=0, col=0, axisItems={"left": SparseAxis("left")})
+        self.mid = self.gl.addPlot(row=1, col=0, axisItems={"left": SparseAxis("left")})
+        self.low = self.gl.addPlot(row=2, col=0, axisItems={"left": SparseAxis("left")})
         self.mid.setXLink(self.top)
         self.low.setXLink(self.top)
         for p_ in (self.top, self.mid, self.low):
-            p_.setLabel("left", "arbitrary units")
+            p_.setLabel("left", "arb. units")              # uncalibrated: arbitrary units (short: the panels are low)
         self.low.setLabel("bottom", "energy (eV)")
         for p in (self.top, self.mid, self.low):
             p.showGrid(x=True, y=True, alpha=0.15)
             p.vb.disableAutoRange()
+        for p in (self.top, self.mid):                  # linked x: one row of energies, under the lowest panel
+            p.getAxis("bottom").setStyle(showValues=False)
         self.top.addLegend(offset=(-10, -10))         # bottom right: never over the rise at the edge
         self.gl.ci.layout.setRowStretchFactor(0, 4)
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
+        min_height(self.gl, 300)                        # three panels with readable ticks (the page scrolls if needed)
         from aurora.app.widgets import ElidedLabel as _EL
         self.bands_note = _EL(BANDS_NOTE, Qt.ElideRight)   # what the grey bands are (shown when they are drawn)
         self.bands_note.setObjectName("muted")
@@ -67,6 +116,7 @@ class PreviewPlot(QWidget):
         style_plot(self.gl)
         on_theme_changed(self, lambda _s: self.redraw())
         self._traces: list[tuple[str, ZoneTraces, dict]] = []
+        self._waiting = ""                              # the hint of an empty preview whose data is still being read
         for c in (self.show_sdd, self.show_sum, self.show_tey, self.show_i0, self.show_spikes):
             c.toggled.connect(self.redraw)
         self.top.scene().sigMouseMoved.connect(self._moved)
@@ -78,9 +128,11 @@ class PreviewPlot(QWidget):
         self.gl.setAccessibleName("preview of the zone's traces")
         mark_advanced(self.toggles)
 
-    def set_traces(self, traces: list[tuple[str, ZoneTraces, dict]]) -> None:
-        """[(name, traces, meta)] where meta may hold 'edge_ev' and 'edge'."""
+    def set_traces(self, traces: list[tuple[str, ZoneTraces, dict]], waiting: str = "") -> None:
+        """[(name, traces, meta)] where meta may hold 'edge_ev' and 'edge'. waiting: what an empty preview is still
+        reading ('reading the good-I0 scans …')."""
         self._traces = traces
+        self._waiting = waiting
         self.redraw()
 
     def redraw(self) -> None:
@@ -94,7 +146,7 @@ class PreviewPlot(QWidget):
             self.mid.setTitle("")
             self.low.setTitle("")
             self.bands_note.hide()
-            set_plot_hint(self.top, "select a sample (zone) and a scan to see its traces")
+            set_plot_hint(self.top, self._waiting or "select a sample (zone) and a scan to see its traces")
             for p in (self.mid, self.low):
                 set_plot_hint(p, " ")                 # no bare 0..1 axes on an empty preview
             return

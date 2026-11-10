@@ -52,6 +52,22 @@ def delete_keys() -> list[QKeySequence]:
     return keys
 
 
+def fullscreen_keys() -> list[QKeySequence]:
+    """Full screen: F11 on Windows and Linux; Ctrl+Cmd+F on macOS, where F11 shows the desktop (Mission Control) and
+    is a volume key without fn. Qt writes Command as 'Ctrl' and Control as 'Meta' on macOS."""
+    return [QKeySequence("Ctrl+Meta+F" if sys.platform == "darwin" else "F11")]
+
+
+def holder_keys(step: int) -> list[QKeySequence]:
+    """Previous (step < 0) or next holder: Ctrl+PgUp / Ctrl+PgDown, plus Ctrl+Alt+Up / Ctrl+Alt+Down on macOS
+    (Option-Command-arrow), whose laptop keyboards have no PgUp / PgDown keys. Not on Windows and Linux, where
+    Ctrl+Alt+arrow rotates the screen or switches the workspace."""
+    keys = [QKeySequence("Ctrl+PgUp" if step < 0 else "Ctrl+PgDown")]
+    if sys.platform == "darwin":
+        keys.append(QKeySequence("Ctrl+Alt+Up" if step < 0 else "Ctrl+Alt+Down"))
+    return keys
+
+
 def _main_window(owner: QObject) -> QWidget | None:
     """The window with the `menus` dict (MainWindow) that owns `owner`, None while `owner` is not inside one yet."""
     w = owner if isinstance(owner, QWidget) else None

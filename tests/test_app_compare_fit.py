@@ -40,7 +40,9 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     assert len(added) == 6 and cmp_.table.rowCount() == 6                       # sdd-scaled + TEY per sample
     assert [r.norm for r in lib.requests] == ["larch"] * 6
     qapp.processEvents()
-    assert ("6 traces plotted" if mode.is_advanced() else "6 spectra plotted") in cmp_.status.text()
+    # TEY rows start hidden (John's rule)
+    assert ("3 traces plotted" if mode.is_advanced() else "3 spectra plotted") in cmp_.status.text()
+    assert [r.show for r in lib.requests] == [r.signal == "sdd-scaled" for r in lib.requests]
     # table edits propagate: hide the TEY rows, tick Fit on the sdd rows, shift one
     for i, r in enumerate(lib.requests):
         if r.signal == "TEY":
@@ -103,4 +105,51 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     qapp.processEvents()
     n = win.reduce.send_to_compare()
     assert n == 2 and any(r.label.startswith("zone one") and r.norm == "none" for r in lib.requests)
+    win.close()
+
+
+def test_scale_is_plot_only(qapp, tmp_path):
+    """Scale multiplies the drawn trace only (John Bussey's 'Scale (plot only)'): a 0.5 on the B row moved the LCF of
+    0.7 A + 0.3 B to 0.85 / 0.15 before, and the Difference and the CSV carried it too."""
+    from aurora.app.main import MainWindow
+    from aurora.core.fit import lcf
+    E = np.linspace(660, 740, 161)
+    a, b = _edge(E, 690, 1.0, 0.6), _edge(E, 700, 1.6, 0.2)
+    d = tmp_path / "reduced"
+    for name, y in (("A", a), ("B", b), ("M", 0.7 * a + 0.3 * b)):
+        (d / name).mkdir(parents=True); _write_john_csv(d / name / f"{name}_full_reduced.csv", name, E, y)
+    win = MainWindow()
+    lib, cmp_, fit = win.library, win.compare, win.fit
+    lib.add_folder(d)
+    rows = {r.label: i for i, r in enumerate(lib.requests) if r.signal == "sdd-scaled"}
+    for i, r in enumerate(lib.requests):
+        r.fit = r.signal == "sdd-scaled"
+
+    def coefficients():
+        cur = {k.split(" [")[0]: v for k, v in fit.curves_with_err().items() if k.endswith("[sdd-scaled]")}
+        return lcf(cur["M"], [cur["A"], cur["B"]], bootstrap=0, f_tests=False).coefficients
+
+    before = coefficients()
+    y_b = lib.process_row(lib.requests[rows["B"]]).y.copy()
+    cmp_.table.item(rows["B"], cmp_.col("Scale")).setText("0.5")
+    qapp.processEvents()
+    rb = lib.requests[rows["B"]]
+    assert rb.scale == 0.5
+    assert np.allclose(coefficients(), before) and np.allclose(before, [0.7, 0.3], atol=0.02)
+    assert np.allclose(lib.process_row(rb).y, y_b, equal_nan=True)              # Difference and Fit read this
+    t = next(t for t in cmp_.plot_traces() if t.r is rb)
+    assert np.allclose(t.y - t.off, 0.5 * y_b, equal_nan=True)                # the drawn trace is scaled
+    cmp_.export(tmp_path / "comparison.csv")
+    head = (tmp_path / "comparison.csv").read_text().splitlines()
+    col = head[0].split(",").index("B-sdd-scaled")
+    vals = np.array([float(line.split(",")[col]) for line in head[1:] if line.split(",")[col]])
+    assert np.allclose(vals, y_b[np.isfinite(y_b)], atol=1e-6)                 # the CSV is unscaled, as John's
+    # a signal that falls across the edge is kept as measured and named in the status line
+    (d / "F").mkdir(); _write_john_csv(d / "F" / "F_full_reduced.csv", "F", E, 3.0 - a)
+    lib.add_folder(d)
+    qapp.processEvents()
+    rf = next(r for r in lib.requests if r.key == "F [sdd-scaled]")
+    assert np.nanmean(lib.process_row(rf).y[E > 715]) < 0
+    assert ("the signal falls across the edge on F [sdd-scaled]" if mode.is_advanced() else
+            "The signal falls across the edge on F (fluorescence)") in cmp_.status.text()
     win.close()

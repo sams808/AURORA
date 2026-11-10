@@ -238,6 +238,10 @@ class Library(QObject):
             xanes = s.meta.get("layout") == "xanes" if isinstance(s.meta, dict) else False   # sgm_report: PFY / I0, TEY / I0
             if s.signal in show_signals or len(specs) == 1 or xanes:
                 r = self.new_request(s, norm)
+                # John Bussey's rule for his files: only the sdd-scaled row of a file is shown at first (TEY hidden)
+                if isinstance(s.meta, dict) and s.meta.get("layout") == "john" and s.signal != "sdd-scaled" \
+                        and any(o.signal == "sdd-scaled" for o in specs):
+                    r.show = False
                 self.requests.append(r)
                 added.append(r)
         if added:
@@ -375,6 +379,45 @@ class Library(QObject):
             if rows is None or i in rows:
                 setattr(r, attr, value)
         self.changed.emit()
+
+    # ------------------------------------------------------------------ the Easy defaults of a row
+    def easy_values(self, r: TraceRequest) -> dict:
+        """The values a new row gets for the columns Easy mode hides (Norm, the windows, Flatten, E0, Scale) and the
+        E0 smoothing: mode.EASY_DEFAULTS['compare'], Norm 'none' for a trace normalised already (a *_norm signal, a
+        zone trace from Reduce, a difference)."""
+        from aurora.core.compare import E0_SMOOTH_EV
+        d = _easy_compare()
+        s = self.spectra.get(r.key)
+        done = r.signal.endswith("_norm") or r.signal == "difference" or (s is not None and (
+            (isinstance(s.meta, dict) and "zone" in s.meta) or parse_zone_source(str(s.source or "")) is not None))
+        return {"norm": "none" if done else d["norm"], "pre": tuple(d["pre"]),
+                "post": tuple(d["post"]), "flatten": bool(d["flatten"]), "e0_mode": "deriv",
+                "scale": float(d["scale"]), "e0_smooth": E0_SMOOTH_EV}
+
+    def easy_differences(self) -> dict[int, list[str]]:
+        """row -> the fields of easy_values in which the row differs (rows that do not differ left out)."""
+        out = {}
+        for i, r in enumerate(self.requests):
+            have = {f: getattr(r, f) for f in self.easy_values(r)}
+            fields = [f for f, v in self.easy_values(r).items()
+                      if (tuple(have[f]) if isinstance(have[f], list) else have[f]) != v]
+            if fields:
+                out[i] = fields
+        return out
+
+    def reset_to_easy(self) -> int:
+        """'Reset to Easy defaults' in Compare: the differing fields of every row rewritten in one change. Returns the
+        number of fields."""
+        diffs = self.easy_differences()
+        for i, fields in diffs.items():
+            r, want = self.requests[i], self.easy_values(self.requests[i])
+            for f in fields:
+                setattr(r, f, want[f])
+            if "e0_mode" in fields:
+                r.e0 = None                     # a fixed E0 goes with its mode
+        if diffs:
+            self.changed.emit()
+        return sum(len(v) for v in diffs.values())
 
     # ------------------------------------------------------------------ edges and E0
     def edge_of(self, s: Spectrum) -> tuple[str, str] | None:

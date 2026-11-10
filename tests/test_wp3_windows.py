@@ -183,6 +183,22 @@ def test_line_of_the_edge_needs_a_calibration():
     assert typical.sigma_ch == xw.SIGMA_CH_TYPICAL and "typical" in typical.sigma_source
 
 
+def test_line_of_the_edge_is_sgm_reports_rule_per_detector():
+    """sgm_report's RoiBins.ensure puts each detector's window at its own calibrated channel c, floor(c - 1.5 sigma) to
+    ceil(c + 1.5 sigma) in that detector's channels. With the 2026 beamtime's calibration and fitted widths the preset
+    gives exactly the bins sgm_report wrote into config/roi_bins.json (it was one channel off on SDD1 / SDD4 when the
+    width went through the mean gain)."""
+    from aurora.core.io.config import Calibration, RoiBins
+    cal = Calibration(data={"sdd1": {"gain": 10.0581, "offset": 3.8575}, "sdd2": {"gain": 9.3976, "offset": -3.6391},
+                            "sdd3": {"gain": 9.8516, "offset": -1.2982}, "sdd4": {"gain": 10.09, "offset": 7.854}})
+    bins = RoiBins(data={"_meta": {"n_sigma": 1.5}, "F Kα": {"sigma_ch": 4.5}, "O Kα": {"sigma_ch": 3.52}})
+    written = {"F Kα": {"sdd1": [60, 74], "sdd2": [65, 80], "sdd3": [62, 76], "sdd4": [59, 74]},       # roi_bins.json
+               "O Kα": {"sdd1": [46, 58], "sdd2": [50, 62], "sdd3": [48, 59], "sdd4": [45, 57]}}
+    for edge, line in ((("F", "K"), "F Kα"), (("O", "K"), "O Kα")):
+        el = xw.edge_line_windows(edge, cal, bins)
+        assert el.label == line and el.windows == written[line], (line, el.windows)
+
+
 @pytest.mark.skipif(JOHN is None, reason="John Bussey's GUI folder (legacy/CLS_GUI_JohnBussey) is not available")
 def test_john_windows_and_polygon_reproduce_his_full_reduced_csv():
     from aurora.core.io.h5 import xy
@@ -245,9 +261,14 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         pump(qapp)
         z = ses.zone()
         assert z.settings[sid].line == "F Kα" and z.settings[sid].roi is None
-        # 'same range' ticked: setting one region moves all four, and the spins follow
+        # 'same range' ticked: dragging one region moves all four by as much (the fixed bins keep their offsets),
+        # and the spins follow (SDD1's window)
         assert wc.same_range.isChecked()
         wc.regions[1].setRegion((50, 70))
+        pump(qapp)
+        assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(49, 69), (50, 70), (51, 71), (52, 72)]
+        assert (wc.lo.value(), wc.hi.value()) == (49, 69) and wc.preset.currentData() == ("custom", "")
+        wc.set_window(None, 50, 70)                    # det None: the same window for all four
         pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(50, 70)] * 4
         assert (wc.lo.value(), wc.hi.value()) == (50, 70) and wc.preset.currentData() == ("custom", "")
@@ -272,10 +293,73 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc.set_window(None, 46, 58, commit=False)
         assert wc.choice() == {"line": "O Kα", "roi": None}
         # unlinked (Advanced): one detector apart
+        from aurora.app import mode
+        mode.set_advanced(True)
         wc.same_range.setChecked(False)
         wc.det.setCurrentIndex(2)
         wc.set_window(2, 10, 20, commit=False)
         assert wc.windows()["sdd3"] == [10, 20] and wc.windows()["sdd1"] == [46, 58]
+    finally:
+        from aurora.app import mode
+        mode.set_advanced(False)
+        close(win)
+
+
+def test_easy_nudges_keep_the_per_detector_windows(qapp, tmp_path):
+    """Easy mode has one lo / hi pair for the four windows and no 'same range' or 'for' control. A nudge moves every
+    window by one channel: the fixed bins of a line (60:74, 61:75, 62:76, 63:77 on the demo) keep their offsets,
+    where they used to collapse onto SDD1's window. The line under the spins names the four windows."""
+    from aurora.cli import cmd_demo
+    from wp3_helpers import close, open_window, pump
+    root = tmp_path / "demo"
+    cmd_demo(root)
+    win, sid = open_window(qapp, Project.discover(root))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        assert not wc.same_range.isVisible() and not wc.det_box.isVisible()
+        assert "SDD2 61:75, SDD3 62:76, SDD4 63:77 move with it" in wc.ev_label.text()
+        wc.hi.setValue(wc.hi.value() + 1)
+        wc.lo.setValue(wc.lo.value() - 1)
+        wc.commit_now()
+        pump(qapp)
+        expect = {"sdd1": [59, 75], "sdd2": [60, 76], "sdd3": [61, 77], "sdd4": [62, 78]}
+        assert wc.windows() == expect and ses.zone().settings[sid].roi == expect
+        assert wc.ev_label.text().startswith("Detector 1 (SDD1): 590–750 eV (channels 59 to 74")   # Easy words
+        # the same with the hidden 'same range' unticked (left so by Advanced): Easy still moves all four
+        wc.same_range.setChecked(False)
+        wc.det.setCurrentIndex(2)
+        wc.hi.setValue(wc.hi.value() + 1)
+        assert wc.windows() == {d: [a, b + 1] for d, (a, b) in expect.items()}
+    finally:
+        close(win)
+
+
+def test_easy_line_of_the_edge_does_not_flip_the_hidden_same_range(qapp, fake_project):
+    """The preset 'line of the edge' gives per-detector windows (each detector's calibration). In Easy it no longer
+    unticks the hidden 'same range' box, and the next nudge moves the four windows together."""
+    from wp3_helpers import close, open_window, pump
+    (fake_project / "config" / "sdd_calibration.json").write_text(json.dumps(
+        {d: {"gain": g, "offset": o} for d, g, o in zip(DETS, (10.06, 9.40, 9.85, 10.09), (3.9, -3.6, -1.3, 7.9))}),
+        encoding="utf-8")
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        i = next(i for i in range(wc.preset.count()) if wc.preset.itemData(i)[0] == "edge")
+        wc.preset.setCurrentIndex(i)
+        pump(qapp)
+        st = ses.zone().settings[sid]
+        edge = dict(st.roi)
+        assert not xw.same_for_all(edge) and wc.same_range.isChecked()
+        wc.lo.setValue(wc.lo.value() - 1)
+        wc.commit_now()
+        pump(qapp)
+        assert ses.zone().settings[sid].roi == {d: [a - 1, b] for d, (a, b) in edge.items()}
     finally:
         close(win)
 
@@ -367,3 +451,36 @@ def test_real_windows_reproduce_the_sgm_report_bins(real_project):
     ok = np.isfinite(ref).all(axis=1)
     assert ok.sum() >= sd.n_energies - 1
     np.testing.assert_array_equal(s[ok], ref[ok])
+
+
+def test_without_roi_bins_easy_offers_johns_window_and_says_what_total_xrf_is(qapp, fake_project):
+    """A folder without config/roi_bins.json (John Bussey's own layout) reduces to the total XRF only. Step 2 then says
+    that the total XRF holds every emission line, not the PFY of the edge's line, and offers John Bussey's default
+    window (60:83 on every detector, F Kα at 676.8 eV is channel 67.7 at the nominal 10 eV / channel)."""
+    from wp3_helpers import close, open_window, pump
+    assert xw.john_default_windows(("F", "K")) == ("F Kα", {d: [60, 83] for d in DETS})
+    assert xw.john_default_windows(("O", "K")) is None                   # O Kα, 524.9 eV: channel 52, outside 60:83
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        ses, rd = win.session, win.reduce
+        wc = rd.window_card
+        items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
+        assert items == ["all X-rays (total XRF)", "standard 60:83 (F Kα)", "custom (drag the band on the plot)"]
+        assert wc.preset.currentText() == "all X-rays (total XRF)"
+        assert "every emission line, not only the F Kα of the edge" in wc.ev_label.text()
+        assert "the earlier SGM XAS GUI started with 60:83" in wc.ev_label.text()          # Easy: no person name
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        wc.preset.setCurrentIndex(1)
+        pump(qapp)
+        st = ses.zone().settings[sid]
+        assert st.line == "F Kα" and st.roi == {d: [60, 83] for d in DETS}
+        assert wc.preset.currentText() == "standard 60:83 (F Kα)" and "every emission line" not in wc.ev_label.text()
+        # the preset combo takes the card's width (the label keeps its own), so its text is not cut at 1500 x 940
+        win.resize(1500, 940)
+        pump(qapp)
+        plab = wc.preset.parentWidget().layout().itemAt(0).widget()
+        assert plab.text() == "preset" and plab.width() <= plab.sizeHint().width() + 2
+        assert wc.preset.width() >= wc.preset.fontMetrics().horizontalAdvance(wc.preset.currentText()) + 16
+    finally:
+        close(win)

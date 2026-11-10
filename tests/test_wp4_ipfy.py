@@ -74,9 +74,30 @@ def test_ipfy_traces_on_the_demo_are_i0_over_the_counts(demo):
         assert np.allclose(1 / mean_det, t.sum, rtol=0.25)
         tj = zone_traces(sd, pix, ScanSettings(line=line, fluo_norm="i0jump", signal="ipfy"))
         post = (tj.E >= tj.post[0]) & (tj.E <= tj.post[1])
-        assert np.isclose(np.nanmean(tj.sum[post]), 1.0)              # edge jump = 1 after the pre-divided path
+        # edge jump of size 1 after the pre-divided path; the demo's I0 / S falls at the edge or is flat within its noise
+        # (see below), and a negative jump is kept as measured and said, never flipped into a rising edge
+        jump = np.nanmean(tj.sum[post])
+        assert np.isclose(abs(jump), 1.0) and (jump < 0) == any(n.startswith("IPFY sum: edge step negative") for n in tj.notes)
     pfy = zone_traces(sd, pix, ScanSettings(line="O Kα"))
     assert pfy.signal == "pfy" and pfy.trace_names()["sum"] == "fluo_sum_norm" and not any("IPFY" in n for n in pfy.notes)
+
+
+def test_ipfy_of_the_resonant_line_is_named_for_what_it_is(demo):
+    """I0 / (F Kα counts) on an F K stack is exactly 1 / PFY of that line, which the i0jump normalisation then turns
+    into a rising edge that passes for an IPFY. IPFY needs a line of another element: the traces say so and Check
+    warns. A non-resonant line (O Kα across the F K edge) gets no such note."""
+    from aurora.core import qc
+    sd, pix = demo
+    assert sd.edge == ("F", "K")
+    t = zone_traces(sd, pix, ScanSettings(line="F Kα", fluo_norm="raw", signal="ipfy", despike=False))
+    pfy = zone_traces(sd, pix, ScanSettings(line="F Kα", fluo_norm="i0", signal="pfy", despike=False))
+    assert np.allclose(t.sum, 1 / pfy.sum, rtol=1e-12, equal_nan=True)
+    note = next((n for n in t.notes if n.startswith("IPFY of the resonant line")), None)
+    assert note is not None and "F Kα" in note and "1 / PFY" in note, t.notes
+    assert ("warn", note) in qc.check_zone(t, sd)
+    to = zone_traces(sd, pix, ScanSettings(line="O Kα", fluo_norm="raw", signal="ipfy", despike=False))
+    assert not any(n.startswith("IPFY of the resonant line") for n in to.notes)
+    assert not any(n.startswith("IPFY of the resonant line") for n in pfy.notes)
 
 
 def test_ipfy_edge_jump_positive_in_every_normalisation_mode(demo):

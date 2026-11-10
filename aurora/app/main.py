@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QFontDatabase, QKeySequence
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton, QStackedWidget,
                                QToolButton, QVBoxLayout, QWhatsThis, QWidget)
 
@@ -49,6 +49,7 @@ BANNER_TEXT = ("This beamtime folder is read-only for AURORA (a locked drive, a 
                "protected folder): your outlines and spectra cannot be saved inside it. Copy the beamtime folder to "
                "this computer and open the copy to keep your work.")
 CLOSE_WAIT_S = 5.0                      # closing waits at most this long for cancelled jobs to stop
+EXIT_WAIT_S = 10.0                      # then the process waits at most this long in all for the threads still running
 SEP = "▸"
 
 
@@ -179,6 +180,9 @@ class MainWindow(QMainWindow):
         outer.addLayout(body, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage(f"{APP_NAME} {__version__}")
+        from aurora.app.widgets import TaskBar
+        self.status_taskbar = TaskBar()                 # the self-test's progress and Cancel (no Esc: the pages own it)
+        self.statusBar().addPermanentWidget(self.status_taskbar)
 
         self._menus()
         shortcuts.adopt(self)                  # menu entries the perspectives added before they were inside the window
@@ -201,6 +205,7 @@ class MainWindow(QMainWindow):
         self.show_perspective("home")
         central.setFocusPolicy(Qt.ClickFocus)      # at start the focus rests on the page, not on a top-bar button
         central.setFocus()
+        self.home.tab_after(central)               # ... and the first Tab reaches the welcome card's Open project…
 
     # ------------------------------------------------------------------ chrome
     def _top_bar(self) -> QWidget:
@@ -347,6 +352,8 @@ class MainWindow(QMainWindow):
                                                "View", "the previous holder of the project (wraps around)")
         self.next_holder_action = self._action(view, "&Next holder", lambda: self.step_holder(1), "Ctrl+PgDown",
                                                "View", "the next holder of the project (wraps around)")
+        self.prev_holder_action.setShortcuts(shortcuts.holder_keys(-1))     # + Option-Command-arrow on macOS
+        self.next_holder_action.setShortcuts(shortcuts.holder_keys(1))
         goto = view.addMenu("&Go to")
         self.goto_actions: dict[str, QAction] = {}
         self._hint_actions: dict[str, QAction] = {}
@@ -357,7 +364,8 @@ class MainWindow(QMainWindow):
                                  "Go to")
                 self._hint_actions[key] = h
         self.menu_anchors["view"] = view.addSeparator()       # shortcuts.add(menu='view') inserts above Full screen
-        self._action(view, "&Full screen", self.toggle_fullscreen, "F11", "View")
+        self.fullscreen_action = self._action(view, "&Full screen", self.toggle_fullscreen, None, "View")
+        self.fullscreen_action.setShortcuts(shortcuts.fullscreen_keys())      # F11; Ctrl+Cmd+F on macOS
         # ---- window actions without a menu entry
         self.primary_action = self._action(None, "Run the main action of the page", self.click_primary, "Ctrl+Return",
                                            "General", "clicks the highlighted button of the current perspective")
@@ -546,8 +554,13 @@ class MainWindow(QMainWindow):
         updates.check_now(self)
 
     def run_selftest(self) -> None:
-        """Help > Run self-test…: aurora --selftest in a background job, then the summary (Copy, Open folder)."""
+        """Help > Run self-test…: aurora --selftest in a background job, then the summary (Copy, Open folder). Its
+        progress ('12 of 57 checks') and Cancel are in the status bar; the menu entry waits until it ends."""
         from aurora.app import diagnostics
+        from aurora.app.widgets import set_enabled
+        job = self.jobs.job("selftest")
+        if job is not None and job.is_running():        # one at a time, and one summary
+            return
 
         def done(summary) -> None:
             self.statusBar().showMessage(diagnostics.summary_text(summary).splitlines()[0], 10000)
@@ -555,25 +568,38 @@ class MainWindow(QMainWindow):
             self.selftest_dialog = d
             d.show()                            # the job ended in the background: no modal interruption
 
-        self.statusBar().showMessage("self-test running in the background …", 5000)
+        set_enabled(self.selftest_action, False, "the self-test is running (its progress is in the status bar)")
         self.jobs.submit("selftest", lambda progress: diagnostics.run_selftest(progress), on_done=done,
-                         label="self-test")
+                         on_end=lambda _s: set_enabled(self.selftest_action, True), label="self-test",
+                         taskbar=self.status_taskbar)
 
     def open_demo(self) -> None:
-        """Create (once) and open the synthetic demo beamtime in the user's data folder."""
+        """Create (once) and open the synthetic demo beamtime in the user's data folder. It is written in a job with
+        the Home progress strip (about a second the first time), then Home opens it."""
         from platformdirs import user_data_dir
-        from aurora.cli import cmd_demo
         root = Path(user_data_dir(APP_NAME, appauthor=False)) / "demo_beamtime"
-        if not (root / "raw").is_dir():
-            if cmd_demo(root):                              # the folder holds something else: never written into
+
+        def write(cb) -> Path | None:
+            from aurora.cli import cmd_demo
+            cb(0, 1, "writing the demo beamtime …")
+            if not (root / "raw").is_dir():
+                if cmd_demo(root):                          # the folder holds something else: never written into
+                    return None
+            elif not (root / "references").is_dir():      # a demo written by an earlier version: add its spectra
+                from aurora.core.testdata import write_demo_extras
+                write_demo_extras(root)
+            return root
+
+        def written(path: Path | None) -> None:
+            if path is None:
                 self.statusBar().showMessage(f"the demo beamtime needs a new or empty folder: {root} is not empty",
                                              15000)
                 return
-        elif not (root / "references").is_dir():          # a demo written by an earlier version: add its spectra
-            from aurora.core.testdata import write_demo_extras
-            write_demo_extras(root)
-        self.home.open_path(root)
+            self.home.open_path(path)
+
         self.show_perspective("home")
+        self.jobs.submit("demo", write, on_done=written, label="writing the demo beamtime",
+                         taskbar=self.home.taskbar)
 
     def open_log_folder(self) -> None:
         from aurora.logsetup import log_dir
@@ -886,9 +912,11 @@ class AuroraApplication(QApplication):
 
 
 def open_sent_path(win: MainWindow, path: Path) -> None:
-    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown."""
+    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown.
+    The discovery runs under 'discover:<n>' (home.open_path), so the one in progress is found by its prefix."""
     win.show_perspective("home")
-    job = win.jobs.job("discover")
+    reading = [k for k in win.jobs.running() if k.startswith("discover:")]
+    job = win.jobs.job(reading[-1]) if reading else None
     if job is not None:
         job.add_callbacks(on_end=lambda _state: win.home.open_path(path))
     else:
@@ -905,7 +933,11 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     app.setApplicationVersion(__version__)
     app.setWindowIcon(app_icon())
     f = QFont()
-    f.setFamilies(["Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", "Arial"])
+    from aurora.app.theme import UI_FAMILIES
+    families = list(UI_FAMILIES)
+    if sys.platform == "darwin":                     # the system font (San Francisco), not Helvetica Neue
+        families.insert(0, QFontDatabase.systemFont(QFontDatabase.GeneralFont).family())
+    f.setFamilies(families)
     f.setPointSize(10)
     app.setFont(f)
     apply_theme(app)                 # Fusion + palette + style sheet of the light or dark scheme (Settings > appearance)
@@ -913,11 +945,13 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     return app
 
 
-def shutdown_app(app: QApplication, *windows: QWidget) -> None:
+def shutdown_app(app: QApplication, *windows: QWidget, wait_s: float = 30.0) -> bool:
     """Destroy the windows and the QApplication in a fixed order. Left to interpreter teardown, PySide6 >= 6.12
     segfaults on exit (module globals and the application die in an arbitrary order). Threads still running (jobs a
-    closing window handed to the application) are waited for first: a running QThread is never destroyed."""
+    closing window handed to the application) are waited for first, at most wait_s in all: a running QThread is never
+    destroyed. False when one still runs then (nothing is destroyed: the caller ends the process, see run())."""
     import gc
+    import logging
     import shiboken6
     from PySide6.QtCore import QThread
     for w in windows:
@@ -929,13 +963,20 @@ def shutdown_app(app: QApplication, *windows: QWidget) -> None:
             w.close()
             w.deleteLater()
     app.processEvents()
+    deadline = time.monotonic() + wait_s
     for t in app.findChildren(QThread):
         if shiboken6.isValid(t) and t.isRunning():
-            t.wait(30000)
+            t.wait(max(0, int((deadline - time.monotonic()) * 1000)))
+    stuck = [getattr(t, "label", "") or t.objectName() for t in app.findChildren(QThread)
+             if shiboken6.isValid(t) and t.isRunning()]
+    if stuck:
+        logging.getLogger("aurora.app").warning("still running %.0f s after the window closed: %s", wait_s, stuck)
+        return False
     app.processEvents()
     gc.collect()
     app.processEvents()
     shiboken6.delete(app)
+    return True
 
 
 def open_at_start(win: MainWindow, project: Path | None = None) -> None:
@@ -971,5 +1012,26 @@ def run(project: Path | None = None) -> int:
     open_at_start(win, project)
     QTimer.singleShot(1500, win, lambda: updates.maybe_check_at_start(win))     # opt-in, once a day
     code = app.exec()
-    shutdown_app(app, win)
+    if not shutdown_app(app, win, wait_s=EXIT_WAIT_S):
+        # a job stuck in one call (a share that does not answer): deleting the application under its running thread
+        # aborted the process (exit 127); end it now with the window's exit code instead
+        end_process(code)
     return code
+
+
+def end_process(code: int) -> None:
+    """End the process at once with `code`, the logs flushed: no interpreter teardown and, on Windows, no DLL detach
+    either (Qt's global destructors would run with the application and a thread still alive)."""
+    import logging
+    logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None:                  # None in a windowed frozen app
+            stream.flush()
+    if sys.platform.startswith("win"):
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k32.TerminateProcess(k32.GetCurrentProcess(), code)
+    os._exit(code)

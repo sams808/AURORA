@@ -13,9 +13,11 @@ constants):
     categorical(n)              up to 20 colours for categorical maps (clusters)
     pc(role) / role_pen(role)   semantic plot colours ('ink', 'fit', 'resid', 'i0', 'good', 'tey', 'spike', 'edge', ...)
     readable(colour, bg)        the colour, lightened or darkened until it reads on bg
+    map_casing(colour)          the dark stroke and the rim under a map outline (it reads on any colour map)
     make_plot / style_plot      create or theme a pyqtgraph widget now and on every change
     swatch_icon, status_brush, status_text, status_icon, set_item_tone, refill_tones, set_tone
     on_theme_changed(owner, fn) call fn(scheme) after every theme change while `owner` lives
+    min_height(widget, base)    a minimum height of px(base), kept through Text size changes (plots)
     export_tokens()             LIGHT plus CURVES on white: figures that leave the screen
     apply_theme(app)            AuroraStyle + palette + style sheet + pyqtgraph defaults, then notify
 """
@@ -23,10 +25,11 @@ from __future__ import annotations
 
 import colorsys
 import math
+import sys
 
 from PySide6.QtCore import QCoreApplication, QObject, QPointF, QRectF, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
-from PySide6.QtWidgets import QProxyStyle, QStyle, QStyleFactory
+from PySide6.QtWidgets import QAbstractSpinBox, QLineEdit, QProxyStyle, QStyle, QStyleFactory
 
 # ----------------------------------------------------------------------------- tokens
 # Ratios (WCAG 2.1) are listed in docs of the 0.4 foundation and checked by tests/test_theme.py.
@@ -69,6 +72,12 @@ PAL = CURVES                                    # alias of CURVES (older imports
 # text drawn in a series colour, >= 4.5:1 on its scheme's plot background
 LABELS_LIGHT = ["#2A6CCA", "#D44303", "#088762", "#B74898", "#9A6C08", "#0A809D"]
 LABELS_DARK = ["#488AE9", "#E95825", "#0FA175", "#CF5EAE", "#BE881D", "#1393B4"]
+# clusters 7-20 (categorical): picked one at a time from an OKLCH grid (L 0.50-0.71, C 0.06-0.22, every 3 degrees of
+# hue) as the colour farthest in OKLab from CURVES and the earlier picks, among those at >= 3:1 on the map and on both
+# plot backgrounds (the cluster map and its spectra share the colours). Nearest pair 0.103 in OKLab (the hues of CURVES
+# at other lightnesses came to 0.074, five of them under 3:1 on the map).
+CATEGORICAL_MORE = ["#AB6FFF", "#706D00", "#C1818B", "#FF5480", "#784AE5", "#985B5A", "#E65AD4", "#007A6B", "#5491FF",
+                    "#8A76B8", "#1D8900", "#D40C59", "#7D9E00", "#82885E"]
 
 # map overlays on the navy map background (both schemes)
 MAP_OVERLAY = {
@@ -76,6 +85,7 @@ MAP_OVERLAY = {
     "erase": "#FF7B7B",          # erase squares, rect- rubber band and erase rectangles
     "roi": "#38E0C2",            # ROI outline
 }
+MAP_CASING_RIM = 10.0            # the rim of a map outline's casing (map_casing): its colour at 10:1 on map_bg
 FOOTPRINTS = {                   # scan footprints on the survey map: colour and its own dash (plus a legend entry)
     "complete": ("#F2A65A", Qt.SolidLine),
     "aborted": ("#FF5555", Qt.DashLine),
@@ -110,8 +120,12 @@ STATUS_TEXT = {"ok": ("✓", "ok"), "warn": ("!", "check"), "bad": ("✗", "bad"
 TONE_ROLE = int(Qt.UserRole) + 0x7A0          # item data role holding the tone of a status / flag cell
 TONE_ICON_ROLE = TONE_ROLE + 1                # ... and whether the cell carries the tone's icon
 
-UI_FONT = "Inter, 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif"
-MONO_FONT = "'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace"
+# fonts: an installed family first on each platform. Inter and JetBrains Mono are not bundled, and a missing family
+# at the head of a list costs a font-alias scan at start (80-250 ms on macOS) for nothing
+UI_FAMILIES = {"win32": ["Segoe UI", "Arial"], "darwin": ["Helvetica Neue", "Arial"]}.get(sys.platform, ["DejaVu Sans"])
+UI_FONT = ", ".join(f"'{f}'" for f in UI_FAMILIES) + ", sans-serif"
+MONO_FONT = {"win32": "Consolas, monospace", "darwin": "Menlo, monospace"}.get(sys.platform,
+                                                                              "'DejaVu Sans Mono', monospace")
 
 
 # ----------------------------------------------------------------------------- colour maths
@@ -159,6 +173,14 @@ def readable(colour: str | None, bg: str | None = None, min_ratio: float = 3.0) 
         if contrast(out, bg) >= min_ratio:
             return out
     return TOKENS["plot_fg"]
+
+
+def map_casing(colour: str) -> list[tuple[str, float]]:
+    """The strokes under a map outline in `colour` (footprints, zones, the grid preview), outermost first, as (colour,
+    px wider than the line): a rim of the same hue lightened to MAP_CASING_RIM on map_bg, then map_bg. The dark stroke
+    reads on the bright and mid tones of a colour map, the rim on its dark tones, so every overlay colour reaches 3:1
+    on every colour of every map colour map (tests/test_theme.py); one dark or light halo alone leaves the mid tones."""
+    return [(readable(colour, TOKENS["map_bg"], MAP_CASING_RIM), 4.0), (TOKENS["map_bg"], 2.0)]
 
 
 def _srgb_to_lin(v: float) -> float:
@@ -279,14 +301,8 @@ def label_for(colour: str | None) -> str:
 
 
 def categorical(n: int) -> list[str]:
-    """n colours for categorical maps (clusters): CURVES first, then the same hues at +15 % and -15 % OKLCH lightness,
-    then at +7.5 %; at most 20 distinct colours, repeated beyond."""
-    out = list(CURVES)
-    for dl in (0.15, -0.15, 0.075):
-        for c in CURVES:
-            L, C, h = _to_oklch(c)
-            out.append(_from_oklch(min(0.97, max(0.12, L + dl)), C, h))
-    out = out[:20]
+    """n colours for categorical maps (clusters): CURVES, then CATEGORICAL_MORE; 20 distinct colours, repeated beyond."""
+    out = list(CURVES) + list(CATEGORICAL_MORE)
     n = max(0, int(n))
     return [out[i % len(out)] for i in range(n)]
 
@@ -353,6 +369,13 @@ def on_theme_changed(owner: QObject, fn) -> None:
     n = notifier()
     if n is not None:
         n.changed.connect(_Hook(owner, fn).fire)
+
+
+def min_height(widget, base: float) -> None:
+    """widget.setMinimumHeight(px(base)) now and after every Text size change: a plot keeps room for its axes, ticks
+    and a readable data area at every text size (a scrolling page then gives it that height)."""
+    widget.setMinimumHeight(px(base))
+    on_theme_changed(widget, lambda _s, w=widget, b=base: w.setMinimumHeight(px(b)))
 
 
 # ----------------------------------------------------------------------------- cells: swatches, status, tones
@@ -498,18 +521,28 @@ def set_tone(widget, tone: str | None) -> None:
 # ----------------------------------------------------------------------------- style (indicators)
 class AuroraStyle(QProxyStyle):
     """Fusion with AURORA's own check boxes, radio buttons and item-view check indicators, drawn from the tokens at
-    paint time: card fill with an edge border, action fill with an on_action tick, a dash for partial, alt fill with
-    a line border when disabled. Checkable list rows therefore always show a box in both schemes."""
+    paint time: card fill with an edge border, action fill with an on_action tick, a dash for partial, and when
+    disabled the fill of a disabled field with the same edge border (>= 3:1, so an unticked disabled box still reads
+    as a box). Checkable list rows therefore always show a box in both schemes.
+
+    No Python pixelMetric: Qt asks for pixel metrics hundreds of thousands of times while it lays out and restyles
+    the window, and each call into Python doubled the time of a theme or text-size switch on a real beamtime. Check
+    boxes and radio buttons take their px(16) size from the style sheet; item-view and menu check marks keep
+    Fusion's size (Qt sizes those rows through the base style, which a style sheet cannot change)."""
 
     def __init__(self):
         super().__init__(QStyleFactory.create("Fusion"))
         self.setObjectName("aurora_style")
 
-    def pixelMetric(self, metric, option=None, widget=None):
-        if metric in (QStyle.PM_IndicatorWidth, QStyle.PM_IndicatorHeight, QStyle.PM_ExclusiveIndicatorWidth,
-                      QStyle.PM_ExclusiveIndicatorHeight):
-            return px(16)
-        return super().pixelMetric(metric, option, widget)
+    def polish(self, arg):
+        out = super().polish(arg)
+        if isinstance(arg, QAbstractSpinBox):
+            # the style sheet cannot pad a spin box's own line edit: its value sat on the border, where a line edit
+            # has its 1 px border and 8 px padding; the same 9 px inset here
+            edit = arg.findChild(QLineEdit)
+            if edit is not None:
+                edit.setTextMargins(9, 0, 0, 0)            # the padding is not scaled with Text size either
+        return out
 
     def drawPrimitive(self, element, option, painter, widget=None):
         if element in (QStyle.PE_IndicatorCheckBox, QStyle.PE_IndicatorItemViewItemCheck):
@@ -534,7 +567,7 @@ class AuroraStyle(QProxyStyle):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         if not enabled:
-            fill, border, mark = t["alt"], t["line"], t["disabled"]
+            fill, border, mark = t["action_disabled_bg"], t["edge"], t["disabled"]
         elif on or partial:
             fill, border, mark = t["action"], t["action"], t["on_action"]
         else:
@@ -571,7 +604,7 @@ class AuroraStyle(QProxyStyle):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         if not enabled:
-            fill, border, mark = t["alt"], t["line"], t["disabled"]
+            fill, border, mark = t["action_disabled_bg"], t["edge"], t["disabled"]
         elif on:
             fill, border, mark = t["action"], t["action"], t["on_action"]
         else:
@@ -715,12 +748,13 @@ QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabl
 QComboBox QAbstractItemView {{ background: {t['card']}; color: {t['ink']}; border: 1px solid {t['edge']}; border-radius: 0;
     selection-background-color: {t['select']}; selection-color: {t['select_fg']}; }}
 QCheckBox, QRadioButton {{ color: {t['ink']}; spacing: 6px; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width: {px_(16)}; height: {px_(16)}; }}
 QCheckBox:disabled, QRadioButton:disabled {{ color: {t['disabled']}; }}
 QSpinBox, QDoubleSpinBox {{ padding-right: 20px; }}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 18px;
-    border-left: 1px solid {t['line']}; border-top-right-radius: 8px; background: {t['alt']}; }}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
-    border-left: 1px solid {t['line']}; border-bottom-right-radius: 8px; background: {t['alt']}; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: padding; subcontrol-position: top right; width: 18px;
+    border-left: 1px solid {t['line']}; border-top-right-radius: 7px; background: {t['alt']}; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: padding; subcontrol-position: bottom right;
+    width: 18px; border-left: 1px solid {t['line']}; border-bottom-right-radius: 7px; background: {t['alt']}; }}
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover,
 QDoubleSpinBox::down-button:hover {{ background: {t['select']}; }}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
@@ -911,10 +945,15 @@ def apply_theme(app=None, appearance: str | None = None, text_size: str | None =
     appearance = appearance or get("appearance")
     size_key = text_size or get("text_size")
     _STATE["applying"] = True                   # the colour-scheme signals raised here are not OS changes
+    wait = isinstance(app, QGuiApplication)
+    if wait:                                    # restyling every widget of a full window takes seconds
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
     try:
         return _apply(app, appearance, size_key)
     finally:
         _STATE["applying"] = False
+        if wait:
+            QGuiApplication.restoreOverrideCursor()
 
 
 def _apply(app, appearance: str, size_key: str) -> str:

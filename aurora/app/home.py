@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import os
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -68,21 +69,51 @@ def clear_recent() -> None:
     s.sync()
 
 
+POLL_S = 0.1                                      # how often a job waiting for a share checks for Cancel
+
+
+def _asked(fn) -> tuple[threading.Thread, dict]:
+    """fn() in a daemon thread: {'value': ...} or {'error': ...} once it answers. One look at a share that does not
+    answer (a lab NAS off VPN) blocks for about 20 s and cannot be interrupted, so the job that waits for it keeps
+    checking for Cancel, and a closing window never waits for the call: the thread is left to end on its own."""
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["value"] = fn()
+        except Exception as err:                      # noqa: BLE001  handed to the job
+            box["error"] = err
+    t = threading.Thread(target=run, name="aurora-path-check", daemon=True)
+    t.start()
+    return t, box
+
+
 def check_paths(paths: list[str], progress) -> dict[str, bool]:
     """{path: found} for the recent projects (a folder, or a scan's .h5 file). Runs in a job: an unreachable share
-    may take long to answer, and the GUI thread never waits for it."""
-    out = {}
-    for i, p in enumerate(paths):
+    may take long to answer, and the GUI thread never waits for it. The paths are looked at together, and progress
+    (which raises Cancelled once the job is cancelled) is called while they answer."""
+    asked = {p: _asked(lambda p=p: os.path.isdir(p) or (p.lower().endswith(".h5") and os.path.isfile(p)))
+             for p in paths}
+    for i, (p, (t, _box)) in enumerate(asked.items()):
         progress(i, len(paths), p)
-        try:
-            out[p] = os.path.isdir(p) or (p.lower().endswith(".h5") and os.path.isfile(p))
-        except OSError:
-            out[p] = False
-    return out
+        while t.is_alive():
+            t.join(POLL_S)
+            progress(i, len(paths), p)
+    return {p: bool(box.get("value")) for p, (_t, box) in asked.items()}
 
 
 def discover(path: Path, progress) -> tuple[Project, overview.ProjectFacts]:
-    """The discovery job: the project and the files found next to it (sample sheet)."""
+    """The discovery job: the project and the files found next to it (sample sheet). The path is looked at first in
+    a thread of its own (see _asked), so Cancel and a closing window never wait for a share that does not answer."""
+    path = Path(path)
+    t, box = _asked(lambda: path.is_dir() or path.is_file())
+    while t.is_alive():
+        t.join(POLL_S)
+        progress(0, 0, f"reading {path}")
+    if "error" in box:
+        raise box["error"]
+    if not box.get("value"):
+        raise FileNotFoundError(f"{path}: no such folder or file, or the share that holds it does not answer")
     project = Project.discover(path, progress=progress)
     return project, overview.project_facts(project)
 
@@ -269,6 +300,7 @@ class HomePerspective(QWidget):
         self._generation = 0                          # +1 per project shown: a map check of an earlier one is dropped
         self.can_leave = None                         # fn(new project) -> bool, asked before another project replaces
         #                                               the open one (the window: zone edits that could not be saved)
+        self._request = 0                             # +1 per open_path: the result of a superseded open is dropped
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -312,11 +344,13 @@ class HomePerspective(QWidget):
         self.tree.setAccessibleName("days, holders and scans of the project")
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.tree.header().resizeSection(0, 360)
-        for i in range(1, len(COLS) - 1):
+        # every column in view at 1200 px: the Scan column takes the width the others leave and elides long names
+        # in the middle (the full name is its tooltip); a fixed 360 px pushed Energies, Points and Flags off-screen
+        self.tree.setTextElideMode(Qt.ElideMiddle)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        for i in range(1, len(COLS)):
             self.tree.header().setSectionResizeMode(i, QHeaderView.ResizeToContents)
-        self.tree.header().setStretchLastSection(True)
         self.tree.currentItemChanged.connect(self._on_select)
         self.tree.itemDoubleClicked.connect(self._activated)
         left.body.addWidget(self.tree, 1)
@@ -359,8 +393,19 @@ class HomePerspective(QWidget):
         self.update_actions()
         QTimer.singleShot(0, self, self.refresh_recent)          # once the window is up: which recent ones exist
 
+    def reading(self) -> bool:
+        """An open (a discovery job) is in progress."""
+        return any(k.startswith("discover:") for k in jobs.of(self).running())
+
+    def tab_after(self, first: QWidget) -> None:
+        """The welcome card's buttons and the recent list right after `first` in the Tab order: with no project open
+        the first Tab lands on Open project…, not after eight other stops. Hidden (a project open), they are skipped."""
+        chain = [first, *self.empty_state.buttons, self.recent_list]
+        for a, b in zip(chain, chain[1:]):
+            QWidget.setTabOrder(a, b)
+
     def update_actions(self) -> None:
-        busy = jobs.of(self).job("discover") is not None
+        busy = self.reading()
         set_enabled(self.reload_btn, self.project is not None and not busy, "open a project first")
         self.all_days_btn.setVisible(self.project is not None and bool(self.project.days_left_out) and not self._failed)
         self.all_days_btn.setEnabled(not busy)
@@ -417,10 +462,15 @@ class HomePerspective(QWidget):
         folder's project). The one entry point of Open…, Reload, Retry, the recent projects, the demo, a folder
         dropped on the window, the command-line folder and the last project at start. The path is only looked at in
         the discovery job, so an unreachable share never blocks the window.
-        quiet: a failure is a calm note in the path line (the last project at start), not the failure panel."""
+        quiet: a failure is a calm note in the path line (the last project at start), not the failure panel.
+        A new request supersedes one still in progress: that one is cancelled and its late result dropped (a share
+        that does not answer can hold a discovery for 20 s in one call, and the new path must not wait for it)."""
         mgr = jobs.of(self)
-        if mgr.job("discover") is not None:
-            return
+        for key in mgr.running():
+            if key.startswith("discover:"):
+                mgr.cancel(key)
+        self._request += 1
+        req = self._request
         path = Path(path)
         self._quiet = quiet
         self._last_path = path
@@ -428,7 +478,9 @@ class HomePerspective(QWidget):
         self.open_btn.setEnabled(False)
         self._opening = path.name or str(path)
         self.opening_state.set_content(f"Reading {self._opening} …")
-        job = mgr.submit("discover", lambda cb: discover(path, cb), on_done=self._discovered, on_failed=self._on_failed,
+        job = mgr.submit(f"discover:{req}", lambda cb: discover(path, cb),
+                         on_done=lambda r: req == self._request and self._discovered(r),
+                         on_failed=lambda t: req == self._request and self._on_failed(t),
                          on_end=lambda _s: self._open_ended(), label=f"reading {path.name}", taskbar=self.taskbar,
                          report=False)
         job.progressed.connect(self._opening_progress)
@@ -468,8 +520,9 @@ class HomePerspective(QWidget):
                                              f"Reading {self._opening} …")
 
     def _open_ended(self) -> None:
-        self.open_btn.setEnabled(True)
-        self._opening = ""
+        self.open_btn.setEnabled(not self.reading())
+        if not self.reading():
+            self._opening = ""
         self.update_actions()
         self.opening_changed.emit("")
 
@@ -675,6 +728,7 @@ class HomePerspective(QWidget):
         it = QTreeWidgetItem([s.name, when, s.kind, edge_words(s.edge_text), s.status.replace("_", " "), s.energy_text,
                               str(s.n_points) if s.n_points else "", ""])
         it.setData(0, Qt.UserRole, s)
+        it.setToolTip(0, s.name)
         if s.edge_text:
             it.setToolTip(3, s.edge_text)
         it.setData(FLAGS_COL, FLAG_ROLE, (list(s.flags), s.error or ""))

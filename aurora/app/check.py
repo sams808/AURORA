@@ -9,7 +9,8 @@ five views, and 'Save ticked → Compare', which writes his file formats (aurora
 Advanced mode adds the checks of sgm_report v2.5 per scan of the holder (count rate, saturation, I0 validity against
 the energy-local reference), the good-I0 picker, the agreement of the four detectors on the selected zone and the I0
 explorer. The results of the checks persist in <project>/.aurora/qc.json (aurora.core.qc.save_qc), are read back when
-the project opens, are re-checked when a scan changes, and reach new zones' defaults through session.add_flag_source.
+the project opens, are re-checked when a scan changes, and reach new zones' defaults through session.add_flag_source
+(and the settings made before them through session.follow_new_flags).
 """
 from __future__ import annotations
 
@@ -30,12 +31,12 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeade
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain_all, header_tips, labelled, say
 from aurora.app.mode import is_advanced, mark_advanced, mark_easy, on_mode_changed
-from aurora.app.session import ALL_HOLDERS, CheckItem, Session
+from aurora.app.session import ALL_HOLDERS, DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS, plural
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, TermLabel, notify_saved, overlay_host, set_enabled,
-                                held_file, set_plot_hint, write_error_text)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, TermLabel, fit_height, notify_saved,
+                                overlay_host, page_scroll, set_enabled, held_file, set_plot_hint, write_error_text)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
@@ -81,6 +82,7 @@ def source_words(source: str) -> str:
 
 
 EASY_DESPIKE_MODE = "coherent"          # new zone x scan settings (I25); files without 'dsm' stay 'classic'
+SEEN_KEY = "check_seen"                 # ui block: queue items whose first verdict was applied (saved with the queue)
 
 
 def science_defaults(scan, st) -> None:
@@ -272,7 +274,7 @@ class CheckPerspective(QWidget):
         sddc.body.addWidget(self.sdd_plot, 1)
         self.spike_note = QLabel(""); self.spike_note.setObjectName("muted"); self.spike_note.setWordWrap(True)
         sddc.body.addWidget(self.spike_note)
-        bottom.addWidget(sddc)
+        bottom.addWidget(fit_height(sddc))             # its wrapped zone/scan/line note keeps its lines at Larger
         i0x = Card("I0 explorer: mesh vs photodiode (any stack, incl. the photodiode tests)",
                    help_anchor="52-the-holder-checks-advanced")
         xrow = QHBoxLayout()
@@ -292,11 +294,7 @@ class CheckPerspective(QWidget):
         split.setSizes([400, 300, 420])
         # Advanced at 1200 x 760 needs more height than the window has: the page scrolls vertically instead of
         # squeezing the cards below their minimum (never sideways)
-        self.page_scroll = QScrollArea()
-        self.page_scroll.setWidget(split)
-        self.page_scroll.setWidgetResizable(True)
-        self.page_scroll.setFrameShape(QFrame.NoFrame)
-        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.page_scroll = page_scroll(split)
         self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState("No project open: the quality checks of each holder's scans appear here.",
@@ -419,13 +417,17 @@ class CheckPerspective(QWidget):
         """Read the stored checks (qc.json) and show them without re-running; a background job re-checks the scans
         whose files changed since."""
         self._rates.clear()
-        self._rows, self._row_cache, self._seen, self._probed_holders = [], {}, set(), set()
+        self._rows, self._row_cache, self._probed_holders = [], {}, set()
+        self._seen = set(self.session.ui_items(SEEN_KEY))     # the queue is saved with the session and kept by Reload
         self._load_errors = {}
         try:
             self._results = qc.load_qc(project) if project is not None else {}
         except (OSError, ValueError) as err:
             log.warning("checks of %s not read (%s)", getattr(project, "root", "?"), err)
             self._results = {}
+        self._queue_dirty = True                # rebuilt when the page is shown
+        if self.isVisible():
+            self._refresh_queue()
         if self._results:
             log.info("%d stored checks read from %s", len(self._results), qc.qc_path(project))
             stored, scans = dict(self._results), self._all_scans()
@@ -543,14 +545,16 @@ class CheckPerspective(QWidget):
         n_scans = sum(len(v) for v in holders.values())
 
         def job(cb):
-            total = n_scans * (2 if load else 1) + 1
+            total = (n_scans * (2 if load else 1) + 1) * 100              # per stack: 100 steps of its energies
             res = qc.probe_holders(project, holders, ses.stack_id,
-                                   progress=lambda i, n, m: cb(i, total, m))
+                                   progress=lambda i, n, m: cb(i * 100, total, m))
             if load:
                 for i, s in enumerate(s for v in holders.values() for s in v):
-                    cb(n_scans + 1 + i, total, f"loading {s.name}")
-                    try:
-                        ses.stack(ses.stack_id(s))
+                    base = (n_scans + 1 + i) * 100
+                    cb(base, total, f"loading {s.name}")
+                    try:                                # each energy folder reports: Cancel stops within one
+                        ses.stack(ses.stack_id(s), progress=lambda j, m, t="", b=base: cb(b + int(100 * j / max(m, 1)),
+                                                                                           total, t))
                     except Exception as err:                    # noqa: BLE001  a damaged stack: listed without I0
                         log.warning("%s not loaded for the good-I0 list (%s)", s.name, err)
             return res
@@ -575,11 +579,14 @@ class CheckPerspective(QWidget):
     def _probed(self, results: dict, loaded: bool, project=None) -> None:
         if project is not None and not self._is_open(project):
             return
+        ses = self.session
+        before = {sid: ses.flags_of(scan) for sid in results if (scan := ses.scan_of(sid)) is not None}
         self._results.update(results)
         self._save_results(results, project)
         self._fill_table(); self._fill_i0(); self._update_sdd()
         self.day_label.setText(self._day_text())
         self._row_cache.clear()
+        ses.follow_new_flags(before)        # settings made before these verdicts follow them (unless pinned)
         self._refresh_queue()
         if loaded:
             self.session.touch()        # memberships for the stacks loaded here
@@ -651,8 +658,10 @@ class CheckPerspective(QWidget):
         self.i0_list.clear()
         for c in self._cands:
             tone = "ok" if c.looks_good else "warn"
-            it = QListWidgetItem(f"{c.label}   level {c.level:.3g} · step {100 * c.max_step:.1f} % · rough {100 * c.rough:.1f} % · "
-                                 f"≤0: {c.nonpos}   {status_text(tone)[0]} {'looks good' if c.looks_good else 'check'}")
+            # two lines: the scan and the verdict, then the numbers behind it (one line elided them in the middle)
+            it = QListWidgetItem(f"{c.label}   {status_text(tone)[0]} {'looks good' if c.looks_good else 'check'}\n"
+                                 f"level {c.level:.3g} · step {100 * c.max_step:.1f} % · rough {100 * c.rough:.1f} % · "
+                                 f"≤0: {c.nonpos}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if self.session.zones.good_i0.get(c.sid) else Qt.Unchecked)
             it.setData(Qt.UserRole, c.sid)
@@ -722,9 +731,13 @@ class CheckPerspective(QWidget):
             self.spike_note.setText("")
             set_plot_hint(self.sdd_plot, "select a zone in Reduce and a scan that covers it")
             return
+        st = z.settings[sid]
+        if st.i0_source == "good" and not self.session.ensure_good_i0(self, self._update_sdd, taskbar=self.taskbar):
+            self.sdd_note.setText("reading the good-I0 scans …")       # drawn again when they are in
+            set_plot_hint(self.sdd_plot, "reading the good-I0 scans …")
+            return
         set_plot_hint(self.sdd_plot, None)
         pix = members(z, sd.x, sd.y, sd.pitch)
-        st = z.settings[sid]
         good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
         t = zone_traces(sd, pix, st, good)
         if t is None:
@@ -802,6 +815,9 @@ class CheckPerspective(QWidget):
                                  taskbar=self.taskbar)
             return row
         row.n_total = sd.n_pix
+        if st.i0_source == "good" and not ses.ensure_good_i0(self, self._refresh_queue, taskbar=self.taskbar):
+            row.state = "loading"                         # the good-I0 scans are read in a job, then the row
+            return row
         scan = ses.scan_of(it.sid)
         flags = ses.flags_of(scan) if scan is not None else []
         key = self._row_key(it, zone, st, sd, flags)
@@ -865,6 +881,9 @@ class CheckPerspective(QWidget):
             for r in rows:
                 if r.state == "ready":
                     self._seen.add(r.item)
+            seen = [[it.holder, it.zone_id, it.sid] for it in ses.check_queue if it in self._seen]
+            if seen != (ses.ui_value(SEEN_KEY) or []):          # an empty queue on a fresh project writes nothing
+                ses.set_ui_value(SEEN_KEY, seen)
         finally:
             self._filling = False
         if first_bad:                           # the rows may span holders: one undo step restores every one
@@ -1213,6 +1232,10 @@ class CheckPerspective(QWidget):
             self.queue_note.setText(READ_ONLY_NOTE.format(why=self.saving_blocked()))
             self.update_actions()
             return
+        if any(r.settings.i0_source == "good" for r in ticked) \
+                and not ses.ensure_good_i0(self, self.save_ticked, taskbar=self.taskbar):
+            self.queue_note.setText("reading the good-I0 scans first: the spectra are saved once they are in")
+            return
         bad = [r for r in ticked if r.level == "bad"]
         good = [r for r in ticked if r.level != "bad"]
 
@@ -1245,6 +1268,10 @@ class CheckPerspective(QWidget):
             if ans == "no":
                 plan = [x for x in plan if not any(p.exists() for p in x[3])]
         notes = [f"'{r.zone.label}' ({self._scan_text(r.item.sid)}) has a problem and was not saved" for r in bad]
+        unnamed = [lab for lab in dict.fromkeys(x[0].zone.label for x in plan) if DEFAULT_LABEL.match(lab)]
+        if unnamed:
+            notes.append(", ".join(f"'{lab}'" for lab in unnamed) + " saved under the default name: name the sample in "
+                         "Reduce's sample box")
         if not plan:
             self.queue_note.setText("; ".join(notes) or "nothing to save")
             return

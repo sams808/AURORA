@@ -8,15 +8,16 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, QUrl, Qt
-from PySide6.QtGui import (QColor, QDesktopServices, QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat,
-                           QTextCursor, QTextDocument, QTextFormat, QTextFrameFormat, QTextImageFormat, QTextLength,
-                           QTextTableFormat)
+from PySide6.QtGui import (QColor, QDesktopServices, QFontDatabase, QKeySequence, QShortcut, QTextBlockFormat,
+                           QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QTextFrameFormat, QTextImageFormat,
+                           QTextLength, QTextTableFormat)
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTextBrowser, QVBoxLayout, QWidget)
 
 from aurora import APP_NAME, resources_dir
 from aurora.app.shortcuts import native_text
-from aurora.app.theme import TOKENS, on_theme_changed
+from aurora.app.theme import TOKENS, on_theme_changed, px
+from aurora.app.widgets import fit_screen
 
 DOCS = [
     ("USER_GUIDE.md", "User guide", "the short guide, one section per perspective"),
@@ -169,8 +170,12 @@ class DocBrowser(QTextBrowser):
         cur = QTextCursor(doc)
         cur.beginEditBlock()
         block = doc.begin()
-        mono = QFont("Consolas")
-        mono.setStyleHint(QFont.Monospace)
+        # code blocks: the platform's fixed font (Consolas on Windows) a little smaller than the body, following Text
+        # size (a bare QFont('Consolas') was a fixed 12 pt, larger than the 13 px body and blind to Text size)
+        mono = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        if sys.platform == "win32":
+            mono.setFamilies(["Consolas", mono.family()])
+        mono.setPixelSize(px(12))
         while block.isValid():
             bf = block.blockFormat()
             level = bf.headingLevel()
@@ -191,6 +196,7 @@ class DocBrowser(QTextBrowser):
                 nb = QTextBlockFormat(bf)
                 nb.setBackground(QColor(t["alt"]))
                 nb.setLeftMargin(12)
+                nb.setNonBreakableLines(False)          # long command lines wrap inside the page (no sideways scroll)
                 QTextCursor(block).setBlockFormat(nb)
                 c = QTextCursor(block)
                 c.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
@@ -198,6 +204,10 @@ class DocBrowser(QTextBrowser):
                 cf.setFont(mono)
                 cf.setForeground(QColor(t["ink"]))
                 c.mergeCharFormat(cf)
+            elif block.textList() is None and QTextCursor(block).currentTable() is None and block.text().strip():
+                nb = QTextBlockFormat(bf)                # a paragraph: a gap before the next one
+                nb.setBottomMargin(max(bf.bottomMargin(), px(8)))
+                QTextCursor(block).setBlockFormat(nb)
             block = block.next()
         # tables: visible borders, padding, header shading
         frames = [doc.rootFrame()]
@@ -258,7 +268,7 @@ class HelpWindow(QMainWindow):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} manuals")
-        self.resize(1080, 820)
+        fit_screen(self, 1080, 820)
         central = QWidget()
         lay = QVBoxLayout(central)
         lay.setContentsMargins(10, 10, 10, 10)
@@ -302,6 +312,7 @@ class HelpWindow(QMainWindow):
         QShortcut(QKeySequence("Shift+Return"), self.find_edit, activated=lambda: self.find(backward=True))
         QShortcut(QKeySequence.Find, self, activated=lambda: (self.find_edit.setFocus(), self.find_edit.selectAll()))
         QShortcut(QKeySequence.Close, self, activated=self.close)
+        QShortcut(QKeySequence.Cancel, self, activated=self.close)      # Esc, as in every other window of the app
         on_theme_changed(self, lambda _s: self._reload())
 
     def show_doc(self, name: str = "USER_GUIDE.md", anchor: str | None = None) -> None:

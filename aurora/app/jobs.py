@@ -3,14 +3,17 @@
     job = window.jobs.submit("stack:" + sid, lambda progress: session.stack(sid, progress=progress),
                              on_done=self._loaded, label="reading the stack", taskbar=self.taskbar)
 
-- One running job per key ('stack:<sid>', 'cube:<sid>', 'survey:<holder>', 'report', 'discover', 'check:<holder>'):
+- One running job per key ('stack:<sid>', 'cube:<sid>', 'survey:<holder>', 'report', 'discover:<n>', 'check:<holder>'):
   a second submit with the same key attaches its callbacks to the running job instead of starting another.
 - fn(progress) runs on a Worker thread; progress(i, n, message) raises Cancelled once the job is cancelled.
 - on_done(result), on_failed(traceback), on_end(state) are called on the GUI thread: the Job is a GUI-thread QObject
   and the worker's signals reach its slots through Qt.QueuedConnection (never a plain function on the worker thread).
-- A failure is logged and shown once in the error dialog (crash.show_error); a cancel opens no dialog.
+- A failure is logged and shown once in the error dialog (crash.show_error); a cancel opens no dialog. An exception in
+  a callback reaches sys.excepthook (one error dialog); only a callback whose Qt owner was deleted is skipped quietly.
 - A running QThread is never destroyed: a finished job waits for its thread, and the window keeps (or hands to the
   application) any job still running when it closes.
+- A finished job drops its result, function and callbacks once they ran; the 16 most recent stay (state, message,
+  error), older ones are deleted with their threads.
 
 jobs.of(widget) is the manager of the widget's main window (window.jobs), or a manager of the widget itself while it
 is not inside one (perspectives built alone in tests).
@@ -23,12 +26,14 @@ import sys
 import time
 from collections import deque
 
+import shiboken6
 from PySide6.QtCore import QCoreApplication, QEventLoop, QObject, Qt, Signal, Slot
 
 from aurora.app.widgets import Worker
 
 log = logging.getLogger("aurora.jobs")
 _GC_HOLDS = [0]            # jobs that asked for the cyclic garbage collector to pause (plain int: no Qt object)
+GONE = ("already deleted", "has been deleted")      # PySide's RuntimeError texts for a deleted Qt object
 
 
 def _hold_gc() -> None:
@@ -136,14 +141,27 @@ class Job(QObject):
         self.ended.emit(state)
         for fn in self._on_end:
             self._call(fn, state)
+        self._let_go()
         self.manager.changed.emit()
+
+    def _let_go(self) -> None:
+        """Once its callbacks ran, a finished job keeps its state, message and error text only: the result, the
+        function (and what it captured: stacks, cubes, the session) and the callbacks would stay alive with it."""
+        self.result = None
+        self.worker._fn = None
+        self._on_done.clear()
+        self._on_failed.clear()
+        self._on_end.clear()
 
     @staticmethod
     def _call(fn, *args) -> None:
         try:
             fn(*args)
-        except RuntimeError as err:             # the callback's Qt owner is gone (a closed window)
-            log.info("job callback skipped: %s", err)
+        except RuntimeError as err:
+            if not any(s in str(err) for s in GONE):    # a bug (numpy, a dict changed during iteration ...): reported
+                sys.excepthook(*sys.exc_info())
+                return
+            log.info("job callback skipped: %s", err)   # the callback's Qt owner is gone (a closed window)
         except Exception:                       # noqa: BLE001  reported like an exception in any slot
             sys.excepthook(*sys.exc_info())
 
@@ -221,6 +239,10 @@ class JobManager(QObject):
     def _release(self, job: Job) -> None:
         if self._jobs.get(job.key) is job:
             del self._jobs[job.key]
+        if len(self._finished) == self._finished.maxlen:
+            old = self._finished.popleft()          # deleted with its thread (which has ended: _finish waited for it)
+            if shiboken6.isValid(old) and not old.worker.isRunning():
+                old.deleteLater()
         self._finished.append(job)
 
 

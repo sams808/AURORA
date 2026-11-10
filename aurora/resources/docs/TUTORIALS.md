@@ -14,7 +14,7 @@ aurora demo C:\Users\<you>\Desktop\aurora_demo
 ```
 
 It contains one day (2026-11-05) with one holder, N5: the survey `010013_holderA_survey`, one complete F K stack
-`092758_alpha_beta_f_k_stack` (5 energies × 12 points), one aborted stack, one photodiode test, fixed ROI bins for
+`092758_alpha_beta_f_k_stack` (41 energies × 12 points), one aborted stack, one photodiode test, fixed ROI bins for
 F Kα and O Kα and a two-row sample sheet (`1 alpha` in Minerals, `2 beta` in Simple Glass). It also holds five reduced
 spectra in John Bussey's layout in `processed/reduced/` (NaF, CaF2, BaY2F8 and two mixtures of them) and three
 reference spectra in `references/`. Every number in it is synthetic and says so in its headers. From an installed copy
@@ -29,8 +29,8 @@ use `aurora-cli.exe demo …` on Windows or `AURORA.app/Contents/MacOS/AURORA de
 2. Home shows one day, one holder (`N5`, named after the survey) and four scans. Read the Status column: `complete`
    for the stack, `aborted` for the short one, `test` for the photodiode test; the survey is the first row.
 3. Select the stack `092758_alpha_beta_f_k_stack` and read its scan analysis summary on the right: *6 s per map*,
-   *5 maps × 6 s = 30 s*, *4 × 3 points, pitch 0.250 × 0.250 mm*, energy regions *680–692 eV in 3 eV steps*, *5 found
-   of 5 planned; every map complete*. Select the aborted stack: *3 found of 5 planned; missing 689.00, 692.00 eV*.
+   *41 maps × 6 s = 4.1 min*, *4 × 3 points, pitch 0.250 × 0.250 mm*, energy regions *660–740 eV in 2 eV steps*, *41 found
+   of 41 planned; every map complete*. Select the aborted stack: *3 found of 5 planned; missing 689.00, 692.00 eV*.
 4. Run the same listing headless to see what the GUI saw:
 
    ```
@@ -50,14 +50,15 @@ headless listing and the tree agree.
 3. Step **3 · Outline the sample**: select **rect+** (or **lasso+** and draw around the area) and drag over the left
    half of the map. The caption reads *Region: 1 rectangle · 6 of 12 pixels of 092758_alpha_beta_f_k_stack*. Pick
    the sample name `1 alpha` (offered from the sample sheet) in the **sample name** box above the map.
-4. Press **Ctrl+Z**: the zone disappears; **Ctrl+Y** brings it back. The top bar shows *unsaved*, then *saved* with
-   the time.
+4. Press **Ctrl+Z**: the label goes back to *zone 1* (**Edit > Undo** names each step); press it again and the zone
+   disappears; **Ctrl+Y** twice brings both back. The top bar shows *unsaved*, then *saved* with the time.
 5. **New sample**, **rect+**, drag over the right half; label `2 beta`. A click inside the first zone selects it
    again.
 6. Step **4 · Send to Check** says in one sentence how the spectrum is made (*The spectrum is the F Kα X-rays counted
-   in the step-2 window, added over the outlined pixels and the four detectors, divided by the beam intensity (I0), …*);
-   its tooltip has the exact settings (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · fluorescence / I0, edge jump = 1
-   · de-spike k = 6 · SDD1-4 · PFY F Kα*). Select zone 1 and press **Add to Check**; do the same for zone 2.
+   in the step-2 window, averaged over the outlined pixels and added over the four detectors, divided by the beam
+   intensity (I0), …*); its tooltip has the exact settings (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as the
+   earlier SGM XAS GUI) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (off by default in the earlier SGM XAS GUI)
+   · SDD1-4 · PFY F Kα*). Select zone 1 and press **Add to Check**; do the same for zone 2.
 7. *Advanced*: switch with **Ctrl+Shift+A**. The cards lose their numbers; the **Zone** card shows **group**, filled
    from the sample sheet when the label was picked (`Minerals` for zone 1, `Simple Glass` for zone 2). The scan card below shows **include** ticked, SDD1–4 ticked,
    line F Kα, fluorescence */ I0, edge jump = 1*, **de-spike** with k = 6, I0 own. Untick **SDD3** and watch the
@@ -68,7 +69,7 @@ headless listing and the tree agree.
    zone of the holder*: zone 2 takes the same detectors. Then **Rules…**: **Add** a rule with **edge** `F K` that
    writes the TEY normalisation */ I0, pre-edge = 0*, look at the table of what would change, **Apply now**, and
    **Edit > Undo**.
-9. Close and reopen AURORA: the zones are back, from `aurora_demo\.aurora\session.json`.
+9. Close and reopen AURORA: the zones are back, from `aurora_demo\.aurora\session.json`, and so is the Check queue.
 
 What you learned: zones are in mm and belong to the holder, settings belong to the zone and scan, every edit can be
 undone, and everything is saved automatically.
@@ -113,9 +114,11 @@ This tutorial uses the demo's `processed/reduced/` folder: NaF, CaF2 and BaY2F8,
 `mixture 1` (0.5 NaF + 0.3 CaF2 + 0.2 BaY2F8) and mixture 2 (0.2 + 0.5 + 0.3), plus the two spectra saved in
 Tutorial 4. Any folder of reduced CSVs works the same way.
 
-1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a fluorescence (sdd-scaled) and an electron
-   yield (TEY) row; Easy mode shows the words, Advanced mode adds the column name. Untick **Show**
-   on the TEY rows (or **Hide all**, then tick the sdd-scaled ones). In Easy mode only John-format files are read;
+1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a fluorescence row (sdd-scaled: the four SDDs
+   each scaled to 0–1, summed, / I0, John Bussey's fluorescence signal) and an electron yield (TEY) row; Easy mode
+   shows the words, Advanced mode adds the column name. The TEY rows start with **Show** unticked, as in John Bussey's
+   GUI, so the plot holds the seven fluorescence traces, the two zones of Tutorial 4 included. In Easy mode only
+   John-format files are read;
    Advanced mode also reads AURORA zone CSVs and sgm_report `_xanes.csv`.
 2. *Advanced*: select every sdd-scaled row, set **pre** and **post** to −20, −5 and 15, 35 in the windows row under the
    table and **Apply**. Norm stays `larch`. In the **E0** column choose `row:NaF [sdd-scaled]` on the other rows: they
@@ -167,7 +170,7 @@ a recognisable edge are listed without one and never filtered out.
 
 1. Report: leave the title and the output folder. Look at **Check before building**: with the two zones of Tutorial 2
    it reads *2 zones · 2 spectra · 0 warnings*. Delete zone 2 in Reduce and come back: it reads *1 zone · 1 spectrum ·
-   1 warning*, with the finding *Sample '2 beta' of N5 (sample sheet) has no zone.* Click **Show** to open N5 in
+   0 warnings · 1 note*, with the finding *Sample '2 beta' of N5 (sample sheet) has no zone.* Click **Show** to open N5 in
    Reduce, or tick **Ignore**; **Ctrl+Z** in Reduce brings zone 2 back.
 2. **Build the report**. Browse the pages with **◀** **▶**, then **Open folder**: `reports/aurora/<date>_<time>_all/`
    holds the PDF, `figures/`, `csv/` (each CSV with its `.json` sidecar), `pages/` and `report_manifest.json`;

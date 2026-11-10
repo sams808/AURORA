@@ -223,6 +223,47 @@ def test_cancel_stops_the_mcr_job(qapp, error_dialogs):
     fit.deleteLater()
 
 
+def test_fit_status_lines_after_cancel_and_failure(qapp, error_dialogs, monkeypatch):
+    """After a Cancel the status line says 'LCF cancelled' / 'MCR-ALS cancelled', after a failure the short error;
+    before, it kept 'fitting …' and 'MCR-ALS on 30 spectra …' for good (threads-10)."""
+    from PySide6.QtCore import Qt
+    from aurora.app import fit as fit_mod
+    from aurora.app.library import Library
+    from aurora.app.fit import FitPerspective
+    from aurora.app.jobs import of
+    from aurora.core.compare import Spectrum
+    E = np.linspace(670, 740, 281)
+    lib = Library()
+    rng = np.random.default_rng(9)
+    lib.add_spectra([Spectrum(f"s{i}", "x", E, rng.uniform() * np.interp(E, El, A) + np.interp(E, El, B), f"s{i}")
+                     for i in range(30)], show_signals=("x",), norm="none")
+    for r in lib.requests:
+        r.fit = True
+    fit = FitPerspective(lib)
+    fit.refresh()
+    fit.target.setCurrentIndex(0)
+    for i in range(fit.components.count()):
+        fit.components.item(i).setCheckState(Qt.Checked if 0 < i < 4 else Qt.Unchecked)
+    fit.bootstrap.setValue(100000)
+    job = fit.run_lcf()
+    assert job is not None and fit.lcf_info.text() == "fitting …"
+    job.cancel()
+    assert of(fit).wait_idle(30000) and job.state == "cancelled" and fit.lcf_info.text() == "LCF cancelled"
+    fit.max_iter.setValue(5000)
+    fit.tol.setValue(0.0)
+    job = fit.run_mcr()
+    job.cancel()
+    assert of(fit).wait_idle(30000) and fit.mcr_status.text() == "MCR-ALS cancelled" and not error_dialogs
+
+    def boom(*_a, **_k):
+        raise ZeroDivisionError("no spectra left")
+    monkeypatch.setattr(fit_mod, "mcr_als", boom)
+    fit.run_mcr()
+    assert of(fit).wait_idle(30000)
+    assert fit.mcr_status.text() == "MCR-ALS failed: ZeroDivisionError: no spectra left" and len(error_dialogs) == 1
+    fit.deleteLater()
+
+
 def test_fit_range_defaults_to_the_compare_x_range(qapp, tmp_path):
     from demo_window import build_demo_window, pump
     win = build_demo_window(qapp, tmp_path)

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
@@ -20,11 +20,14 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBo
 from aurora.app import mode, nav
 from aurora.app.help_text import HELP, explain, header_tips, labelled, say
 from aurora.app.library import Library
-from aurora.app.mode import mark_advanced, mark_advanced_column, on_mode_changed
-from aurora.app.theme import CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, on_theme_changed, role_pen, set_tone, swatch_icon
+from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_column, mark_easy, on_mode_changed
+from aurora.app.shortcuts import native_text
+from aurora.app.theme import (CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, min_height, on_theme_changed,
+                              role_pen, set_tone, swatch_icon)
 from aurora.app.vocab import edge_words, plural, signal_label, unit_suffix
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path, guarded_write,
-                                notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path,
+                                fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair, remember_dir,
+                                set_enabled, set_plot_hint)
 from aurora.core.compare import (E0_MODE_TEXT, E0_MODES, NORMS, derivative, difference, export_wide_csv,
                                  legacy_auto_windows, local_peaks, sidecar_path, stack_offsets)
 
@@ -40,14 +43,21 @@ BOOL_COLS = (COL["show"], COL["fit"], COL["flatten"], COL["diag"])
 EASY_COLS = (COL["show"], COL["fit"], COL["label"], COL["signal"], COL["shift"], COL["colour"])
 ADVANCED_COLS = tuple(i for i in range(len(COLUMNS)) if i not in EASY_COLS)
 LABEL_MIN_PX = 170                  # the Label column in Advanced: at least this wide, the table scrolls sideways
-EMPTY_TEXT = {   # Advanced?
-    False: "No spectra here yet. Save spectra in Check (Save ticked → Compare), or add a folder of saved spectra.",
-    True: "The library is empty: add saved spectra, references, or send a zone's traces from Reduce.",
-}
 EASY_PRE, EASY_POST = tuple(mode.EASY_DEFAULTS["compare"]["pre"]), tuple(mode.EASY_DEFAULTS["compare"]["post"])   # eV from E0
 EASY_E0_WORDS = {"deriv": "where the spectrum rises fastest", "half": "where the spectrum reaches half of its edge step",
                  "table": "the table value of the edge", "fixed": "a value typed in Advanced mode"}
 AUTO_PRE, AUTO_POST = "auto 15 %", "auto 20 %"
+# the empty library's sentence and the folder dialog's title, by mode (Easy names only what Easy can do)
+EMPTY_TEXT = {False: "No spectra here yet. Save spectra in Check (Save ticked → Compare), or add a folder of saved "
+                     "spectra.",
+              True: "The library is empty: add the spectra saved by Check, pick references, or send a zone from Reduce."}
+# the words of a row's field that differs from the Easy defaults ('advanced settings in use' in Easy mode)
+ROW_WORDS = {"norm": lambda r: f"Norm {r.norm}", "pre": lambda r: f"pre {r.pre[0]:g}..{r.pre[1]:g} eV",
+             "post": lambda r: f"post {r.post[0]:g}..{r.post[1]:g} eV",
+             "flatten": lambda r: "Flatten " + ("on" if r.flatten else "off"), "e0_mode": lambda r: f"E0 {r.e0_mode}",
+             "scale": lambda r: f"Scale {r.scale:g}", "e0_smooth": lambda r: f"E0 derivative smoothing {r.e0_smooth:g} eV"}
+FOLDER_TITLE = {False: "Folder of saved spectra (*_full_reduced.csv, *_absorption.csv)",
+                True: "Folder of saved spectra (*_full_reduced.csv, *_absorption.csv, *_xanes.csv, AURORA zone CSVs)"}
 
 
 def pick_colour(parent: QWidget, initial: str, title: str) -> str | None:
@@ -63,6 +73,32 @@ def pick_colour(parent: QWidget, initial: str, title: str) -> str | None:
 def colour_name(c: str) -> str:
     c = (c or "").upper()
     return CURVE_NAMES[CURVES.index(c)] if c in CURVES else c
+
+
+def easy_norm_text() -> str:
+    """Easy mode's read-only line under the table: the fixed normalisation, and where John Bussey's GUI differed."""
+    from aurora.app.mode import EASY_DEFAULTS, JOHN_DEFAULTS
+    d, j = EASY_DEFAULTS["compare"], JOHN_DEFAULTS["compare"]
+    w = lambda p: f"{p[0]:+g}…{p[1]:+g}".replace("-", "−")                # noqa: E731
+    # Easy-visible: plain words with the expert term in parentheses, no person name (plain spec R2, R5)
+    return (f"Each spectrum is scaled the standard way (normalisation, larch): its levels {w(d['pre'])} eV before and "
+            f"{w(d['post'])} eV after the edge position (E0)" + (", flattened" if d["flatten"] else "")
+            + f" (AURORA's defaults; the earlier SGM XAS GUI used {w(j['pre'])} and {w(j['post'])} eV) · a file's "
+            "electron-yield (TEY) row starts hidden, as in the earlier GUI")
+
+
+def failed_text(failed) -> str:
+    """The status of rows that could not be normalised: each row with its signal, energy range and reason, and what
+    to do in the mode in force (Easy has no window controls)."""
+    parts = []
+    for t in failed:
+        fin = np.isfinite(t.E) & np.isfinite(t.s.y)
+        rng = f"{t.E[fin].min():.0f}–{t.E[fin].max():.0f} eV" if fin.any() else "no finite point"
+        why = (t.nr.note or "").split(": adjust")[0]
+        parts.append(f"{t.r.key} ({rng}{'; ' + why if why else ''})")
+    how = ("set Pre / Post (eV from E0) on these rows, or untick Show" if is_advanced() else
+           native_text("switch to Advanced mode (Ctrl+Shift+A) to set the windows, or untick Show"))
+    return f"could not normalise {', '.join(parts)}: {how}"
 
 
 class _ComboDelegate(QStyledItemDelegate):
@@ -135,13 +171,16 @@ class ComparePerspective(QWidget):
         h1 = QLabel("Compare"); h1.setObjectName("h1")
         self.subtitle = sub = ElidedLabel(say("compare.subtitle"), Qt.ElideRight); sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
+        head_box = QWidget()                            # the buttons wrap onto a second line at a large Text size
+        head_row = FlowLayout(head_box, spacing=6)
+        head.addWidget(head_box)
         self.head_buttons: dict[str, QPushButton] = {}
         for text, fn, key in (("Add saved spectra…", self._add_folder, "add_folder"), ("Add CSV…", self._add_csv, "add_csv"),
                               ("References…", self._references, "references"),
                               ("Save config…", self._save_config, "save_config"),
                               ("Load config…", self._load_config, "load_config"),
                               ("Figure size…", self._figure_options, "figure_size"), ("Export…", self._export, "export")):
-            b = QPushButton(text); b.clicked.connect(fn); head.addWidget(b)
+            b = QPushButton(text); b.clicked.connect(fn); head_row.addWidget(b)
             explain(b, f"compare.{key}")
             self.head_buttons[text] = b
         self.export_btn = self.head_buttons["Export…"]
@@ -174,6 +213,17 @@ class ComparePerspective(QWidget):
                                        self.default_shift)
         ops.addWidget(self.default_shift_pair)
         left.body.addWidget(ops_box)
+        # Easy: the rows whose hidden columns were set in Advanced mode (or by a loaded configuration) say so
+        self.easy_chip_box = QWidget()
+        cl = QHBoxLayout(self.easy_chip_box); cl.setContentsMargins(0, 0, 0, 0); cl.setSpacing(6)
+        self.easy_chip = Chip("advanced settings in use", "warn")
+        self.easy_chip.setAccessibleName("advanced settings in use")
+        self.easy_reset_btn = QPushButton("Reset to Easy defaults")
+        self.easy_reset_btn.clicked.connect(self.reset_to_easy)
+        explain(self.easy_reset_btn, "compare.reset_easy")
+        cl.addWidget(self.easy_chip); cl.addWidget(self.easy_reset_btn)
+        self.easy_chip_box.hide()
+        left.header.addWidget(self.easy_chip_box)
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.setAccessibleName("library of spectra")
@@ -264,14 +314,21 @@ class ComparePerspective(QWidget):
         pc.body.addWidget(opts_box)
         self.plot = make_plot(x="incident energy (eV)", y="normalised, offset")
         self.plot.getViewBox().disableAutoRange()
+        self._trace_labels: list[tuple] = []           # (TextItem, energy, value): where each label belongs
+        self.plot.getViewBox().sigResized.connect(self._spread_labels)
+        self.plot.getViewBox().sigRangeChanged.connect(self._spread_labels)
         pc.body.addWidget(self.plot, 1)
+        min_height(self.plot, 150)
         self.status = QLabel(""); self.status.setObjectName("muted"); self.status.setWordWrap(True)
         pc.body.addWidget(self.status)
+        self.easy_note = QLabel(easy_norm_text()); self.easy_note.setObjectName("muted"); self.easy_note.setWordWrap(True)
+        pc.body.addWidget(self.easy_note)               # Easy: the fixed normalisation and how John Bussey's differed
         right.addWidget(pc)
         self.diag_card = dc = Card(say("compare.diag_title"), help_anchor="64-diagnostics-and-export")
         self.diag = make_plot(x="incident energy (eV)", y="raw signal", legend="inside")
         self.diag.getViewBox().disableAutoRange()
         dc.body.addWidget(self.diag, 1)
+        min_height(self.diag, 175)                      # a title, a legend and the axes over a readable data area
         self.diag_note = QLabel(""); self.diag_note.setObjectName("muted"); self.diag_note.setWordWrap(True)
         dc.body.addWidget(self.diag_note)
         self.peaks_label = QLabel(""); self.peaks_label.setObjectName("muted"); self.peaks_label.setWordWrap(True)
@@ -280,17 +337,20 @@ class ComparePerspective(QWidget):
         right.setSizes([560, 260])
         right.setStretchFactor(0, 3)
         right.setStretchFactor(1, 1)
-        dc.setMinimumHeight(200)
+        fit_height(pc); fit_height(dc)
         self.diag_card = dc
         split.addWidget(right)
         split.setStretchFactor(0, 2)
         split.setStretchFactor(1, 3)
         split.setSizes([600, 900])
         self.split = split
-        self.body = overlay_host(split)
+        # at 1200 x 760 or a larger Text size the cards need more height than the window has: the page scrolls
+        # vertically instead of squeezing the plots below their minimum
+        self.page_scroll = page_scroll(split)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
-        self.empty_state = EmptyState(EMPTY_TEXT[False], [], icon="compare", parent=self.body)
-        self._empty_content()
+        self.empty_state = EmptyState(EMPTY_TEXT[mode.is_advanced()], [], icon="compare", parent=self.body)
+        self._empty_content()                 # its sentence and buttons follow the mode (_mode_texts)
         for w, key in ((self.labels_on, "labels"), (self.signal_in_label, "signal_in_label"), (self.deriv, "deriv"),
                        (self.deriv_smooth, "smooth"), (self.diff_btn, "difference"), (self.show_peaks, "peaks")):
             explain(w, f"compare.{key}")
@@ -311,6 +371,7 @@ class ComparePerspective(QWidget):
         library.changed.connect(self.update_actions)
         library.changed.connect(self._check_missing)
         library.changed.connect(self._draw_diagnostics)
+        library.changed.connect(self._refresh_easy)
         library.restored.connect(self._apply_view)
         on_theme_changed(self, lambda _s: (self._fill_table(), self.replot(), self._draw_diagnostics(), self._retone()))
         # Easy mode: John Bussey's Compare (saved spectra, show / fit / label / signal / shift / colour, x range, export)
@@ -319,8 +380,7 @@ class ComparePerspective(QWidget):
                       o["Rename"], o["Duplicate"], self.default_shift_pair, self.range_row, *self.plot_opts,
                       *self.peaks_row)
         mark_advanced_column(self.table, *ADVANCED_COLS)
-        from aurora.app.mode import mark_easy
-        mark_easy(self.signal_help)
+        mark_easy(self.easy_note, self.signal_help)
         on_mode_changed(self, lambda _adv: self._mode_texts(), call_now=False)
         self._fill_table()
         self.replot()
@@ -345,6 +405,7 @@ class ComparePerspective(QWidget):
     def _mode_texts(self) -> None:
         self._easy_split()
         self._apply_widths()
+        self._refresh_easy()
         self.subtitle.setText(say("compare.subtitle"))
         self.diag_card.set_title(say("compare.diag_title"))
         self._empty_content()
@@ -369,6 +430,26 @@ class ComparePerspective(QWidget):
     def col(self, header: str) -> int:
         """The column index of a header ('Label', 'Fit', ...)."""
         return COLS.index(header)
+
+    # ------------------------------------------------------------------ Easy mode: the chip
+    def _refresh_easy(self) -> None:
+        """Easy mode: the chip 'advanced settings in use' over the library when a row's hidden columns differ from the
+        Easy defaults (Library.easy_differences); its tooltip names the rows and the fields."""
+        diffs = self.lib.easy_differences() if not mode.is_advanced() else {}
+        if diffs:
+            lines = [f"{self.lib.requests[i].key}: " + "; ".join(ROW_WORDS[f](self.lib.requests[i]) for f in fields)
+                     for i, fields in diffs.items()]
+            tip = "\n".join(lines[:12]) + (f"\n... and {plural(len(lines) - 12, 'more row')}" if len(lines) > 12 else "")
+            self.easy_chip.setToolTip(tip)
+            self.easy_reset_btn.setToolTip("Rewrite these fields with the Easy defaults:\n" + tip)
+        self.easy_chip_box.setVisible(bool(diffs))
+
+    def reset_to_easy(self) -> int:
+        """'Reset to Easy defaults': every row's differing hidden columns rewritten (Library.reset_to_easy)."""
+        n = self.lib.reset_to_easy()
+        if n:
+            self.status.setText(f"{plural(n, 'field')} back to the Easy defaults")
+        return n
 
     # ------------------------------------------------------------------ message line
     def say(self, text: str, tone: str = "warn", locate: bool = False) -> None:
@@ -739,18 +820,17 @@ class ComparePerspective(QWidget):
 
     # ------------------------------------------------------------------ files
     def _add_folder(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Folder of saved spectra (*_full_reduced.csv, *_xanes.csv, AURORA zone CSVs)",
-                                             default_dir("reduced", self.lib))
+        easy = not mode.is_advanced()
+        d = QFileDialog.getExistingDirectory(self, FOLDER_TITLE[not easy], default_dir("reduced", self.lib))
         if not d:
             return
         remember_dir("reduced", Path(d))
-        easy = not mode.is_advanced()
         n = len(self.lib.add_folder(Path(d), john_only=easy))
         skipped = getattr(self.lib, "last_skipped", [])
         self.status.setText(f"{plural(n, 'trace')} added from {d}" if n else f"no reduced CSVs found in {d}")
         if easy and skipped:
             names = ", ".join(p.name for p in skipped[:3]) + (f" and {len(skipped) - 3} more" if len(skipped) > 3 else "")
-            self.say(f"{plural(len(skipped), 'file')} not in John Bussey's format skipped in Easy mode ({names}); "
+            self.say(f"{plural(len(skipped), 'file')} not in the format Check saves skipped in Easy mode ({names}); "
                      f"Advanced mode reads them", "muted")
 
     def _add_csv(self) -> None:
@@ -830,14 +910,14 @@ class ComparePerspective(QWidget):
 
     def export(self, path: Path, opts=None) -> list[Path]:
         """The wide CSV of the shown traces as processed (the quantity the figure shows: the first derivative when it
-        is ticked, '<label>-d/dE <signal>' columns; without the offsets), the figure at the chosen size (PNG / SVG /
-        PDF, drawn again with matplotlib, offsets and x range as on screen), and the config JSON (+ its sidecar of
-        arrays)."""
+        is ticked, '<label>-d/dE <signal>' columns; without the offsets and without Scale, which is plot only as in
+        John Bussey's GUI), the figure at the chosen size (PNG / SVG / PDF, drawn again with matplotlib, offsets,
+        scales and x range as on screen), and the config JSON (+ its sidecar of arrays)."""
         from aurora.app.figure_export import current_options, export_colour, styled
         from aurora.core.figures import FigureTrace, compare_figure, save_figure
         path = Path(path)
         traces = self.plot_traces()
-        export_wide_csv(path, [(t.r, t.E, t.base) for t in traces], quantity="d/dE " if self.deriv.isChecked() else "")
+        export_wide_csv(path, [(t.r, t.E, t.value) for t in traces], quantity="d/dE " if self.deriv.isChecked() else "")
         out = [path]
         xr = self._xrange()
         o = styled(opts or current_options(), x_range=tuple(xr) if xr else None, ylabel=self._ylabel(units=True),
@@ -888,14 +968,16 @@ class ComparePerspective(QWidget):
         for (r, s, nr), off in zip(items, offsets):
             i = rows.get(id(r), 0)                      # the table row: same colour and dash as its swatch
             E = s.E + r.shift
-            base = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
-            out.append(SimpleNamespace(r=r, s=s, nr=nr, i=i, E=E, base=base, y=base + off, off=off,
+            value = derivative(E, nr.y, int(self.deriv_smooth.value())) if self.deriv.isChecked() else nr.y
+            base = value * r.scale                      # plot only: Fit, Difference and the CSV read the unscaled value
+            out.append(SimpleNamespace(r=r, s=s, nr=nr, i=i, E=E, value=value, base=base, y=base + off, off=off,
                                        colour=r.colour or curve(i),
                                        text=r.label + (f" ({r.signal})" if self.signal_in_label.isChecked() else "")))
         return out
 
     def replot(self) -> None:
         self.plot.clear()
+        self._trace_labels = []
         traces = self.plot_traces()
         if not traces:
             self.status.setText("add saved spectra, or send a zone from Reduce" if mode.is_advanced() else
@@ -905,18 +987,18 @@ class ComparePerspective(QWidget):
             return
         set_plot_hint(self.plot, None)
         xr = self._xrange()
-        xs, ys, failed, peaks_txt, notes = [], [], [], [], []
+        xs, ys, failed, peaks_txt, notes, falling = [], [], [], [], [], []
         drawn = []
         unscaled = []                                   # Easy: rows drawn 0 to 1 because their scaling failed
         easy = not mode.is_advanced()
         for t in traces:
             if not np.isfinite(t.base).any():
                 if not easy:
-                    failed.append(t.r.label); continue
+                    failed.append(t); continue
                 y = np.asarray(t.s.y, float)
                 fin = np.isfinite(y)
                 if not fin.any():
-                    failed.append(t.r.label); continue
+                    failed.append(t); continue
                 lo_, hi_ = float(np.nanmin(y)), float(np.nanmax(y))
                 t.base = (y - lo_) / (hi_ - lo_) if hi_ > lo_ else np.zeros_like(y)
                 t.y = t.base + t.off
@@ -932,6 +1014,8 @@ class ComparePerspective(QWidget):
             self.plot.plot(t.E, t.y, pen=pen, connect="finite")
             if t.nr.e0_note:
                 notes.append(t.r.key)
+            if "step negative" in t.nr.note:                # kept as measured (compare.negative_step_note)
+                falling.append(t.r.key if not easy else f"{t.r.label} ({signal_label(t.r.signal)})")
             sel = np.isfinite(t.y) & ((t.E >= xr[0]) & (t.E <= xr[1]) if xr else True)
             if sel.any():
                 xs += [float(t.E[sel].min()), float(t.E[sel].max())]; ys.append(t.y[sel])
@@ -953,6 +1037,7 @@ class ComparePerspective(QWidget):
                     ti = pg.TextItem(t.text, color=label_for(t.colour), anchor=(1, 1))
                     ti.setPos(xa, float(np.interp(xa, e, v)))
                     self.plot.addItem(ti, ignoreBounds=True)
+                    self._trace_labels.append((ti, xa, float(np.interp(xa, e, v))))
             v = np.concatenate(ys)
             span = float(np.nanmax(v) - np.nanmin(v)) or 1.0
             self.plot.getViewBox().setRange(xRange=(x0, x1), yRange=(float(np.nanmin(v)), float(np.nanmax(v)) + 0.06 * span),
@@ -960,16 +1045,19 @@ class ComparePerspective(QWidget):
         self.plot.setLabel("left", self._ylabel())
         n_ok = len(traces) - len(failed) - len(unscaled)
         if easy:
-            self.status.setText(" ".join(x for x in (f"{plural(n_ok, 'spectrum')} plotted.",
-                                                     self.unscaled_text(unscaled, traces),
-                                                     (f"{', '.join(failed)}: no values to draw." if failed else ""))
-                                         if x))
+            self.status.setText(" ".join(x for x in (
+                f"{plural(n_ok, 'spectrum')} plotted.", self.unscaled_text(unscaled, traces),
+                (f"{', '.join(t.r.label for t in failed)}: no values to draw." if failed else ""),
+                (f"The signal falls across the edge on {', '.join(falling)} instead of rising: kept as measured."
+                 if falling else "")) if x))
         else:
             self.status.setText(f"{plural(n_ok, 'trace')} plotted"
-                                + (f"; normalisation failed (all NaN) for: {', '.join(failed)}: adjust the pre / post "
-                                   "windows" if failed else "")
-                                + (f"; E0 note on {', '.join(notes)} (see the E0 eV cell and the diagnostics)" if notes else ""))
+                                + (f"; {failed_text(failed)}" if failed else "")
+                                + (f"; E0 note on {', '.join(notes)} (see the E0 eV cell and the diagnostics)" if notes else "")
+                                + (f"; the signal falls across the edge on {', '.join(falling)} (negative edge step, kept as "
+                                   "measured)" if falling else ""))
         self.peaks_label.setText("peak maxima (shifted energies): " + " · ".join(peaks_txt) if peaks_txt else "")
+        self._spread_labels()
         self.update_actions()
 
     def unscaled_text(self, unscaled, traces) -> str:
@@ -1006,7 +1094,38 @@ class ComparePerspective(QWidget):
         else:
             why = f"the edge step could not be measured on {their} energies ({lo:.0f}–{hi:.0f} eV)"
         return (f"{who} could not be scaled the standard way: {why}. "
-                f"{'They are' if many else 'It is'} drawn scaled 0 to 1 instead (dashed).")
+                f"{'They are' if many else 'It is'} drawn scaled 0 to 1 instead (dashed). In Advanced mode, Pre / Post "
+                "set the ranges by hand; untick Show to leave a row out.")
+
+    def _spread_labels(self, *_a) -> None:
+        """Trace labels never print over each other: a label that would cover the one below (two traces close
+        together at the right edge, a short plot) moves up by at most one line; when that is not enough it is left
+        out until the plot is taller or zoomed in. Each label starts again from its trace's value on every zoom or
+        resize."""
+        vb = self.plot.getViewBox()
+        items = [(ti, x, y) for ti, x, y in self._trace_labels if ti.scene() is not None]
+        if not items or vb.width() <= 0 or vb.height() <= 0:
+            return
+        top = vb.sceneBoundingRect().top()
+        placed = []                                     # scene rects of the labels shown so far, lowest first
+        for ti, x, y in sorted(items, key=lambda it: -vb.mapViewToScene(QPointF(it[1], it[2])).y()):
+            p = vb.mapViewToScene(QPointF(x, y))
+            w = ti.textItem.boundingRect().width()
+            # its line as laid out (the font's height plus leading), not the text item's margins: with the bare font
+            # height two stacked labels shared a pixel row
+            h = ti.textItem.boundingRect().height() - 2 * ti.textItem.document().documentMargin()
+            bottom = p.y()
+            moved = True
+            while moved:                                # anchor (1, 1): the label's bottom right sits on the point
+                moved = False
+                for q in placed:
+                    if q.left() < p.x() and p.x() - w < q.right() and q.top() < bottom and bottom - h < q.bottom():
+                        bottom, moved = q.top(), True
+            fits = p.y() - bottom <= h and bottom - h >= top - 1
+            ti.setVisible(fits)
+            if fits:
+                placed.append(QRectF(p.x() - w, bottom - h, w, h))
+                ti.setPos(vb.mapSceneToView(QPointF(p.x(), bottom)))
 
     def _difference(self) -> None:
         rows = self.selected_rows()
@@ -1063,16 +1182,10 @@ class ComparePerspective(QWidget):
                                                       nr.note, nr.e0_note) if x))
 
     def _fit_diag(self) -> None:
-        """Easy: the scaling card as tall as its wrapped note (so the note never covers the plot). Advanced keeps the
-        fixed minimum: its plot options need the height above."""
+        """The scaling card as tall as its wrapped note at its width (widgets.fit_height refits it)."""
         import shiboken6
-        if not shiboken6.isValid(self.diag_card):
-            return
-        if mode.is_advanced():
-            self.diag_card.setMinimumHeight(200)
-            return
-        from aurora.app.widgets import fit_to_content
-        fit_to_content(self.diag_card, 200)
+        if shiboken6.isValid(self.diag_card):
+            fit_height(self.diag_card)
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)

@@ -280,6 +280,38 @@ def test_bin_sums_follow_the_roi_bins(fake_project):
     assert meta["bins"]["labels"] == ["O Kα"] and (hc2.cache_dir / f"bins_{meta['bins']['hash']}.npy").exists()
 
 
+@pytest.mark.parametrize("victim, how", [("cube_aux.npz", "truncate"), ("cube_aux.npz", "flip"),
+                                         ("cube_aux.npz", "garbage"), ("cube_sdd2.npy", "truncate"),
+                                         ("xrf_total.npy", "truncate"), ("cube_meta.json", "garbage")])
+def test_a_damaged_cache_file_is_rebuilt_from_raw(fake_project, victim, how):
+    """Any unreadable member of the cache (a cut npz is a BadZipFile, a flipped byte inside a member a CRC error) is a
+    damaged cache: the next load builds the cube again from the raw data, identical, and the load after that is fine."""
+    import gc
+    proj = Project.discover(fake_project)
+    scan = proj.find(testdata.STACK)
+    hc = Hypercube.load(proj, scan)
+    ref = [np.asarray(c).copy() for c in hc.cubes] + [np.asarray(hc.i0).copy(), np.asarray(hc.spec_all).copy()]
+    p = hc.cache_dir / victim
+    hc = None
+    gc.collect()                                                          # unmapped: the file can be rewritten
+    data = p.read_bytes()
+    if how == "truncate":
+        p.write_bytes(data[: len(data) // 2])
+    elif how == "flip":                                                   # inside a stored member: Bad CRC-32
+        b = bytearray(data)
+        for k in range(len(b) // 2, len(b) // 2 + 64):
+            b[k] ^= 0xFF
+        p.write_bytes(bytes(b))
+    else:
+        p.write_bytes(b"\x00garbage" * 10)
+    for _ in range(2):
+        hc = Hypercube.load(proj, scan)
+        got = [np.asarray(c) for c in hc.cubes] + [np.asarray(hc.i0), np.asarray(hc.spec_all)]
+        assert all(np.array_equal(a, b, equal_nan=True) for a, b in zip(got, ref))
+        got = hc = None
+        gc.collect()
+
+
 # ----------------------------------------------------------------------------- exports
 def test_export_4d_equals_the_0_3_export(fake_project, tmp_path):
     proj = Project.discover(fake_project)

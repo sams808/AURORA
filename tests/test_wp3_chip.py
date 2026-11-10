@@ -85,3 +85,27 @@ def test_chip_tooltip_reset_and_switches(qapp, fake_project):
     finally:
         mode.set_advanced(False)
         close(win)
+
+
+def test_a_session_without_a_de_spike_rule_is_not_called_advanced(qapp, fake_project):
+    """A zone from a 0.3 session or the browser zone tool (no 'dsm': the earlier de-spike rule stays in force) shows no
+    chip in Easy mode, since no control in either mode sets the rule; the step-4 line names it and Reset leaves it."""
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        rd, ses = win.reduce, win.session
+        x0, x1, y0, y1 = ses.stack_loaded(sid).bbox
+        rd.map.rect_drawn.emit(x0, x1, y0, y1)
+        pump(qapp)
+        z = ses.zone()
+        d = z.settings[sid].to_json()
+        d.pop("dsm", None)
+        old = ScanSettings.from_json(d)
+        assert old.despike_mode == "classic"
+        with ses.edit("an older session"):
+            z.settings[sid] = old
+        pump(qapp)
+        assert not rd.chip_box.isVisible(), rd.chip.toolTip()
+        assert "de-spike k = 6 (the earlier rule" in rd.step4_line.toolTip()          # the settings line
+        assert rd.reset_to_easy() == 0 and ses.zone(z.id).settings[sid].despike_mode == "classic"
+    finally:
+        close(win)

@@ -170,7 +170,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                  "45-one-card-per-attached-scan"),
     "reduce.i0": ("I0: the scan's own, or the mean of the good scans ticked in Check.", "I0 source",
                   "45-one-card-per-attached-scan"),
-    "reduce.pre": ("Pre-edge window in eV, '680-684' style; blank = the first 15 % of the energies.", "pre-edge window",
+    "reduce.pre": ("Pre-edge window in eV, '680-684' style; blank = the first 15 % of the energies, ending at least 5 eV "
+                   "below E0.", "pre-edge window",
                    "45-one-card-per-attached-scan"),
     "reduce.post": ("Post-edge window in eV, '700-720' style; blank = the last 20 % of the energies.",
                     "post-edge window", "45-one-card-per-attached-scan"),
@@ -185,7 +186,9 @@ HELP: dict[str, tuple[str, str, str]] = {
                            "whose centre lies inside belong to the zone.", "lasso", "42-stack-map"),
     "reduce.tool.polygon+": ("Click the corners of a polygon, double-click to close it (Esc cancels). Pixels whose centre "
                              "lies inside belong to the zone.", "polygon", "42-stack-map"),
-    "reduce.clear": ("Remove the outline of the selected sample to draw it again (the sample and its name stay).",
+    "reduce.clear": ("Remove the outline of the selected sample to draw it again (the sample and its name stay). To "
+                     "take every pixel of the map instead (the earlier SGM XAS GUI's 'Clear (full map)'), drag over the "
+                     "whole map.",
                      "Clear the region", "42-stack-map"),
     "reduce.zones": ("The samples (zones) of the holder: pick one to edit it. A click inside a zone on the map also "
                      "selects it.", "samples of the holder", "43-zones"),
@@ -204,7 +207,7 @@ HELP: dict[str, tuple[str, str, str]] = {
                              "emission spectrum source", "48-xrf-windows"),
     "reduce.window.same": ("One window for all four detectors: dragging one region moves the four. Untick to set each "
                            "detector's window apart.", "same range for all detectors", "48-xrf-windows"),
-    "reduce.window.det": ("The detector whose window the lo / hi boxes edit when the windows are set apart.",
+    "reduce.window.det": ("The detector whose window the from / to boxes edit when the windows are set apart.",
                           "detector edited", "48-xrf-windows"),
     "reduce.window.remember": ("Save these windows as a default rule for the edge of this stack: scans of that edge "
                                "attached later use them (Rules…).", "Remember these windows", "48-xrf-windows"),
@@ -311,6 +314,10 @@ HELP: dict[str, tuple[str, str, str]] = {
                            "(_full_reduced.csv, _absorption.csv). Advanced mode also reads the summary spectra of "
                            "an earlier analysis (_xanes.csv), AURORA zone CSVs and other column files.",
                            "Add saved spectra", "61-loading"),
+    "compare.reset_easy": ("Rewrite the columns Easy mode hides, on every row that differs, with the Easy defaults: Norm "
+                           "larch, pre -20..-5 eV and post +15..+35 eV from E0, flattened, E0 from the derivative, "
+                           "scale 1 (a trace normalised already keeps Norm none).", "Reset to Easy defaults",
+                           "6-compare"),
     "compare.add_csv": ("Add any column file; the energy column is found by name or taken as the first column.",
                         "Add CSV", "61-loading"),
     "compare.references": ("Pick spectra from the reference folder (Settings), filtered by element.", "References",
@@ -355,10 +362,10 @@ HELP: dict[str, tuple[str, str, str]] = {
                          "63-stacked-plot"),
     "compare.col.show": ("Draw this spectrum on the graph.", "Show", "62-the-table"),
     "compare.col.label": ("Editable; Rename and Duplicate act on the selected rows.", "Label", "62-the-table"),
-    "compare.col.signal": ("Which signal of the saved spectrum the row plots: fluorescence (the usual choice: the "
-                           "detectors' counts in the element's window ÷ I0), electron yield (TEY, the surface), "
-                           "inverse yield (IPFY) or one detector. Advanced mode adds the file's column name in "
-                           "parentheses.", "Signal", "62-the-table"),
+    "compare.col.signal": ("Which signal of the saved spectrum the row plots: fluorescence (the usual choice: the four "
+                           "detector signals each scaled to 0–1 (min-max), summed and divided by I0), its plain sum "
+                           "÷ I0, electron yield (TEY, the surface) ÷ I0, inverse yield (IPFY) or one detector. Advanced "
+                           "mode adds the file's column name in parentheses.", "Signal", "62-the-table"),
     "compare.col.shift": ("Moves the curve along the energy axis by this many eV, to correct an energy offset (for "
                           "example between two beamtimes). Leave 0 unless the offset is known.",
                           "Shift eV", "62-the-table"),
@@ -375,7 +382,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.col.flatten": ("Post-edge line flattened to 1.", "Flatten", "62-the-table"),
     "compare.col.spacing": ("Offset after this row in the stacked plot (blank = the common spacing).", "Spacing",
                             "62-the-table"),
-    "compare.col.scale": ("Multiplier of this row in the stacked plot.", "Scale", "62-the-table"),
+    "compare.col.scale": ("Multiplier of this row in the stacked plot and its figure only; Fit, Difference and the CSV "
+                          "use the trace unscaled.", "Scale", "62-the-table"),
     "compare.col.fit": ("Use this spectrum in Fit, as the target or as a reference.", "Fit", "62-the-table"),
     "compare.col.diag": ("The row's raw signal and fitted lines are shown in the diagnostics panel.", "Diag",
                          "62-the-table"),
@@ -442,7 +450,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "fit.n_comp": ("Number of MCR-ALS components.", "components", "72-pca--mcr-als"),
     "fit.max_iter": ("Maximum number of alternating least-squares iterations.", "maximum iterations",
                      "72-pca--mcr-als"),
-    "fit.tol": ("Stop when the relative change of the error falls below this value.", "tolerance on the error change",
+    "fit.tol": ("Stop when the change of the error between two iterations, divided by the error, falls below this "
+                "value (John Bussey's GUI compared the absolute change with 1e-8).", "tolerance on the error change",
                 "72-pca--mcr-als"),
     "fit.clip_neg": ("Set negative values to 0 before the fit.", "clip negative values", "72-pca--mcr-als"),
     "fit.pca": ("Explained variance of the ticked rows over the range.", "Update PCA scree", "72-pca--mcr-als"),
@@ -547,6 +556,9 @@ HELP: dict[str, tuple[str, str, str]] = {
     "report.next": ("Next page of the preview.", "Next page", "93-what-a-build-writes"),
     "report.open_folder": ("Open the folder of the last build.", "Open folder", "93-what-a-build-writes"),
     "report.open_pdf": ("Open the PDF.", "Open PDF", "93-what-a-build-writes"),
+    "report.zoom": ("Size of the page preview: the width of the card, or 100 / 150 / 200 % of the page image "
+                    "(Ctrl+wheel over the page steps through them). The PDF itself is vector: Open PDF for full detail.",
+                    "page preview zoom", "93-what-a-build-writes"),
     "report.preset": ("Final: every holder, Appendix A and B, figures at 600 dpi. Draft: the current holder, no "
                       "Appendix A or B, figures at 110 dpi. The options below can still be changed.", "preset",
                       "91-options"),
