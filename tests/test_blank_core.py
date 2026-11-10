@@ -447,6 +447,7 @@ def test_a_bad_plate_layout_is_a_config_problem_row(tmp_path):
     ("092758_carbon_k_stack", "carbon_k", ("C", "K")),                 # never the empty name
     ("092758_tey_test_sample_o_k_stack", "tey_test_sample", ("O", "K")),
     ("092758_film_fe_l3_fine_stack", "film", ("Fe", "L3")),
+    ("203529_Se-std_se_l3l2_fine1_stack", "Se-std", ("Se", "L3L2")),   # a numbered step word
     ("092758_UO2_u_n45coarse_1_stack", "UO2", ("U", "N45")),
     ("092758_glass_2_stack", "glass_2", None),                         # a sample number is no re-take counter
     ("092758_BM_series_o_k_stack", "BM_series", ("O", "K")),           # BM is no boron M edge
@@ -477,6 +478,11 @@ def test_the_edge_comes_from_the_energies_when_the_name_disagrees():
     assert edge == ("F", "K") and note == "the name says O K (543 eV), the energies cover 680–692 eV: F K used"
     assert resolve_edge(("F", "K"), [680.0, 692.0]) == (("F", "K"), "")
     assert resolve_edge(None, [])[0] is None
+    # a scan above an edge without a name: the beamtime's other scans decide (F K, 3 eV below), else the range (Fe L3)
+    assert resolve_edge(None, [700.0, 730.0]) == (("Fe", "L3"), "edge Fe L3 from the energies (700–730 eV): the name "
+                                                                "states none")
+    edge, note = resolve_edge(None, [700.0, 730.0], {("F", "K"): 40, ("U", "N45"): 3})
+    assert edge == ("F", "K") and "the other scans of this beamtime" in note
     assert pretty_edge(("Fe", "L23")) == "Fe L2,3"
 
 

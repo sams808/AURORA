@@ -37,7 +37,7 @@ SHELL = r"k|l(?:\d(?:,?\d|l\d)?)?|m(?:\d(?:,?\d|m\d)?)?|n(?:\d(?:,?\d)?)?"
 SHELL_DIGIT = r"l\d(?:,?\d|l\d)?|m\d(?:,?\d|m\d)?|n\d(?:,?\d)?"           # the glued form needs a digit (BM is no edge)
 # glued K edges written without a digit (CK, OK, NaK) are read for the light elements whose K edge SGM reaches
 GLUED_K = ("c", "n", "o", "f", "na", "mg", "al", "si")
-GENERIC_WORDS = r"coarse|fine|zone|bigstep|smallstep|tey\d*|pfy\d*|edge\d*|survey|stack"
+GENERIC_WORDS = r"coarse\d*|fine\d*|zone\d*|bigstep|smallstep|tey\d*|pfy\d*|edge\d*|survey|stack"
 
 
 @lru_cache(maxsize=16)
@@ -241,10 +241,11 @@ def edge_for_range(e_min: float, e_max: float, tolerance: float = EDGE_TOLERANCE
     return el, shell
 
 
-def resolve_edge(name_edge: tuple[str, str] | None, energies) -> tuple[tuple[str, str] | None, str]:
+def resolve_edge(name_edge: tuple[str, str] | None, energies, known=None) -> tuple[tuple[str, str] | None, str]:
     """(edge, note) of a stack: the edge its name states when the edge energy lies within its energies ±
-    EDGE_TOLERANCE_EV, else the edge the energies cover (edge_for_range) with a note saying so; the name's edge
-    unchanged when the energies are unknown or cover no edge."""
+    EDGE_TOLERANCE_EV; else an edge the names of the beamtime's other stacks state (`known`: {edge: number of stacks})
+    within that tolerance, the most common first; else the edge the energies cover (edge_for_range); a note says which.
+    The name's edge unchanged when the energies are unknown or near no edge."""
     from aurora.core.lines import edge_energy
     import math
     vals = [float(e) for e in (energies or []) if e is not None and math.isfinite(float(e))]
@@ -255,11 +256,20 @@ def resolve_edge(name_edge: tuple[str, str] | None, energies) -> tuple[tuple[str
         ev = edge_energy(*name_edge)
         if ev is not None and lo - EDGE_TOLERANCE_EV <= ev <= hi + EDGE_TOLERANCE_EV:
             return name_edge, ""
-    guess = edge_for_range(lo, hi)
+    guess, how = None, "the energies"
+    near = []
+    for edge, n in (known or {}).items():
+        ev = edge_energy(*edge)
+        if ev is not None and lo - EDGE_TOLERANCE_EV <= ev <= hi + EDGE_TOLERANCE_EV and edge != name_edge:
+            near.append((-n, 0.0 if lo <= ev <= hi else min(abs(ev - lo), abs(ev - hi)), edge))
+    if near:
+        guess, how = min(near)[2], "the energies and the other scans of this beamtime"
+    if guess is None:
+        guess = edge_for_range(lo, hi)
     if guess is None:
         return name_edge, ""
     if name_edge is None:
-        return guess, f"edge {pretty_edge(guess)} from the energies ({lo:.0f}–{hi:.0f} eV): the name states none"
+        return guess, f"edge {pretty_edge(guess)} from {how} ({lo:.0f}–{hi:.0f} eV): the name states none"
     ev = edge_energy(*name_edge)
     said = f"{pretty_edge(name_edge)} ({ev:.0f} eV)" if ev is not None else pretty_edge(name_edge)
     return guess, f"the name says {said}, the energies cover {lo:.0f}–{hi:.0f} eV: {pretty_edge(guess)} used"

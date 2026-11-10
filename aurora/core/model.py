@@ -130,6 +130,7 @@ class ScanInfo:
     edge_note: str = ""                         # how the edge was read when not from the name ('the name says O K …')
     kind_from_h5: bool = False                  # the kind comes from the .h5 plan_name (the folder name has no suffix)
     override: str = ""                          # 'sample' | 'test': set by hand in the session (Home's scan menu)
+    named_edge: tuple[str, str] | None = None   # the edge the name states (target_edge), before the energies' check
 
     @property
     def edge_text(self) -> str:
@@ -198,8 +199,9 @@ class ScanInfo:
                     info._geometry(*h5io.xy(info.h5))
                 info.planned = list(planned)
                 info.n_planned = len(planned)
-                named = target_edge(info.md.get("scan_name") or "") or target_edge(path.name)
-                info.edge, info.edge_note = resolve_edge(named, info.planned or [e for e, _ in info.energy_dirs])
+                info.named_edge = target_edge(info.md.get("scan_name") or "") or target_edge(path.name)
+                info.edge, info.edge_note = resolve_edge(info.named_edge, info.planned or
+                                                         [e for e, _ in info.energy_dirs])
                 info.restatus(now, words)
             else:
                 info.status = "other"
@@ -453,6 +455,7 @@ class Project:
             for s in scans:
                 s.summary = by_scan.get(s.name, {})
             proj.days.append(day)
+        proj._edges_from_context([s for key in found for s in found[key][1]])
         group_days([found[key] for key in sorted(found)])
         proj._note_layout(nested)
         for day in proj.days:
@@ -494,6 +497,19 @@ class Project:
                                (cfg / PLATE_LAYOUT_FILE, layout_problems), (cfg / NAMING_FILE, naming_problems)):
             if problems:
                 self.config_problems[self.shown(path)] = list(problems)
+
+    def _edges_from_context(self, scans: list[ScanInfo]) -> None:
+        """A stack whose edge came from its energies alone (its name states none, or one the energies do not cover)
+        takes an edge the names of the beamtime's other stacks state when that edge lies within its energies ± 30 eV:
+        a scan 'sample_edge1' over 700–730 eV in a beamtime of F K scans is F K, not Fe L3."""
+        from collections import Counter
+        stacks = [s for s in scans if s.kind == "stack"]
+        known = Counter(s.edge for s in stacks if s.edge is not None and s.named_edge == s.edge and not s.edge_note)
+        if not known:
+            return
+        for s in stacks:
+            if s.edge_note:
+                s.edge, s.edge_note = resolve_edge(s.named_edge, s.planned or [e for e, _ in s.energy_dirs], known)
 
     def _unknown_note(self) -> str:
         unknown = [s for d in self.days for h in d.holders if h.name == UNKNOWN_HOLDER and h.survey is None
