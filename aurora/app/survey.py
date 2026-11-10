@@ -20,9 +20,20 @@ from aurora.app.theme import FOOTPRINTS, MAP_OVERLAY, curve, on_theme_changed, s
 from aurora.app.vocab import det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_path, guarded_write, notify_saved,
                                 overlay_host, pair, remember_dir, set_enabled)
-from aurora.core.model import ScanInfo
+from aurora.core.model import BEFORE_SURVEY, ScanInfo
 
 FOOTPRINT_LABELS = {"complete": "complete", "aborted": "aborted", "in_progress": "in progress", "test": "test"}
+NO_SURVEY_MAP = ("This holder has no survey map: no survey was recorded before these stacks. Reduce works on the "
+                 "stacks directly.")
+NO_SHEET = "No sample sheet: names are typed by hand."
+
+
+def holder_title(h) -> str:
+    """The holder as Survey names it: its name, or 'stacks before the first survey' for the stacks recorded before
+    any survey (the holder 'unknown')."""
+    if h is None:
+        return ""
+    return BEFORE_SURVEY if h.display == BEFORE_SURVEY else f"holder {h.name}"
 
 
 class FootprintLegend(QWidget):
@@ -142,6 +153,21 @@ class SurveyPerspective(QWidget):
         self.sheet_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.sheet_table.setEditTriggers(QTableWidget.NoEditTriggers)
         tc.body.addWidget(self.sheet_table, 1)
+        # without a sheet (or without a row for this holder): one line and the two ways to add one, no empty table
+        self.sheet_note = QLabel("")
+        self.sheet_note.setObjectName("muted")
+        self.sheet_note.setWordWrap(True)
+        tc.body.addWidget(self.sheet_note)
+        self.sheet_actions = QWidget()
+        sa = FlowLayout(self.sheet_actions, spacing=6)
+        self.new_sheet_btn = QPushButton("New sample sheet…")
+        self.new_sheet_btn.clicked.connect(lambda: self._project_files("new_sheet"))
+        self.choose_sheet_btn = QPushButton("Choose sample sheet…")
+        self.choose_sheet_btn.clicked.connect(lambda: self._project_files("choose_sheet"))
+        sa.addWidget(self.new_sheet_btn); sa.addWidget(self.choose_sheet_btn)
+        tc.body.addWidget(self.sheet_actions)
+        self.sheet_note.hide(); self.sheet_actions.hide()
+        tc.installEventFilter(self)
         right.addWidget(tc)
         split.addWidget(right)
         split.setStretchFactor(0, 3); split.setStretchFactor(1, 2)
@@ -154,6 +180,7 @@ class SurveyPerspective(QWidget):
             w.toggled.connect(self.redraw_map)
         self.clip.valueChanged.connect(self.redraw_map)
 
+        self.no_map_state = EmptyState(NO_SURVEY_MAP, [], icon="survey", parent=self.map)
         self.empty_state = EmptyState("No project open: the plate map of each holder appears here.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="survey",
@@ -162,10 +189,12 @@ class SurveyPerspective(QWidget):
                      (self.show_footprints, "survey.footprints"), (self.show_zones, "survey.zones"),
                      (self.import_btn, "survey.import"), (self.export_btn, "survey.export")])
         explain(self.grid_btn, "survey.grid")
+        explain_all([(self.new_sheet_btn, "survey.new_sheet"), (self.choose_sheet_btn, "survey.choose_sheet")])
         session.project_changed.connect(self._project_changed)
         session.holder_changed.connect(self._holder_changed)
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(lambda z: self._highlight_zone())
+        session.sheet_changed.connect(self._fill_sheet)
         on_theme_changed(self, lambda _s: self.redraw_map())
         # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
         mark_advanced(self.options_row, self.import_btn, self.export_btn, self.grid_btn)
@@ -181,15 +210,20 @@ class SurveyPerspective(QWidget):
             self.grid_btn.setChecked(False)
         self.empty_state.set_shown(not has)
         h = self.session.holder()
-        self.zones_card.set_title(f"Zones of holder {h.name}" if h else "Zones of the holder")
-        self.samples_card.set_title(f"Samples on holder {h.name} (sample sheet)" if h else "Samples on the holder (sample sheet)")
+        self.no_map_state.set_shown(has and h is not None and h.survey is None)
+        title = holder_title(h)
+        self.zones_card.set_title(f"Zones of {'the ' if title == BEFORE_SURVEY else ''}{title}" if h else
+                                  "Zones of the holder")
+        self.samples_card.set_title(("Samples (sample sheet)" if title == BEFORE_SURVEY else
+                                     f"Samples on {title} (sample sheet)") if h else "Samples on the holder (sample sheet)")
 
     # ------------------------------------------------------------------ wiring
     def _project_changed(self, project) -> None:
         self.holder_combo.blockSignals(True)
         self.holder_combo.clear()
         for key, (day, h) in self.session.holder_keys.items():
-            self.holder_combo.addItem(f"{h.name} · {day} · {plural(len(h.stacks), 'stack')}", key)
+            name = BEFORE_SURVEY if holder_title(h) == BEFORE_SURVEY else h.name
+            self.holder_combo.addItem(f"{name} · {day} · {plural(len(h.stacks), 'stack')}", key)
         self.holder_combo.blockSignals(False)
         self.update_actions()
 
@@ -224,10 +258,25 @@ class SurveyPerspective(QWidget):
         self._fill_zone_table(); self._fill_sheet(); self._load_sketch()
 
     def _main_line_guess(self) -> str:
-        for s in self.session.stacks_of():
-            if s.summary and s.summary.get("mode", "").startswith("PFY"):
+        """The channel the map opens on: sgm_report's summary mode, else the resonant line of the most common edge of
+        the holder's stacks when the survey has it, else the first fixed line of roi_bins.json, else the total."""
+        from collections import Counter
+        from aurora.core.lines import resonant_line
+        stacks = self.session.stacks_of()
+        for s in stacks:
+            if s.summary and str(s.summary.get("mode", "")).startswith("PFY"):
                 return s.summary["mode"][4:]
-        return "F Kα"
+        channels = list(self._survey.channels) if self._survey is not None else []
+        edges = Counter(s.edge for s in stacks if s.edge)
+        for edge, _n in edges.most_common():
+            line = resonant_line(*edge)
+            if line in channels:
+                return line
+        bins = self.session.project.roi_bins if self.session.project is not None else None
+        for line in (bins.labels if bins is not None else []):
+            if line in channels:
+                return line
+        return "total" if "total" in channels or not channels else channels[0]
 
     # ------------------------------------------------------------------ drawing
     def redraw_map(self) -> None:
@@ -314,11 +363,67 @@ class SurveyPerspective(QWidget):
 
     def _fill_sheet(self) -> None:
         h = self.session.holder()
-        rows = [r for r in self.session.sheet_rows if h and r.plate.strip().lower() == h.name.lower()]
+        rows = self.session.sheet_for(h.name) if h else []
         self.sheet_table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            for c, v in enumerate((row.sample_id, row.group, row.composition, " ".join(x for x in (row.f_k_edge, row.other_edges) if x))):
+            for c, v in enumerate((row.sample_id, row.group, row.composition, row.edges)):
                 self.sheet_table.setItem(r, c, QTableWidgetItem(v))
+        self._sheet_state(h, rows)
+
+    def _sheet_state(self, h, rows) -> None:
+        """No sheet: one line and New / Choose sample sheet…; a sheet without a row for this holder: why, with the
+        holders it names; otherwise the table."""
+        ses = self.session
+        has_sheet = ses.project is not None and bool(ses.sheet_rows)
+        note = ""
+        if ses.project is not None and h is not None and not has_sheet:
+            note = NO_SHEET
+        elif has_sheet and h is not None and not rows:
+            col = ses.sheet_choice.columns.get("holder", "holder")
+            theirs = ses.sheet_choice.holders
+            shown = ", ".join(theirs[:5]) + (" …" if len(theirs) > 5 else "")
+            where = BEFORE_SURVEY if holder_title(h) == BEFORE_SURVEY else f"holder {h.name}"
+            note = (f"The sample sheet lists no sample on {where} (its {col} column names {shown})." if theirs else
+                    f"The sample sheet lists no sample on {where}.")
+        self.sheet_note.setText(note)
+        self.sheet_note.setVisible(bool(note))
+        self.sheet_actions.setVisible(note == NO_SHEET)
+        self.sheet_table.setVisible(not note)
+        self._fit_samples_card()
+
+    def _fit_samples_card(self) -> None:
+        """A samples card with nothing to list takes the height of its line and buttons only (the other cards get the
+        rest); with rows it takes its share again. Recomputed when the card's width changes (the buttons wrap)."""
+        card = self.samples_card
+        if not self.sheet_table.isHidden() or self.sheet_note.isHidden():
+            self.sheet_note.setMinimumHeight(0)
+            self.sheet_actions.setMinimumHeight(0)
+            card.setMinimumHeight(0)
+            card.setMaximumHeight(16777215)
+            return
+        m = card.layout().contentsMargins()
+        w = max(card.width(), 200) - m.left() - m.right()
+        self.sheet_note.setMinimumHeight(self.sheet_note.heightForWidth(w))
+        self.sheet_actions.setMinimumHeight(self.sheet_actions.layout().heightForWidth(w)
+                                            if not self.sheet_actions.isHidden() else 0)
+        card.layout().activate()
+        h = card.minimumSizeHint().height()
+        card.setMinimumHeight(h)
+        card.setMaximumHeight(h)
+
+    def eventFilter(self, obj, event) -> bool:
+        from PySide6.QtCore import QEvent
+        if obj is self.samples_card and event.type() == QEvent.Resize and event.oldSize().width() != event.size().width():
+            self._fit_samples_card()
+        return super().eventFilter(obj, event)
+
+    def _project_files(self, what: str) -> None:
+        """New / Choose sample sheet… of the window's File menu (aurora.app.project_files)."""
+        from aurora.app.project_files import ProjectFiles
+        win = nav.window_of(self)
+        pf = win.findChild(ProjectFiles, "aurora_project_files") if win is not None else None
+        if pf is not None:
+            getattr(pf, what)()
 
     def _load_sketch(self) -> None:
         h = self.session.holder()

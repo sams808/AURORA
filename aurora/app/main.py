@@ -33,7 +33,7 @@ from aurora.app.theme import TOKENS, apply_theme, follow_system, on_theme_change
 from aurora.app.vocab import plural
 from aurora.app import mode as ui_mode
 from aurora.app import shortcuts
-from aurora.app import stack_cache
+from aurora.app import project_files, stack_cache
 
 PERSPECTIVES = [
     ("home", "Home"), ("survey", "Survey"), ("reduce", "Reduce"), ("check", "Check"), ("compare", "Compare"),
@@ -88,7 +88,7 @@ class Crumb(QWidget):
         key = ses.current_holder
         h = ses.holder(key)
         day = ses.holder_day(key) or (ses.project.days[0].date if ses.project.days else "")
-        return [p for p in (ses.project.root.name, day, h.name if h else "") if p]
+        return [p for p in (ses.project.root.name, day, h.display if h else "") if p]
 
     def text(self) -> str:
         parts = self.parts()
@@ -99,7 +99,7 @@ class Crumb(QWidget):
         day, h = self.session.holder_keys[key]
         hz = self.session.zones.holders.get(key)
         n_z = len(hz.zones) if hz else 0
-        return f"{h.name} · {day} · {plural(len(h.stacks), 'stack')} · {plural(n_z, 'zone')}"
+        return f"{h.display} · {day} · {plural(len(h.stacks), 'stack')} · {plural(n_z, 'zone')}"
 
     def refresh(self) -> None:
         parts = self.parts()
@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
         self._menus()
         shortcuts.adopt(self)                  # menu entries the perspectives added before they were inside the window
         stack_cache.install(self)              # File > Re-reduce the stack with the project ROI bins (Advanced, I49)
+        project_files.install(self)            # File > Choose / New sample sheet…, Import SDD calibration…
         self._help = None
         self.setAcceptDrops(True)              # a folder or an .h5 dropped on the window opens it (home.open_path)
         for key in sorted(ADVANCED_PERSPECTIVES):

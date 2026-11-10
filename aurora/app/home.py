@@ -173,6 +173,7 @@ class HomePerspective(QWidget):
     project_opened = Signal(object)
     scan_selected = Signal(object)
     scan_activated = Signal(object)       # double-click: open in Reduce
+    kind_override_requested = Signal(object, str)     # right-click a stack: (scan, 'sample' | 'test' | '' = the rules)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -236,6 +237,8 @@ class HomePerspective(QWidget):
         self.tree.header().setStretchLastSection(True)
         self.tree.currentItemChanged.connect(self._on_select)
         self.tree.itemDoubleClicked.connect(self._activated)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._tree_menu_at)
         left.body.addWidget(self.tree, 1)
         split.addWidget(left)
         self.scans_card = left
@@ -362,6 +365,20 @@ class HomePerspective(QWidget):
     def set_project(self, project: Project) -> None:
         """Show an already discovered project (tests, distcheck)."""
         self._show_project(project, overview.project_facts(project))
+
+    def refresh_facts(self, chosen: str | None = None) -> None:
+        """Read the sample sheet and the configuration rows again (a sheet chosen or written, a fixed line saved, a
+        calibration imported) and show the summary. `chosen`: the session's chosen sheet ('' = none; None reads the
+        session file)."""
+        if self.project is not None:
+            self.facts = overview.project_facts(self.project, chosen)
+            self._render_details()
+
+    def show_again(self) -> None:
+        """Show the open project again after its scans were grouped anew in place (a kind set by hand): the tree, the
+        summary, and the window's session (project_opened)."""
+        if self.project is not None:
+            self._show_project(self.project, overview.project_facts(self.project))
 
     def shutdown(self) -> None:
         """Let running jobs finish before the widget goes away (a QThread destroyed while running aborts Qt)."""
@@ -555,7 +572,8 @@ class HomePerspective(QWidget):
             self.tree.addTopLevelItem(d_item)
             for holder in day.holders:
                 n_ok = len(holder.stacks)
-                h_item = QTreeWidgetItem([f"holder {holder.name}", "", "", "", f"{n_ok} complete {'stack' if n_ok == 1 else 'stacks'}",
+                title = f"holder {holder.name}" + (f" ({holder.display})" if holder.display != holder.name else "")
+                h_item = QTreeWidgetItem([title, "", "", "", f"{n_ok} complete {'stack' if n_ok == 1 else 'stacks'}",
                                           "", "", f"{len(holder.dropped)} dropped" if holder.dropped else ""])
                 d_item.addChild(h_item)
                 for s in holder.scans:
@@ -591,6 +609,29 @@ class HomePerspective(QWidget):
         elif self.project is not None and self._shown is not None:
             self._shown = None                        # a day or holder row: the project summary again
             self._render_details()
+
+    def scan_context_menu(self, item: QTreeWidgetItem) -> QMenu | None:
+        """The right-click menu of a stack: Treat as a sample scan / Treat as a test, and back to the rules of its
+        name and energies when its kind was set by hand. None for any other row."""
+        s = item.data(0, Qt.UserRole) if item is not None else None
+        if not isinstance(s, ScanInfo) or s.kind != "stack" or s.status == "empty":
+            return None
+        menu = QMenu(self.tree)
+        if s.status == "test":
+            a = menu.addAction("Treat as a sample scan", lambda sc=s: self.kind_override_requested.emit(sc, "sample"))
+            a.setStatusTip("a sample, not a beamline test: it is offered in Reduce like the other stacks")
+        else:
+            a = menu.addAction("Treat as a test", lambda sc=s: self.kind_override_requested.emit(sc, "test"))
+            a.setStatusTip("a beamline test, not a sample: it is left out of Reduce and the report")
+        if s.override:
+            menu.addAction("Use the rules again", lambda sc=s: self.kind_override_requested.emit(sc, ""))
+        return menu
+
+    def _tree_menu_at(self, pos) -> None:
+        menu = self.scan_context_menu(self.tree.itemAt(pos))
+        if menu is not None:
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+            menu.deleteLater()
 
     def _activated(self, it: QTreeWidgetItem, _col: int) -> None:
         s = it.data(0, Qt.UserRole)

@@ -38,6 +38,8 @@ ALLOWED = {
     "Show the region in Reduce": "check._queue_menu: right-click menu of a queued spectrum (exec)",
     "Remove from the queue": "check._queue_menu: right-click menu of a queued spectrum (exec)",
     "Show": "report: the button inside each Findings row (an item widget)",
+    "Treat as a sample scan": "home.scan_context_menu: right-click menu of a test stack (exec)",
+    "Treat as a test": "home.scan_context_menu: right-click menu of a stack (exec)",
     "?": "widgets.Card: the help button of every card (left out of the controls on purpose)",
 }
 

@@ -1,7 +1,10 @@
 """Reduce step 2, the XRF window (John Bussey's step 2): the emission spectrum of the stack, the survey or the region
 (log y), one draggable window per SDD in the series colours with their dashes, lo / hi spin boxes in channels with
-the eV equivalent, and the presets (every fixed line of roi_bins.json, the line of the edge when a calibration
-exists, custom).
+the eV equivalent, and the presets (every fixed line of roi_bins.json, the line of the edge, custom). Without a
+calibration the line of the edge is offered on the nominal 10 eV per channel ('check the peak') when the beamtime has
+no fixed line of that name; without any fixed line a note says the total fluorescence is used. Save as a fixed line…
+writes the current windows into config/roi_bins.json under a name, so every scan of the beamtime can use them and
+Maps can draw the element.
 
 The card shows a choice {'line': label, 'roi': windows or None}: a fixed line keeps roi None (the reduced stack's own
 bins); the line of the edge and custom windows set ScanSettings.roi. `committed` carries a choice made by the user;
@@ -13,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QInputDialog, QLabel, QMessageBox, QPushButton, QSpinBox, QWidget
 
 from aurora.app import jobs
 from aurora.app.help_text import explain_all, labelled
@@ -26,6 +29,10 @@ from aurora.core.constants import DETS, N_CH
 
 SOURCES = (("stack", "the whole stack"), ("survey", "survey"), ("region", "inside the region"))   # short: Linux fonts
 CUSTOM = "custom"
+SAVE_LINE = "Save as a fixed line…"
+NO_FIXED_LINES = ("No fixed emission lines for this beamtime: AURORA uses the total fluorescence. To follow one "
+                  "element, drag the window over its peak.")
+NOMINAL_EDGE = "nominal calibration, check the peak"
 
 
 class XrfWindowCard(Card):
@@ -51,6 +58,11 @@ class XrfWindowCard(Card):
         self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.preset.setMinimumContentsLength(10)
         self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset))
+        self.bins_note = QLabel(NO_FIXED_LINES)           # Easy and Advanced: no roi_bins.json line at all
+        self.bins_note.setWordWrap(True)
+        self.bins_note.setObjectName("muted")
+        self.bins_note.hide()
+        self.body.addWidget(self.bins_note)
         # the spectrum
         self.plot = make_plot(x="channel", y="counts")
         self.plot.setMinimumHeight(100)
@@ -81,6 +93,9 @@ class XrfWindowCard(Card):
         self.det = QComboBox(); self.det.addItems(list(DET_LABELS))
         self.det_box = pair(labelled("for", self.det, "reduce.window.det"), self.det)     # Advanced
         rl.addWidget(self.det_box)
+        self.save_line_btn = QPushButton(SAVE_LINE)       # Easy and Advanced
+        self.save_line_btn.clicked.connect(self.save_fixed_line)
+        rl.addWidget(self.save_line_btn)
         self.body.addWidget(row)
         self.ev_label = QLabel("")
         self.ev_label.setWordWrap(True)
@@ -103,7 +118,8 @@ class XrfWindowCard(Card):
         self.status.setWordWrap(True)
         self.status.setObjectName("muted")
         self.body.addWidget(self.status)
-        explain_all([(self.same_range, "reduce.window.same"), (self.remember_btn, "reduce.window.remember")])
+        explain_all([(self.same_range, "reduce.window.same"), (self.remember_btn, "reduce.window.remember"),
+                     (self.save_line_btn, "reduce.window.save_line")])
         self._commit_timer = QTimer(self)
         self._commit_timer.setSingleShot(True)
         self._commit_timer.setInterval(350)
@@ -125,24 +141,32 @@ class XrfWindowCard(Card):
         self._sd, self._scan = sd, scan
         self._labels = list(sd.labels) if sd is not None else []
         proj = self.session.project
-        self._edge_line = xw.edge_line_windows(getattr(sd, "edge", None), getattr(proj, "calibration", None),
-                                               getattr(proj, "roi_bins", None)) if sd is not None else None
+        bins = getattr(proj, "roi_bins", None)
+        edge = getattr(sd, "edge", None) if sd is not None else None
+        cal = getattr(proj, "calibration", None)
+        self._edge_line = xw.edge_line_windows(edge, cal, bins) if sd is not None else None
+        if self._edge_line is None and edge is not None:
+            from aurora.core.lines import resonant_line
+            if not (bins is not None and bins.has(resonant_line(*edge))):      # a fixed line of that name is better
+                self._edge_line = xw.edge_line_windows(edge, cal, bins, nominal=True)
+        self.bins_note.setVisible(sd is not None and not (bins is not None and bins.labels))
         self._updating = True
         try:
             self.preset.clear()
-            bins = getattr(proj, "roi_bins", None)
             labs = [lab for lab in self._labels if xw.bins_windows(bins, lab) is not None]
             labs += [lab for lab in (bins.labels if bins is not None else []) if bins.has(lab) and lab not in labs]
             for lab in labs:                            # every line of roi_bins.json, and the stack's own lines
                 self.preset.addItem(f"{lab} (fixed bins)", ("line", lab))
             if self._edge_line is not None:
-                self.preset.addItem(f"line of the edge: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV",
+                self.preset.addItem(f"line of the edge: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV"
+                                    + (f" ({NOMINAL_EDGE})" if self._edge_line.nominal else ""),
                                     ("edge", self._edge_line.label))
             self.preset.addItem(CUSTOM, ("custom", ""))
         finally:
             self._updating = False
         for w in (self.preset, self.lo, self.hi, self.same_range, self.remember_btn):
             w.setEnabled(sd is not None)
+        self._save_line_state()
         self.det.setEnabled(sd is not None and not self.same_range.isChecked())
         edge = getattr(sd, "edge_text", "") if sd is not None else ""
         self.remember_btn.setText(f"Remember windows for {edge}" if edge else "Remember windows for the edge")
@@ -282,6 +306,81 @@ class XrfWindowCard(Card):
         self._commit_timer.stop()
         if self._sd is not None:
             self.committed.emit(self.choice())
+
+    # ------------------------------------------------------------------ Save as a fixed line…
+    def _save_line_state(self) -> None:
+        from aurora.app.widgets import set_enabled
+        from aurora.core.io.safety import is_protected
+        proj = self.session.project
+        if self._sd is None or proj is None:
+            set_enabled(self.save_line_btn, False, "pick a scan in step 1")
+        elif is_protected(proj.config_dir / "roi_bins.json"):
+            set_enabled(self.save_line_btn, False, "this beamtime folder is protected: AURORA never writes there")
+        elif getattr(self.session, "read_only", False):
+            set_enabled(self.save_line_btn, False, "this window is read-only (see the status line)")
+        else:
+            set_enabled(self.save_line_btn, True)
+
+    def default_line_name(self) -> str:
+        """The name offered for a new fixed line: the resonant line of the stack's edge ('F Kα', 'Fe Lα'), else the
+        current preset's line, else 'line 1'."""
+        sd = self._sd
+        if sd is not None and getattr(sd, "edge", None):
+            from aurora.core.lines import resonant_line
+            return resonant_line(*sd.edge)
+        if self._line and self._line != xw.TOTAL_LABEL:
+            return self._line
+        return "line 1"
+
+    def ask_line_name(self, default: str) -> str | None:
+        """The name of the new fixed line, asked in a dialog (tests replace this method)."""
+        text, ok = QInputDialog.getText(self, "Save as a fixed line",
+                                        "Name of the emission line (for example F Kα or Fe Lα). The windows of the "
+                                        "four detectors shown now are saved in config/roi_bins.json:", text=default)
+        return text.strip() if ok and text.strip() else None
+
+    def confirm_replace(self, name: str) -> bool:
+        """Whether to replace a fixed line of that name (tests replace this method)."""
+        return QMessageBox.question(self, "Save as a fixed line",
+                                    f"The beamtime already has a fixed line '{name}'. Replace its windows? The "
+                                    "previous roi_bins.json is kept as a backup.") == QMessageBox.Yes
+
+    def save_fixed_line(self, name: str | None = None) -> str:
+        """Write the current windows into config/roi_bins.json as a fixed line (created when missing, the previous
+        file kept as a backup), reload the project's lines and say so. Returns the line saved ('' when nothing)."""
+        proj, sd = self.session.project, self._sd
+        if proj is None or sd is None:
+            return ""
+        if name is None:
+            name = self.ask_line_name(self.default_line_name())
+        if not name:
+            return ""
+        bins = proj.roi_bins
+        if bins is not None and bins.has(name) and not self.confirm_replace(name):
+            return ""
+        from datetime import date
+        from aurora import __version__
+        from aurora.core.io.config import RoiBins
+        windows = self.windows()
+        extra = {"saved": f"AURORA {__version__}, Reduce step 2, {date.today().isoformat()}, from {sd.name}"}
+        ev = xw.emission_line_ev(name)
+        if ev is not None:
+            extra["line_ev"] = round(ev, 2)
+        target = proj.config_dir / "roi_bins.json"
+        try:
+            (bins or RoiBins(target)).add_line(name, windows, path=target, extra=extra,
+                                               created_by=f"AURORA {__version__}")
+        except (OSError, ValueError) as err:
+            from aurora.app.session import _os_text
+            text = f"the fixed line was not saved: {_os_text(err)}"
+            self.status.setText(text)
+            self.session.status.emit(text)
+            return ""
+        proj.read_config()
+        self.session.status.emit(f"fixed line '{name}' saved in config/roi_bins.json ({xw.describe(windows)}): a "
+                                 "preset of every scan now, and an elemental map in Maps")
+        self.session.config_changed.emit()
+        return name
 
     # ------------------------------------------------------------------ display
     def _style_regions(self) -> None:

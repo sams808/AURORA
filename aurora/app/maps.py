@@ -52,7 +52,8 @@ CUBE_BYTES = 4                     # at most uint32 counts in the cached cube (u
 NO_PROJECT = "open a project first"
 NO_CUBE = "load a hypercube first"
 NO_SDD = "tick at least one SDD"
-NO_BINS = "elemental maps need fixed ROI bins (config/roi_bins.json)"
+NO_BINS = ("elemental maps need fixed lines (config/roi_bins.json): set a window in Reduce step 2, then Save as a "
+           "fixed line…")
 NO_CLUSTERS = "run the clustering first"
 NO_TICKED = "tick at least one cluster"
 RUNNING = "running"
@@ -226,6 +227,7 @@ class MapsPerspective(QWidget):
         session.holder_changed.connect(self._holder_changed)
         session.zone_selected.connect(lambda _z: self._zones_changed())
         session.zones_changed.connect(self._zones_changed)
+        session.config_changed.connect(self._config_changed)
         on_theme_changed(self, lambda _s: self._theme_changed())
         self.update_actions()
         self._draw_empty()
@@ -519,17 +521,31 @@ class MapsPerspective(QWidget):
             return
         self.set_hypercube(hc)
 
-    def set_hypercube(self, hc: Hypercube) -> None:
-        self._reset_cube(hc)
-        self.energy.blockSignals(True); self.energy.setRange(0, hc.n_energies - 1); self.energy.setValue(hc.n_energies // 2); self.energy.blockSignals(False)
+    def _fill_lines(self) -> None:
+        """The window choices: custom, then every fixed line of config/roi_bins.json (also for the RGB channels)."""
         bins = self.session.project.roi_bins if self.session.project else None
+        keep = self.line.currentData()
         self.line.blockSignals(True); self.line.clear(); self.line.addItem("custom (eV)", None)
         for lab in (bins.labels if bins else []):
             ev = bins.line_ev(lab)
             self.line.addItem(f"{lab}" + (f" {ev:.0f} eV" if ev else ""), lab)
+        i = self.line.findData(keep) if keep is not None else -1
+        if i >= 0:
+            self.line.setCurrentIndex(i)
         self.line.blockSignals(False)
         for c in self.rgb_lines:
             c.clear(); c.addItems([self.line.itemText(i) for i in range(1, self.line.count())])
+
+    def _config_changed(self) -> None:
+        """A fixed line was saved (Reduce step 2): the window choices and the elemental maps follow."""
+        if self.hc is not None:
+            self._fill_lines()
+        self.update_actions()
+
+    def set_hypercube(self, hc: Hypercube) -> None:
+        self._reset_cube(hc)
+        self.energy.blockSignals(True); self.energy.setRange(0, hc.n_energies - 1); self.energy.setValue(hc.n_energies // 2); self.energy.blockSignals(False)
+        self._fill_lines()
         self._apply_flags(hc)
         sat = ", ".join(DET_LABELS[k] for k in sorted(self._flagged))
         self.status.setText(f"{hc.name}: {hc.n_energies} energies x {hc.n_pix} px x 256 ch x 4"
