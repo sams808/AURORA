@@ -535,7 +535,10 @@ class MainWindow(QMainWindow):
         from aurora.cli import cmd_demo
         root = Path(user_data_dir(APP_NAME, appauthor=False)) / "demo_beamtime"
         if not (root / "raw").is_dir():
-            cmd_demo(root)
+            if cmd_demo(root):                              # the folder holds something else: never written into
+                self.statusBar().showMessage(f"the demo beamtime needs a new or empty folder: {root} is not empty",
+                                             15000)
+                return
         elif not (root / "references").is_dir():          # a demo written by an earlier version: add its spectra
             from aurora.core.testdata import write_demo_extras
             write_demo_extras(root)

@@ -29,12 +29,14 @@ import numpy as np
 log = logging.getLogger("aurora.io")
 
 
-def load_npz(path: Path | None):
-    """npz or None (missing, truncated by a killed run, or unreadable)."""
+def load_npz(path: Path | None, allow_pickle: bool = False):
+    """npz or None (missing, truncated by a killed run, or unreadable). AURORA's own caches need no pickle: a member
+    that does (an object array, as a crafted file in a shared project would hold) raises when it is read, which the
+    callers treat as damage (read again from raw)."""
     if path is None or not Path(path).exists():
         return None
     try:
-        return np.load(path, allow_pickle=True)
+        return np.load(path, allow_pickle=allow_pickle)
     except Exception:
         return None
 

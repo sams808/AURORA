@@ -100,11 +100,15 @@ def make_fake_project(root: Path, old_minutes: float = 120.0, n_holders: int = 1
 
     n_holders > 1 adds holders N6, N7, ... later the same day (a survey on the hour from 15:00 and one complete stack
     each, see SURVEY2 / STACK2); holder N5 is identical in every variant. loose=True writes the scan folders directly
-    into `root` (no raw/<day>, processed/ or config/), the way John Bussey's GUI kept them ('CLS GUI/<scan>')."""
+    into `root` (no raw/<day>, processed/ or config/), the way John Bussey's GUI kept them ('CLS GUI/<scan>').
+    ProtectedPathError, before anything is written, when the scans would go into an existing beamline raw/ folder
+    or a protected folder."""
+    from aurora.core.io.safety import assert_writable
     if not 1 <= n_holders <= 1 + len(EXTRA_SAMPLES):
         raise ValueError(f"n_holders must be 1..{1 + len(EXTRA_SAMPLES)}")
     root = Path(root)
     raw_day = root if loose else root / "raw" / DAY
+    assert_writable(raw_day)
     rng = np.random.default_rng(7)
     x, y = snake_grid()
     _write_survey(raw_day / SURVEY, "holderA", "010013", rng)

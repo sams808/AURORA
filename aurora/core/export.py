@@ -18,7 +18,9 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -284,6 +286,73 @@ def target_paths(out_dir: Path, label: str, zone: Zone, pitch=None) -> list[Path
     return [out_dir / f"{base}{s}" for s in ("_full_reduced.csv", "_absorption.csv", poly, "_gui_settings.json")]
 
 
+def other_roi_path(out_dir: Path, label: str, zone: Zone, pitch=None) -> Path:
+    """The ROI file of the pair that write_john does not write for this zone (_zone.json when it writes
+    _polygon_roi.json, and the reverse): an earlier save's, which an overwrite removes so the folder describes one
+    zone."""
+    roi = target_paths(out_dir, label, zone, pitch)[2]
+    other = "_zone.json" if roi.name.endswith("_polygon_roi.json") else "_polygon_roi.json"
+    return roi.with_name(f"{safe_label(label)}{other}")
+
+
+def _move(src: Path, dst: Path) -> None:
+    """os.replace, retried while Windows holds the file for a moment (a virus scanner, an indexer)."""
+    from aurora.core.io.textio import REPLACE_RETRIES, REPLACE_WAIT_S
+    for attempt in range(REPLACE_RETRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == REPLACE_RETRIES - 1:
+                raise
+            time.sleep(REPLACE_WAIT_S * (attempt + 1))
+
+
+def _write_all_or_none(files: list[tuple[Path, str]], drop: list[Path]) -> None:
+    """Write every (path, text) of one sample and remove the files of `drop`, all or none. Every existing file is
+    first moved aside, which a file held by another program (Excel) refuses before anything new is written; on any
+    failure the files written are removed and the old ones come back. A PermissionError names the file that
+    refused, never a temporary name."""
+    from aurora.core.io.safety import ProtectedPathError
+    from aurora.core.io.textio import write_text_atomic
+    aside: list[tuple[Path, Path]] = []
+    written: list[Path] = []
+    current = None
+    try:
+        for p in [p for p, _text in files] + list(drop):
+            if p.exists():
+                current = p
+                bak = p.with_name(f".{p.name}.{os.getpid()}.old")
+                _move(p, bak)
+                aside.append((p, bak))
+        for p, text in files:
+            current = p
+            write_text_atomic(p, text)
+            written.append(p)
+    except BaseException as err:
+        kept = {p for p, _bak in aside}
+        for p in written:
+            if p not in kept:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        for p, bak in reversed(aside):
+            try:
+                _move(bak, p)
+            except OSError as again:
+                log.error("%s could not be put back from %s (%s)", p, bak.name, again)
+        if isinstance(err, PermissionError) and not isinstance(err, ProtectedPathError) and current is not None \
+                and err.filename != str(current):
+            raise PermissionError(err.errno, err.strerror, str(current)) from err
+        raise
+    for _p, bak in aside:
+        try:
+            bak.unlink()
+        except OSError as err:
+            log.warning("%s not removed (%s)", bak, err)
+
+
 def _check_folder(out_dir: Path, scan=None) -> None:
     from aurora.core.io.safety import assert_writable
     assert_writable(out_dir)
@@ -348,9 +417,9 @@ def write_john(zone: Zone, sid: str, stack, settings: ScanSettings, out_dir=None
     """Write the zone x scan as John Bussey's GUI saves a checked scan, into `out_dir` (default
     <project>/processed/reduced/<label>/). Returns the written paths: _full_reduced.csv, _absorption.csv,
     _polygon_roi.json (one polygon or one rectangle; otherwise _zone.json, which says so) and _gui_settings.json.
-    FileExistsError when a target exists and overwrite is False."""
+    FileExistsError when a target (or the other ROI file of an earlier save) exists and overwrite is False. The four
+    files are replaced together or not at all, and an overwrite removes the other ROI file (_write_all_or_none)."""
     from aurora import __version__
-    from aurora.core.io.textio import write_json_atomic, write_text_atomic
     label = label or zone.label or f"zone {zone.id}"
     if out_dir is None:
         if project is None:
@@ -359,8 +428,9 @@ def write_john(zone: Zone, sid: str, stack, settings: ScanSettings, out_dir=None
     out_dir = Path(out_dir)
     _check_folder(out_dir, scan)
     targets = target_paths(out_dir, label, zone, getattr(stack, "pitch", None))
+    other = other_roi_path(out_dir, label, zone, getattr(stack, "pitch", None))
     if not overwrite:
-        there = [p for p in targets if p.exists()]
+        there = [p for p in targets + [other] if p.exists()]
         if there:
             raise FileExistsError(f"{there[0]} already exists")
     fr = frame or john_frame(zone, sid, stack, settings, project=project, scan=scan, mode=mode, good_curve=good_curve,
@@ -379,19 +449,16 @@ def write_john(zone: Zone, sid: str, stack, settings: ScanSettings, out_dir=None
         rows_abs.append(",".join([_num(e), _num(fr.total[i]), _num(fr.tey[i]), _num(fr.i0[i]), bad]))
     full, absorb, roi, gui = targets
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(full, "\n".join(head + [",".join(JOHN_COLUMNS)] + rows) + "\n")
-    write_text_atomic(absorb, "\n".join(head + [",".join(ABSORPTION_COLUMNS)] + rows_abs) + "\n")
     poly = roi_polygon(zone, getattr(stack, "pitch", None))
     if poly is not None:
-        write_json_atomic(roi, poly, indent=2)
+        roi_json = poly
     else:
-        write_json_atomic(roi, {"_comment": "This zone is not one polygon or one rectangle, so John Bussey's GUI cannot "
-                                            "read it as a _polygon_roi.json. AURORA's zone definition follows "
-                                            "(rectangles, erased rectangles, painted and erased squares, polygons; mm).",
-                                "zone": {k: v for k, v in zone.to_json().items() if k not in ("st", "members")}},
-                          indent=2)
+        roi_json = {"_comment": "This zone is not one polygon or one rectangle, so John Bussey's GUI cannot "
+                                "read it as a _polygon_roi.json. AURORA's zone definition follows "
+                                "(rectangles, erased rectangles, painted and erased squares, polygons; mm).",
+                    "zone": {k: v for k, v in zone.to_json().items() if k not in ("st", "members")}}
     rois = {d: [w[0], w[1]] for d, w in fr.windows.items() if w is not None}
-    write_json_atomic(gui, {
+    gui_json = {
         "rois": rois,
         "params": {"i0": MCC_NAMES[I0_COL], "mode": fr.mode, "tey": MCC_NAMES[TEY_COL]},
         "stack_h5": str(getattr(scan, "h5", "") or "") if scan is not None else "",
@@ -407,6 +474,10 @@ def write_john(zone: Zone, sid: str, stack, settings: ScanSettings, out_dir=None
                    "detectors_in_total": fr.dets_in_total, "data_source": fr.source,
                    "polygon": ("the zone's polygon" if zone.polys else
                                "the rectangle widened by 0.45 pitch (AURORA's membership rule)") if poly is not None else None},
-    }, indent=2)
+    }
+    _write_all_or_none([(full, "\n".join(head + [",".join(JOHN_COLUMNS)] + rows) + "\n"),
+                        (absorb, "\n".join(head + [",".join(ABSORPTION_COLUMNS)] + rows_abs) + "\n"),
+                        (roi, json.dumps(roi_json, indent=2, ensure_ascii=False)),
+                        (gui, json.dumps(gui_json, indent=2, ensure_ascii=False))], drop=[other])
     log.info("zone %s x %s: wrote %s", zone.label, sid, ", ".join(p.name for p in targets))
     return targets

@@ -29,6 +29,7 @@ from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout,
                                 guarded_write, notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
 from aurora.core.fit import (LcfResult, McrResult, PcaResult, common_grid, fit_status, itfa, lcf, mcr_als, pca,
                              prepare_matrix, same_matrix, unit_of)
+from aurora.core.io.textio import open_atomic
 
 TINT_ROLE = int(Qt.UserRole) + 0x7B0          # the tone of a tinted row (re-read after a theme change)
 RESAMPLE = (("moving blocks", "block"), ("single points (iid)", "iid"))
@@ -472,7 +473,7 @@ class FitPerspective(QWidget):
         header) and the curves as CSV, the figure at the Figure size (MANUAL §7.1); says what it wrote."""
         from aurora import __version__
         r = self.lcf_result; tname, comps = self._lcf_names
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
+        with open_atomic(path) as f:            # refused in raw/ or a protected folder before anything is written
             f.write(f"# LCF of {tname}; RMSE {r.rmse:.6g}; R-factor {r.r_factor:.6g}; sum {r.total:.6g}; range {r.E[0]:.2f}-{r.E[-1]:.2f} eV\n")
             f.write(f"# AURORA {__version__} (version 2 of John Bussey's SGM XAS GUI)\n")
             f.write(f"# chi-square {r.chi2:.6g}; reduced chi-square {r.redchi:.6g} = chi-square / (N - p), N = {r.n_points}, "
@@ -633,17 +634,19 @@ class FitPerspective(QWidget):
     def export_mcr(self, folder: Path, m: McrResult, prefix: str) -> list[Path]:
         from aurora.app.figure_export import export_colour
         from aurora.core.figures import FigureSeries
+        from aurora.core.io.safety import assert_writable
+        assert_writable(folder)                 # before the folder is made: never inside raw/ or a protected folder
         folder.mkdir(parents=True, exist_ok=True)
         E = m.E if m.E is not None else self._mcr_E
         labels = m.labels or self._mcr_labels
         p1 = folder / f"{prefix}_component_spectra.csv"
-        with open(p1, "w", encoding="utf-8", newline="\n") as f:
+        with open_atomic(p1) as f:
             f.write("energy_eV," + ",".join(f"component{i + 1}" for i in range(m.ST.shape[0])) + "\n")
             for i in range(len(E)):
                 f.write(f"{E[i]:.6g}," + ",".join(f"{v:.6g}" for v in m.ST[:, i]) + "\n")
         p2 = folder / f"{prefix}_component_makeup.csv"
         props = m.proportions
-        with open(p2, "w", encoding="utf-8", newline="\n") as f:
+        with open_atomic(p2) as f:
             f.write("sample," + ",".join(f"component{i + 1}_percent" for i in range(m.ST.shape[0])) + "\n")
             for lab, row in zip(labels, props):
                 f.write(lab + "," + ",".join(f"{v:.3f}" for v in row) + "\n")
@@ -962,7 +965,7 @@ class FitPerspective(QWidget):
         """Every parameter with its uncertainty and unit, the peak areas, the curves as CSV, and the figure."""
         from aurora import __version__
         r = self.peak_result
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
+        with open_atomic(path) as f:
             f.write(f"# peak decomposition of {self._pk_name}; {'converged' if r.converged else 'not converged: ' + r.message}; RMSE {r.rmse:.6g}\n")
             f.write(f"# AURORA {__version__} (version 2 of John Bussey's SGM XAS GUI)\n")
             f.write(f"# shape {getattr(r, 'shape', '')}, parameterised by the FWHM in eV; step_width = the 25-75 % rise "

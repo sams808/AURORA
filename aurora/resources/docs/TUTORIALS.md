@@ -6,7 +6,8 @@ so nothing you do touches real data; the ninth is the recipe for a real beamtime
 mode button at the right of the top bar, or **Ctrl+Shift+A**).
 
 The demo beamtime is one click away: **Help > Open the demo beamtime** (or the **Open the demo beamtime** button on
-Home before a project is open) writes it into the user data folder and opens it. To put it somewhere else:
+Home before a project is open) writes it into the user data folder and opens it. To put it somewhere else (a new or
+empty folder: AURORA refuses one that already holds files, so a real beamtime is never written into):
 
 ```
 aurora demo C:\Users\<you>\Desktop\aurora_demo

@@ -339,10 +339,11 @@ def _load_disk(path: Path | None, sig: str):
     if z is None:
         return None
     try:
-        if str(z["signature"]) != sig:
-            return None
-        return {k: z[k] for k in z.files}
-    except Exception:                              # a damaged file: read again from raw
+        with z:                                    # closed at once: the rebuilt cache replaces this file (Windows)
+            if str(z["signature"]) != sig:
+                return None
+            return {k: z[k] for k in z.files}
+    except Exception:                              # a damaged file or a member that needs pickle: read again from raw
         return None
 
 

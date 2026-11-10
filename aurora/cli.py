@@ -178,10 +178,21 @@ def cmd_report(args) -> int:
 
 
 def cmd_demo(folder: Path) -> int:
-    """A synthetic beamtime with fixed ROI bins, a sample sheet and a few zones, for the tutorials."""
+    """A synthetic beamtime with fixed ROI bins, a sample sheet and a few zones, for the tutorials. Only into a new or
+    empty folder: the demo's day and scan names are those of a real beamtime, so written into one it would replace
+    raw files and the beamtime's config/roi_bins.json."""
     import json
     from aurora.core import testdata
-    root = testdata.make_fake_project(Path(folder))
+    from aurora.core.io.safety import is_protected
+    root = Path(folder)
+    if root.exists() and (not root.is_dir() or any(root.iterdir())):
+        print(f"aurora demo: {root} is not empty; the demo needs a new or empty folder", file=sys.stderr)
+        return 1
+    if is_protected(root):
+        print(f"aurora demo: {root} is protected (a beamline raw/ folder or a folder in AURORA_PROTECT_DIRS); "
+              "AURORA never writes there", file=sys.stderr)
+        return 1
+    root = testdata.make_fake_project(root)
     (root / "config" / "roi_bins.json").write_text(json.dumps({
         "_meta": {"gains": {"sdd1": 10.0, "sdd2": 10.0, "sdd3": 10.0, "sdd4": 10.0}, "n_sigma": 1.5,
                   "help": "line -> {sdd: [first channel, last channel + 1]}; the demo uses 10 eV per channel"},

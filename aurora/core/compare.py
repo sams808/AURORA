@@ -587,21 +587,24 @@ def local_peaks(E: np.ndarray, y: np.ndarray, min_prominence: float = 0.05, min_
     return [(float(e[i]), float(v[i])) for i in idx]
 
 
-def wide_columns(traces: list[tuple[TraceRequest, np.ndarray, np.ndarray]]) -> list[str]:
-    """The column names of export_wide_csv: <label>-energy (eV), <label>-<signal> per trace."""
+def wide_columns(traces: list[tuple[TraceRequest, np.ndarray, np.ndarray]], quantity: str = "") -> list[str]:
+    """The column names of export_wide_csv: <label>-energy (eV), <label>-<quantity><signal> per trace (quantity
+    'd/dE ' for the first derivative, empty for the values themselves)."""
     heads = []
     for req, _E, _y in traces:
-        heads += [f"{req.label}-energy (eV)", f"{req.label}-{req.signal}"]
+        heads += [f"{req.label}-energy (eV)", f"{req.label}-{quantity}{req.signal}"]
     return heads
 
 
-def export_wide_csv(path: Path, traces: list[tuple[TraceRequest, np.ndarray, np.ndarray]]) -> None:
-    """John's wide layout: <label>-energy (eV), <label>-<signal> per trace, rows padded with blanks."""
+def export_wide_csv(path: Path, traces: list[tuple[TraceRequest, np.ndarray, np.ndarray]], quantity: str = "") -> None:
+    """John's wide layout: <label>-energy (eV), <label>-<quantity><signal> per trace, rows padded with blanks.
+    Written in one step, and refused in raw/ or a protected folder before anything is written."""
+    from aurora.core.io.textio import open_atomic
     n = max((len(E) for _, E, _ in traces), default=0)
-    heads, columns = wide_columns(traces), []
+    heads, columns = wide_columns(traces, quantity), []
     for _req, E, y in traces:
         columns += [E, y]
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
+    with open_atomic(path) as f:
         f.write(",".join(heads) + "\n")
         for i in range(n):
             f.write(",".join(("" if i >= len(c) or not np.isfinite(c[i]) else f"{c[i]:.6g}") for c in columns) + "\n")

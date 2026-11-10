@@ -7,6 +7,8 @@ os.replace is retried. Every write goes through aurora.core.io.safety.assert_wri
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import logging
 import os
@@ -69,3 +71,15 @@ def write_text_atomic(path, text: str, encoding: str = "utf-8") -> Path:
 def write_json_atomic(path, obj, indent: int | None = 1) -> Path:
     """JSON (UTF-8, non-ASCII kept as is) written with write_text_atomic."""
     return write_text_atomic(path, json.dumps(obj, indent=indent, ensure_ascii=False))
+
+
+@contextlib.contextmanager
+def open_atomic(path, encoding: str = "utf-8"):
+    """`with open_atomic(path) as f: f.write(...)`: what the block writes replaces `path` in one step when it ends
+    (write_text_atomic, '\\n' line ends); nothing is written when the block raises. A protected path is refused
+    before the block runs, so no file and no folder ever appears there."""
+    from aurora.core.io.safety import assert_writable
+    assert_writable(path)
+    buf = io.StringIO()
+    yield buf
+    write_text_atomic(path, buf.getvalue(), encoding)

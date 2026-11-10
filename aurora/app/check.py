@@ -35,7 +35,7 @@ from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refi
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, set_enabled,
-                                set_plot_hint)
+                                held_file, set_plot_hint, write_error_text)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
@@ -1060,6 +1060,20 @@ class CheckPerspective(QWidget):
                                  QMessageBox.No)
         return {QMessageBox.Yes: "yes", QMessageBox.No: "no"}.get(b, "cancel")
 
+    @staticmethod
+    def save_failure_text(failed: list) -> str:
+        """One calm sentence for the spectra Save ticked could not write: the file that refused (never a temporary
+        name), the system's reason and the next step."""
+        label, err = failed[0]
+        name = Path(err.filename).name if getattr(err, "filename", None) else label
+        text = write_error_text(name, err, "save")
+        if held_file(err):
+            text += " Close it and press Save ticked again."
+        text += f" The files of '{label}' were left as they were."
+        if len(failed) > 1:
+            text += " Not saved either: " + ", ".join(f"'{lab}'" for lab, _err in failed[1:]) + "."
+        return text
+
     def save_ticked(self) -> None:
         """John's 'Save ticked scans' then 'Add saved scans to the Compare tab': every ticked row without a problem is
         written in his formats to <project>/processed/reduced/<sample>/ (write_john), then each folder is added to
@@ -1073,17 +1087,27 @@ class CheckPerspective(QWidget):
             return
         bad = [r for r in ticked if r.level == "bad"]
         good = [r for r in ticked if r.level != "bad"]
+
+        def key(label: str) -> str:                             # Windows and macOS: '1 alpha' and '1 ALPHA' are one name
+            return export.safe_label(label).casefold()
         counts: dict[str, int] = {}
         for r in good:
-            counts[export.safe_label(r.zone.label)] = counts.get(export.safe_label(r.zone.label), 0) + 1
-        plan = []
+            counts[key(r.zone.label)] = counts.get(key(r.zone.label), 0) + 1
+        plan, taken = [], set()
         for r in good:
             label = r.zone.label
-            if counts[export.safe_label(label)] > 1:            # one sample on two scans (or two holders): unique names
+            if counts[key(label)] > 1:                          # one sample on two scans (or two holders): unique names
                 label = f"{label}_{r.item.holder}_{(short_time(r.item.sid) or '').replace(':', '')}"
+            first, n = label, 2
+            while key(label) in taken:                          # still one name (two such zones on one scan): numbered
+                label, n = f"{first}_{n}", n + 1
+            taken.add(key(label))
             sd = ses.stack_loaded(r.item.sid)
             out = export.default_folder(ses.project, label)
-            plan.append((r, label, out, export.target_paths(out, label, r.zone, getattr(sd, "pitch", None)), sd))
+            pitch = getattr(sd, "pitch", None)
+            # the four files, and the other ROI file of an earlier save, which the overwrite removes
+            plan.append((r, label, out, export.target_paths(out, label, r.zone, pitch)
+                         + [export.other_roi_path(out, label, r.zone, pitch)], sd))
         existing = [p for *_x, targets, _sd in plan for p in targets if p.exists()]
         if existing:
             ans = self.ask_overwrite(existing)
@@ -1111,13 +1135,17 @@ class CheckPerspective(QWidget):
                               frame=r.frame))
 
         def job(cb):
-            written = []
+            written, failed = [], []
             for i, t in enumerate(tasks):
                 cb(i, len(tasks), f"writing {t['label']}")
-                written.append(export.write_john(**t))
-            return written
+                try:
+                    written.append(export.write_john(**t))
+                except OSError as err:              # open in another program, a read-only or protected folder: the
+                    failed.append((t["label"], err))    # sample's files stay as they were, the others are still saved
+            return written, failed
 
-        def done(written):
+        def done(result):
+            written, failed = result
             folders = []
             for paths in written:
                 if paths and paths[0].parent not in folders:
@@ -1127,14 +1155,19 @@ class CheckPerspective(QWidget):
                 for f in folders:
                     n_added += len(self.library.add_folder(f))
             flat = [p for paths in written for p in paths]
-            msg = f"{len(written)} spectrum(s) saved in John Bussey's format and added to Compare ({n_added} rows)" + (
-                "; " + "; ".join(notes) if notes else "")
+            parts = [f"{len(written)} spectrum(s) saved in John Bussey's format and added to Compare ({n_added} rows)"
+                     ] if written else []
+            if failed:
+                parts.append("not saved: " + ", ".join(f"'{lab}'" for lab, _err in failed))
+            msg = "; ".join(parts + notes)
             if flat:
                 notify_saved(self.queue_note, flat)                 # 'wrote … → folder · Open folder' (rich text)
                 self.queue_note.setText(html.escape(msg) + "<br>" + self.queue_note.text())
             else:
                 self.queue_note.setText(msg)
             self.update_actions()
+            if failed:
+                QMessageBox.warning(self, "Could not save", self.save_failure_text(failed))
 
         jobs.of(self).submit("check:save", job, on_done=done,
                              on_failed=lambda t: self.queue_note.setText("not saved: " + t.strip().splitlines()[-1]),
