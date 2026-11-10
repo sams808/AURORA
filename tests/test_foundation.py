@@ -137,12 +137,10 @@ def test_demo_and_log_actions(qapp, tmp_path, monkeypatch):
     from PySide6.QtGui import QDesktopServices
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
     win = MainWindow()
-    win.demo_action.trigger()
-    for _ in range(50):
-        qapp.processEvents()
-        if win.session.project is not None:
-            break
-    assert (tmp_path / "data" / "demo_beamtime" / "raw").is_dir()
+    win.demo_action.trigger()                          # the demo is written in a job, then opened
+    assert win.jobs.wait_idle(60000)
+    qapp.processEvents()
+    assert (tmp_path / "data" / "demo_beamtime" / "raw").is_dir() and win.session.project is not None
     win.open_log_folder()
     assert opened and opened[-1].replace("\\", "/").endswith("logs")
     win.close()

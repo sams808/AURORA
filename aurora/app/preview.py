@@ -60,6 +60,7 @@ class PreviewPlot(QWidget):
         style_plot(self.gl)
         on_theme_changed(self, lambda _s: self.redraw())
         self._traces: list[tuple[str, ZoneTraces, dict]] = []
+        self._waiting = ""                              # the hint of an empty preview whose data is still being read
         for c in (self.show_sdd, self.show_sum, self.show_tey, self.show_i0, self.show_spikes):
             c.toggled.connect(self.redraw)
         self.top.scene().sigMouseMoved.connect(self._moved)
@@ -71,9 +72,11 @@ class PreviewPlot(QWidget):
         self.gl.setAccessibleName("preview of the zone's traces")
         mark_advanced(self.toggles)
 
-    def set_traces(self, traces: list[tuple[str, ZoneTraces, dict]]) -> None:
-        """[(name, traces, meta)] where meta may hold 'edge_ev' and 'edge'."""
+    def set_traces(self, traces: list[tuple[str, ZoneTraces, dict]], waiting: str = "") -> None:
+        """[(name, traces, meta)] where meta may hold 'edge_ev' and 'edge'. waiting: what an empty preview is still
+        reading ('reading the good-I0 scans …')."""
         self._traces = traces
+        self._waiting = waiting
         self.redraw()
 
     def redraw(self) -> None:
@@ -88,7 +91,7 @@ class PreviewPlot(QWidget):
         from aurora.app.widgets import set_plot_hint
         if not self._traces:
             self.top.setTitle("")
-            set_plot_hint(self.top, "select a sample (zone) and a scan to see its traces")
+            set_plot_hint(self.top, self._waiting or "select a sample (zone) and a scan to see its traces")
             for p in (self.mid, self.low):
                 set_plot_hint(p, " ")                 # no bare 0..1 axes on an empty preview
             return

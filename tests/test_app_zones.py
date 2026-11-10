@@ -124,6 +124,37 @@ def test_real_zones_in_the_app(qapp, real_project, monkeypatch):
     win.close(); win.deleteLater(); qapp.processEvents()
 
 
+def test_cancel_of_load_all_stops_within_one_energy(qapp, fake_project, monkeypatch):
+    """'Read every scan of the holder' passes each stack's progress through, so Cancel stops within one energy
+    folder; it waited for the whole stack being reduced (threads-12)."""
+    import threading
+    import time
+    import aurora.core.stack as stk
+    proj = Project.discover(fake_project)
+    win = _window(qapp, proj)
+    win.jobs.wait_idle(30000)
+    win.session._stacks.clear()
+    for f in fake_project.rglob("*.npz"):                       # no cache: every stack is reduced from raw
+        f.unlink()
+    inside = threading.Event()
+    real = stk.read_point_dir
+
+    def slow(*a, **k):                                          # an energy folder of a large stack: 0.4 s
+        inside.set()
+        time.sleep(0.4)
+        return real(*a, **k)
+    monkeypatch.setattr(stk, "read_point_dir", slow)
+    win.reduce.load_all()
+    job = win.jobs.job(f"stacks:{win.session.current_holder}")
+    assert job is not None and inside.wait(20)
+    t0 = time.monotonic()
+    job.cancel()
+    assert win.jobs.wait_idle(30000) and job.state == "cancelled"
+    took = time.monotonic() - t0
+    assert took < 0.9, took                                     # one energy (0.4 s), not the rest of the stack (1.6 s)
+    win.close()
+
+
 def test_load_all_scans(qapp, fake_project):
     from PySide6.QtCore import QEventLoop, QTimer
     from aurora.app.main import MainWindow

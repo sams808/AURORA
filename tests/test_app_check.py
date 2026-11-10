@@ -47,3 +47,57 @@ def test_check_perspective(qapp, fake_project):
     win.show_perspective("check")
     assert win.rail_buttons["check"].isChecked()
     win.close()
+
+
+def test_good_i0_stacks_are_read_in_a_job(qapp, tmp_path):
+    """A zone previewed with 'good I0' while the stacks marked good are not loaded: Reduce never reduces them on the
+    GUI thread (13 s frozen on a beamtime without sgm_report caches, threads-5). One job reads them with progress and
+    Cancel, the preview says it is waiting, and it is drawn once they are in; the curve is the one of every good stack."""
+    import threading
+    import numpy as np
+    from aurora.app.main import MainWindow
+    from aurora.app.session import Session
+    from aurora.core.spectra import good_i0_curve
+    from aurora.core.stack import StackData
+    proj = Project.discover(testdata.make_fake_project(tmp_path / "beamtime", n_holders=2))
+    win = MainWindow()
+    win.show()
+    win.home.set_project(proj)
+    qapp.processEvents()
+    ses = win.session
+    sid, good_sid = ses.stack_id(proj.find(testdata.STACK)), ses.stack_id(proj.find(testdata.STACK2))
+    ses.set_holder("N5")
+    sd = ses.stack(sid)
+    ses.zones.good_i0[good_sid] = True                       # marked good, not loaded (a reopened session)
+    x0, x1, y0, y1 = sd.bbox
+    z = ses.new_zone("z")
+    z.rects.append([x0, x1, y0, y1])
+    ses.touch()
+    z.settings[sid].i0_source = "good"
+    threads = []
+    real = Session.stack
+
+    def spy(self, s, progress=None):
+        if s not in self._stacks:
+            threads.append(threading.current_thread() is threading.main_thread())
+        return real(self, s, progress=progress)
+    Session.stack = spy
+    try:
+        ses.select_stack(sid)
+        ses.select_zone(z.id)
+        win.show_perspective("reduce")
+        win.reduce.update_preview()
+        job = win.jobs.job("stacks:good-i0")
+        assert job is not None and job.label == "reading the good-I0 scans"
+        assert win.reduce.preview._traces == [] and win.reduce.preview._waiting == "reading the good-I0 scans …"
+        assert win.jobs.wait_idle(30000)
+        qapp.processEvents()
+    finally:
+        Session.stack = real
+    assert threads == [False]                                # read once, by the job's worker
+    assert ses.stack_loaded(good_sid) is not None and win.reduce.preview._traces
+    good = ses.stack_loaded(good_sid)
+    want = good_i0_curve(sd.E, [(good.E, good.i0_mean())])
+    assert np.allclose(ses.good_curve_for(sd.E), want, equal_nan=True) and isinstance(good, StackData)
+    win.session._save_timer.stop()
+    win.close()

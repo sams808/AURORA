@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtGui import QCursor, QKeySequence
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QToolButton, QVBoxLayout, QWidget)
@@ -23,7 +23,7 @@ from aurora.app.mapview import TOOLS, MapView, scale_label, split_tool
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
-from aurora.app.session import CheckItem, Session
+from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.trace_cache import zone_traces_cached
 from aurora.app.zone_tools import ZoneEditor
@@ -40,8 +40,10 @@ from aurora.core.zones import Stroke, geometry, members, set_geometry, shape_tex
 
 NO_PROJECT = "open a project first"
 GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy geometry'
-# fields the 'advanced settings in use' chip compares (line and windows are shown in step 2, also in Easy)
-CHIP_FIELDS = tuple(f for f in ScanSettings.SETTINGS_FIELDS if f not in ("line", "roi"))
+# fields the 'advanced settings in use' chip compares: line and windows are shown in step 2, also in Easy; the de-spike
+# rule and the IPFY form have no control in either mode (a session without them keeps the earlier de-spike rule, which
+# the step-4 line names)
+CHIP_FIELDS = tuple(f for f in ScanSettings.SETTINGS_FIELDS if f not in ("line", "roi", "despike_mode", "ipfy_mode"))
 COPY_FIELDS_SETTING = "reduce/copy_fields"
 
 
@@ -51,6 +53,21 @@ def popup(menu: QMenu, pos) -> QMenu:
     menu.setAttribute(Qt.WA_DeleteOnClose)
     menu.popup(pos)
     return menu
+
+
+class _UndoKeysPassThrough(QObject):
+    """Ctrl+Z / Ctrl+Y in a zone text box with nothing of its own to undo or redo reach Edit > Undo / Redo. A QLineEdit
+    takes those keys even with an empty history, so a label picked from the list and Ctrl+Z did nothing."""
+
+    def eventFilter(self, obj, ev) -> bool:
+        edit = obj.lineEdit() if isinstance(obj, QComboBox) else obj      # a combo hands the keys to its line edit
+        if ev.type() == QEvent.ShortcutOverride and isinstance(edit, QLineEdit):
+            undo = ev.matches(QKeySequence.Undo) and not edit.isUndoAvailable()
+            redo = ev.matches(QKeySequence.Redo) and not edit.isRedoAvailable()
+            if undo or redo:
+                ev.ignore()
+                return True
+        return False
 
 
 class _VirtualScan:
@@ -75,11 +92,19 @@ def easy_differences(st: ScanSettings, easy: ScanSettings) -> list[str]:
     return st.differs_from(easy, fields=CHIP_FIELDS)
 
 
-def differences_text(st: ScanSettings, diffs: list[str]) -> str:
+def _sdd_words(st: ScanSettings, easy: ScanSettings) -> str:
+    """'SDD3 off', 'SDD1 on (flagged saturated)': the detectors that differ from the Easy defaults (which leave out
+    only the SDDs flagged saturated)."""
+    parts = [f"SDD{i + 1} off" if not on else f"SDD{i + 1} on (flagged saturated)"
+             for i, (on, dflt) in enumerate(zip(st.sdd, easy.sdd)) if bool(on) != bool(dflt)]
+    return ", ".join(parts) or rl.describe_value("sdd", st.sdd)
+
+
+def differences_text(st: ScanSettings, diffs: list[str], easy: ScanSettings | None = None) -> str:
     parts = []
     for f in diffs:
         if f == "sdd":
-            parts.append(rl.describe_value("sdd", st.sdd))
+            parts.append(_sdd_words(st, easy) if easy is not None else rl.describe_value("sdd", st.sdd))
         else:
             parts.append(_field_words(f, getattr(st, f)))
     return "; ".join(parts)
@@ -454,6 +479,11 @@ class ReducePerspective(QWidget):
         self.library = None
         self.z_label.lineEdit().editingFinished.connect(self._zone_edited)
         self.z_group.lineEdit().editingFinished.connect(self._zone_edited)
+        for box in (self.z_label, self.z_group):            # an entry picked from the list renames at once
+            box.textActivated.connect(lambda _t: self._zone_edited())
+        self._undo_keys = _UndoKeysPassThrough(self)
+        for edit in (self.z_label, self.z_label.lineEdit(), self.z_group, self.z_group.lineEdit(), self.z_comment):
+            edit.installEventFilter(self._undo_keys)
         self.z_comment.editingFinished.connect(self._zone_edited)
         right.addWidget(self.zone_card)
         self.cards_area = QScrollArea(); self.cards_area.setWidgetResizable(True)
@@ -509,13 +539,14 @@ class ReducePerspective(QWidget):
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(self._zone_selected)
         session.stack_selected.connect(self._stack_selected)
+        session.flags_changed.connect(self._flags_changed)
         session.add_settings_default(self._settings_default)
         on_theme_changed(self, lambda _s: (self.redraw_map(), refill_tones(self.scan_list)))
         self._shortcuts()
         # Easy mode: John Bussey's four steps (scan, XRF window, region, reduce); everything else is Advanced
         mark_advanced(self.load_all_btn, self.tool_buttons["rect-"], self.tool_buttons["polygon+"],
                       self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.show_row,
-                      self.propose_btn, self.stitch_btn, self.load_poly_btn, self.save_poly_btn, self.group_box,
+                      self.propose_btn, self.stitch_btn, self.save_poly_btn, self.group_box,
                       self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
         mark_easy(self.step4_line, self.add_check_btn, *self._badges)
         on_mode_changed(self, self._mode_changed)
@@ -736,12 +767,13 @@ class ReducePerspective(QWidget):
         session = self.session
 
         def job(cb):
+            n = len(sids)
             for i, sid in enumerate(sids):
-                cb(i, len(sids), f"reading {split_stack_id(sid)[1]}")
-                try:
-                    session.stack(sid)
+                cb(i * 100, n * 100, f"reading {split_stack_id(sid)[1]}")
+                try:                                    # each energy folder reports: Cancel stops within one
+                    session.stack(sid, progress=lambda j, m, t="", i=i: cb(i * 100 + int(100 * j / max(m, 1)), n * 100, t))
                 except Exception as err:
-                    cb(i, len(sids), f"{split_stack_id(sid)[1]}: {err}")
+                    cb(i * 100 + 99, n * 100, f"{split_stack_id(sid)[1]}: {err}")
             return sids
 
         self.status_label.setText(f"reading {plural(len(sids), 'scan')} …")
@@ -1348,6 +1380,14 @@ class ReducePerspective(QWidget):
         self.update_preview()
         self.update_actions()
 
+    def _flags_changed(self, _sids) -> None:
+        """New scan flags (Check's probe, a summary found by Reload): the cards show the settings that followed them,
+        step 4 and the chip name the flags."""
+        if any([b.isChecked() for b in c.sdd] != [bool(v) for v in c.s.sdd] or c.i0src.currentData() != c.s.i0_source
+               for c in self._cards):
+            self._rebuild_cards()
+        self._refresh_easy()
+
     def _zone_selected(self, z: Zone | None) -> None:
         self._fill_zone_list()
         self._fill_zone_card(z)
@@ -1404,20 +1444,40 @@ class ReducePerspective(QWidget):
         return easy_scan_settings(scan, self.session.flags_of(scan), labels=list(sd.labels) if sd is not None else None)
 
     def step4_text(self, sid: str | None = None) -> str:
-        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone sum · / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3
-        saturated, left out)': the Easy settings of the current stack, read-only."""
+        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · / I0, edge jump = 1 · de-spike
+        k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)': the settings of the current sample on
+        the current stack, read-only (the Easy defaults until it has some). A flagged SDD still in the sum or an I0
+        flagged invalid still used is named. The zone mean is what the saved files hold (the / I0 traces of the zone
+        sum are the same); the de-spike, on in Easy, was off by default in his GUI, so the line says so."""
+        from aurora.core.constants import DETS
+        from aurora.core.flags import i0_invalid, saturated_dets
         sd = self.current_stack()
         sid = sid or (sd.id if sd is not None else None)
-        easy = self.easy_settings_for(sid) if sid else None
-        if easy is None:
+        z = self.session.zone() if (sid and self.session.project is not None) else None
+        st = (z.settings.get(sid) if z is not None else None) or (self.easy_settings_for(sid) if sid else None)
+        if st is None:
             return "pick a scan in step 1: the settings used are listed here"
-        from aurora.core.flags import saturated_dets
-        scan = self.session.scan_of(sid)
-        sat = sorted(saturated_dets(self.session.flags_of(scan)))
-        dets = "SDD1-4" + (f" ({', '.join(d.upper() for d in sat)} saturated, left out)" if sat else "")
-        i0 = "I0 mcc ch1 (Au mesh)" + (" · good-I0 mean (I0 invalid)" if easy.i0_source == "good" else "")
-        return " · ".join([i0, "TEY mcc ch4", "zone sum", f"fluorescence {NORM_LABELS.get(easy.fluo_norm, easy.fluo_norm)}",
-                           f"de-spike k = {easy.k:g}", dets])
+        flags = self.session.flags_of(self.session.scan_of(sid))
+        sat = saturated_dets(flags)
+        out = [d.upper() for d, on in zip(DETS, st.sdd) if d in sat and not on]
+        kept = [d.upper() for d, on in zip(DETS, st.sdd) if d in sat and on]
+        off = [d.upper() for d, on in zip(DETS, st.sdd) if d not in sat and not on]
+        notes = []
+        for names, text in ((out, "saturated, left out"), (kept, "flagged saturated, still in the sum"), (off, "off")):
+            if names:
+                notes.append(f"{', '.join(names)} {text}")
+        dets = "SDD1-4" + (f" ({'; '.join(notes)})" if notes else "")
+        bad_i0 = i0_invalid(flags)
+        if st.i0_source == "good":
+            i0 = "I0 mcc ch1 (Au mesh) · good-I0 mean" + (" (I0 invalid)" if bad_i0 else "")
+        else:
+            i0 = "I0 mcc ch1 (Au mesh)" + (" (flagged invalid, still used)" if bad_i0 else "")
+        despike = "de-spike off"
+        if st.despike:          # a session without a de-spike rule keeps the earlier one (no control sets it)
+            despike = (f"de-spike k = {st.k:g} (the earlier rule), John Bussey's default: off"
+                       if st.despike_mode == "classic" else f"de-spike k = {st.k:g} (John Bussey's default: off)")
+        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", "zone mean (John Bussey's reduction)",
+                           f"fluorescence {NORM_LABELS.get(st.fluo_norm, st.fluo_norm)}", despike, dets])
 
     def zone_differences(self, z: Zone | None = None) -> dict[str, list[str]]:
         """sid -> the fields of the zone's settings that differ from the Easy defaults (empty lists left out)."""
@@ -1440,7 +1500,7 @@ class ReducePerspective(QWidget):
         if diffs:
             lines = []
             for sid, fields in diffs.items():
-                text = differences_text(z.settings[sid], fields)
+                text = differences_text(z.settings[sid], fields, self.easy_settings_for(sid))
                 lines.append(f"{short_time(sid) or split_stack_id(sid)[1]}: {text}" if len(z.settings) > 1 else text)
             tip = "\n".join(lines)
             self.chip.setToolTip(tip)
@@ -1459,7 +1519,7 @@ class ReducePerspective(QWidget):
         easy = self.easy_settings_for(card.sid)
         d = easy_differences(card.s, easy) if easy is not None else []
         card.chip.setVisible(bool(d))
-        card.chip.setToolTip(differences_text(card.s, d) if d else "")
+        card.chip.setToolTip(differences_text(card.s, d, easy) if d else "")
 
     def reset_to_easy(self) -> int:
         """'Reset to Easy defaults': the differing fields of the current zone's settings rewritten in one edit."""
@@ -1485,6 +1545,7 @@ class ReducePerspective(QWidget):
         """'Add to Check': the zone x current stack queued for Easy Check. Settings that do not exist yet come from
         mode.easy_scan_settings (plus the step-2 window); existing settings are kept (the chip names what differs)."""
         from aurora.app.mode import easy_scan_settings
+        self._zone_edited()                         # a label typed in the box and not committed yet (Ctrl+Return)
         k, _m, sd = self.region_count()
         z = self.session.zone()
         if z is None or sd is None or k == 0:
@@ -1500,7 +1561,10 @@ class ReducePerspective(QWidget):
                 st.n = k
                 z.settings[sd.id] = st
         n = self.session.queue_for_check([CheckItem(self.session.current_holder, z.id, sd.id)])
-        self.status_label.setText(f"{z.label} on {short_time(sd.id) or sd.name} added to Check" if n else
+        # John Bussey's GUI asked for a label first: a default name is saved as it is, so say so
+        unnamed = (" · it is saved under this name: name the sample in the sample box"
+                   if DEFAULT_LABEL.match(z.label) else "")
+        self.status_label.setText(f"{z.label} on {short_time(sd.id) or sd.name} added to Check{unnamed}" if n else
                                   f"{z.label} on {short_time(sd.id) or sd.name} is already in Check")
         return n
 
@@ -1631,13 +1695,16 @@ class ReducePerspective(QWidget):
         if z is None or self.library is None:
             return 0
         n = 0
-        waiting = 0
+        waiting = good_wait = 0
         for sid, st in z.settings.items():
             sd = self.session.stack_loaded(sid)
             if sd is None or not st.include:
                 continue
             if st.roi and not self._ensure_windows(sd, st.roi):
                 waiting += 1
+                continue
+            if st.i0_source == "good" and not self._ensure_good_i0(redraw=False):
+                good_wait += 1
                 continue
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
@@ -1649,8 +1716,15 @@ class ReducePerspective(QWidget):
         msg = f"{plural(n, 'trace')} sent to Compare" if n else "nothing to send: load the zone's scans first"
         if waiting:
             msg += f" ({plural(waiting, 'scan')} still reading its XRF windows: send again in a moment)"
+        if good_wait:
+            msg += f" ({plural(good_wait, 'scan')} waiting for the good-I0 scans being read: send again in a moment)"
         self.status_label.setText(msg)
         return n
+
+    def _ensure_good_i0(self, redraw: bool = True) -> bool:
+        """True when the stacks marked good I0 are loaded; otherwise a job reads them (progress and Cancel in the
+        strip) and the preview is drawn again when they are in."""
+        return self.session.ensure_good_i0(self, self.update_preview if redraw else (lambda: None), taskbar=self.taskbar)
 
     # ------------------------------------------------------------------ preview
     def update_preview(self) -> None:
@@ -1666,6 +1740,7 @@ class ReducePerspective(QWidget):
         else:
             sids = [s for s in z.settings if self.session.stack_loaded(s) is not None][:1]
         traces = []
+        waiting = ""
         for sid in sids:
             sd = self.session.stack_loaded(sid)
             if sd is None:
@@ -1673,9 +1748,12 @@ class ReducePerspective(QWidget):
             st = z.settings[sid]
             if st.roi and not self._ensure_windows(sd, st.roi):
                 continue                                # drawn when the windows are read
+            if st.i0_source == "good" and not self._ensure_good_i0():
+                waiting = "reading the good-I0 scans …"
+                continue                                # drawn when they are read
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
             t = zone_traces_cached(sd, pix, st, good)
             if t is not None:
                 traces.append((short_time(sid) or sd.name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text}))
-        self.preview.set_traces(traces)
+        self.preview.set_traces(traces, waiting=waiting)

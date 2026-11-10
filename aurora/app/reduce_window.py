@@ -1,10 +1,13 @@
 """Reduce step 2, the XRF window (John Bussey's step 2): the emission spectrum of the stack, the survey or the region
 (log y), one draggable window per SDD in the series colours with their dashes, lo / hi spin boxes in channels with
 the eV equivalent, and the presets (every fixed line of roi_bins.json, the line of the edge when a calibration
-exists, custom).
+exists, John Bussey's default 60:83 when neither gives the edge's line, custom). The total XRF is said to hold every
+emission line, so that it is not taken for the PFY of the edge's line.
 
 The card shows a choice {'line': label, 'roi': windows or None}: a fixed line keeps roi None (the reduced stack's own
-bins); the line of the edge and custom windows set ScanSettings.roi. `committed` carries a choice made by the user;
+bins); the line of the edge and custom windows set ScanSettings.roi. Linked edits (Easy mode, where one lo / hi pair
+stands for the four detectors, or 'same range for all detectors' ticked) move every detector's window by the same
+number of channels, so the per-detector windows of a fixed line or of the line of the edge keep their offsets. `committed` carries a choice made by the user;
 the Reduce perspective writes it into the zone's settings through session.edit. Reading the spectra is a job of the
 window (Cancel, progress); the result is cached by aurora.core.xrf_windows.
 """
@@ -13,11 +16,11 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSizePolicy, QSpinBox, QWidget
 
 from aurora.app import jobs
 from aurora.app.help_text import explain_all, labelled
-from aurora.app.mode import mark_advanced
+from aurora.app.mode import is_advanced, mark_advanced
 from aurora.app.theme import curve, dash, make_plot, mk_pen, on_theme_changed, with_alpha
 from aurora.app.vocab import DET_LABELS, unit_suffix
 from aurora.app.widgets import Card, FlowLayout, pair, set_plot_hint
@@ -46,11 +49,15 @@ class XrfWindowCard(Card):
         self._updating = False
         self._spectrum = None                # (4, 256) shown, or None
         self._edge_line = None               # xw.EdgeLine when offered
+        self._john = None                    # (line, windows): John Bussey's default window when offered
         # presets row
         self.preset = QComboBox()
         self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.preset.setMinimumContentsLength(10)
-        self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset))
+        self.preset.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)     # the label keeps its width only
+        plab = labelled("preset", self.preset, "reduce.window.preset")
+        plab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.body.addWidget(pair(plab, self.preset))
         # the spectrum
         self.plot = make_plot(x="channel", y="counts")
         self.plot.setMinimumHeight(100)
@@ -138,6 +145,12 @@ class XrfWindowCard(Card):
             if self._edge_line is not None:
                 self.preset.addItem(f"line of the edge: {self._edge_line.label} {self._edge_line.line_ev:.1f} eV",
                                     ("edge", self._edge_line.label))
+            # no fixed bins nor calibration for the edge's line (John Bussey's own folders): his default window
+            john = xw.john_default_windows(getattr(sd, "edge", None)) if sd is not None else None
+            self._john = john if (john is not None and john[0] not in labs and self._edge_line is None) else None
+            if self._john is not None:
+                lo, hi = xw.JOHN_DEFAULT
+                self.preset.addItem(f"John Bussey's {lo}:{hi} ({self._john[0]})", ("john", self._john[0]))
             self.preset.addItem(CUSTOM, ("custom", ""))
         finally:
             self._updating = False
@@ -165,7 +178,7 @@ class XrfWindowCard(Card):
         self._updating = True
         try:
             self.preset.setCurrentIndex(self._preset_index())
-            if roi and not xw.same_for_all(self._windows):
+            if roi and not xw.same_for_all(self._windows) and is_advanced():     # Easy never flips a hidden control
                 self.same_range.setChecked(False)
             self._place_regions()
             self._fill_spins()
@@ -183,6 +196,8 @@ class XrfWindowCard(Card):
                                                                                       xw.bins_windows(bins, lab)):
                 return i                                # a roi_bins line the stack was not reduced with
             if self._custom and kind == "edge" and self._edge_line is not None and xw.same(self._windows, self._edge_line.windows):
+                return i
+            if self._custom and kind == "john" and self._john is not None and xw.same(self._windows, self._john[1]):
                 return i
         return max(0, self.preset.count() - 1)          # custom
 
@@ -212,6 +227,9 @@ class XrfWindowCard(Card):
         elif kind == "edge" and self._edge_line is not None:
             self._line, self._custom = self._edge_line.label, True
             self._windows = dict(self._edge_line.windows)
+        elif kind == "john" and self._john is not None:
+            self._line, self._custom = self._john[0], True
+            self._windows = xw.normalise_windows(self._john[1])
         else:
             self._custom = True
         self._updating = True
@@ -223,13 +241,27 @@ class XrfWindowCard(Card):
         self._describe()
         self.commit_now()
 
+    def _linked(self) -> bool:
+        """The four windows are edited together: Easy mode (one lo / hi pair, the checkbox hidden) or 'same range'."""
+        return self.same_range.isChecked() or not is_advanced()
+
+    def _shown_det(self) -> int:
+        """The detector whose window the lo / hi boxes show: SDD1 when linked, else the one 'for' names."""
+        return 0 if self._linked() else self.det.currentIndex()
+
     def set_window(self, det: int | None, lo: int, hi: int, commit: bool = True) -> None:
-        """Set one detector's window (or all four with det None or 'same range' ticked)."""
+        """Set one detector's window to [lo, hi); det None gives all four that window. A linked edit (_linked) moves
+        every detector's window by the change of det's, so windows that differ per detector keep their offsets."""
         lo, hi = int(lo), int(hi)
         w = xw.normalise_windows({DETS[0]: [lo, hi]})[DETS[0]]
-        targets = range(len(DETS)) if det is None or self.same_range.isChecked() else [det]
-        for k in targets:
-            self._windows[DETS[k]] = list(w)
+        if det is None:
+            for d in DETS:
+                self._windows[d] = list(w)
+        elif self._linked():
+            dlo, dhi = w[0] - self._windows[DETS[det]][0], w[1] - self._windows[DETS[det]][1]
+            self._windows = xw.normalise_windows({d: [a + dlo, b + dhi] for d, (a, b) in self._windows.items()})
+        else:
+            self._windows[DETS[det]] = list(w)
         self._custom = True
         self._updating = True
         try:
@@ -246,12 +278,14 @@ class XrfWindowCard(Card):
         if self._updating:
             return
         lo, hi = self.regions[k].getRegion()
-        if self.same_range.isChecked():                 # dragging one moves all four
+        if self._linked():                              # dragging one moves all four by as much
+            a, b = self._windows[DETS[k]]
             self._updating = True
             try:
                 for j, r in enumerate(self.regions):
                     if j != k:
-                        r.setRegion((lo, hi))
+                        wj = self._windows[DETS[j]]
+                        r.setRegion((wj[0] + lo - a, wj[1] + hi - b))
             finally:
                 self._updating = False
 
@@ -264,7 +298,7 @@ class XrfWindowCard(Card):
     def _spin_changed(self) -> None:
         if self._updating:
             return
-        k = 0 if self.same_range.isChecked() else self.det.currentIndex()
+        k = self._shown_det()
         lo, hi = self.lo.value(), self.hi.value()
         if hi <= lo:
             hi = lo + 1
@@ -299,7 +333,7 @@ class XrfWindowCard(Card):
             r.setVisible(self._sd is not None)
 
     def _fill_spins(self) -> None:
-        k = 0 if self.same_range.isChecked() else self.det.currentIndex()
+        k = self._shown_det()
         lo, hi = self._windows[DETS[k]]
         old = self._updating
         self._updating = True
@@ -316,13 +350,23 @@ class XrfWindowCard(Card):
             return
         proj = self.session.project
         cal = getattr(proj, "calibration", None)
-        k = 0 if self.same_range.isChecked() else self.det.currentIndex()
+        k = self._shown_det()
         lo, hi = self._windows[DETS[k]]
         a, b = xw.channel_ev(cal, DETS[k], lo), xw.channel_ev(cal, DETS[k], hi)
         nominal = cal is None or not getattr(cal, "calibrated", False)
-        who = "all detectors" if self.same_range.isChecked() and xw.same_for_all(self._windows) else DET_LABELS[k]
+        same = xw.same_for_all(self._windows)
+        who = "all detectors" if self._linked() and same else DET_LABELS[k]
+        others = ""
+        if self._linked() and not same:                 # one lo / hi pair, four different windows: name them all
+            others = " · " + ", ".join(f"{DET_LABELS[j]} {self._windows[d][0]}:{self._windows[d][1]}"
+                                       for j, d in enumerate(DETS) if j != k) + " move with it"
+        if xw.same(self._windows, xw.bins_windows(None, xw.TOTAL_LABEL)) and getattr(self._sd, "edge", None):
+            from aurora.core.lines import resonant_line
+            others += (f" · total XRF holds every emission line, not only the {resonant_line(*self._sd.edge)} of the edge"
+                       + (f" (John Bussey's GUI started with {xw.JOHN_DEFAULT[0]}:{xw.JOHN_DEFAULT[1]})"
+                          if self._john is not None else ""))
         self.ev_label.setText(f"{who}: channels {lo}:{hi} = {a:.0f}–{b:.0f} eV"
-                              + (" (10 eV/ch nominal)" if nominal else " (calibrated)"))
+                              + (" (10 eV/ch nominal)" if nominal else " (calibrated)") + others)
 
     def refresh_spectrum(self) -> None:
         """Draw the spectrum of the chosen source; the stack's is read in a job the first time (cached)."""

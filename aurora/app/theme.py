@@ -509,17 +509,16 @@ def set_tone(widget, tone: str | None) -> None:
 class AuroraStyle(QProxyStyle):
     """Fusion with AURORA's own check boxes, radio buttons and item-view check indicators, drawn from the tokens at
     paint time: card fill with an edge border, action fill with an on_action tick, a dash for partial, alt fill with
-    a line border when disabled. Checkable list rows therefore always show a box in both schemes."""
+    a line border when disabled. Checkable list rows therefore always show a box in both schemes.
+
+    No Python pixelMetric: Qt asks for pixel metrics hundreds of thousands of times while it lays out and restyles
+    the window, and each call into Python doubled the time of a theme or text-size switch on a real beamtime. Check
+    boxes and radio buttons take their px(16) size from the style sheet; item-view and menu check marks keep
+    Fusion's size (Qt sizes those rows through the base style, which a style sheet cannot change)."""
 
     def __init__(self):
         super().__init__(QStyleFactory.create("Fusion"))
         self.setObjectName("aurora_style")
-
-    def pixelMetric(self, metric, option=None, widget=None):
-        if metric in (QStyle.PM_IndicatorWidth, QStyle.PM_IndicatorHeight, QStyle.PM_ExclusiveIndicatorWidth,
-                      QStyle.PM_ExclusiveIndicatorHeight):
-            return px(16)
-        return super().pixelMetric(metric, option, widget)
 
     def drawPrimitive(self, element, option, painter, widget=None):
         if element in (QStyle.PE_IndicatorCheckBox, QStyle.PE_IndicatorItemViewItemCheck):
@@ -722,6 +721,7 @@ QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabl
 QComboBox QAbstractItemView {{ background: {t['card']}; color: {t['ink']}; border: 1px solid {t['edge']}; border-radius: 0;
     selection-background-color: {t['select']}; selection-color: {t['select_fg']}; }}
 QCheckBox, QRadioButton {{ color: {t['ink']}; spacing: 6px; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width: {px_(16)}; height: {px_(16)}; }}
 QCheckBox:disabled, QRadioButton:disabled {{ color: {t['disabled']}; }}
 QSpinBox, QDoubleSpinBox {{ padding-right: 20px; }}
 QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 18px;
@@ -918,10 +918,15 @@ def apply_theme(app=None, appearance: str | None = None, text_size: str | None =
     appearance = appearance or get("appearance")
     size_key = text_size or get("text_size")
     _STATE["applying"] = True                   # the colour-scheme signals raised here are not OS changes
+    wait = isinstance(app, QGuiApplication)
+    if wait:                                    # restyling every widget of a full window takes seconds
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
     try:
         return _apply(app, appearance, size_key)
     finally:
         _STATE["applying"] = False
+        if wait:
+            QGuiApplication.restoreOverrideCursor()
 
 
 def _apply(app, appearance: str, size_key: str) -> str:

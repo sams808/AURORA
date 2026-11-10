@@ -249,6 +249,23 @@ def test_indicators_always_show_a_box(qapp, sch):
     theme.apply_theme(qapp, appearance="light")
 
 
+def test_pixel_metrics_stay_in_cpp(qapp):
+    """The application style has no Python pixelMetric: Qt asks for metrics hundreds of thousands of times per
+    restyle, and the calls into Python doubled a theme or text-size switch on the real beamtime (threads-7). Check
+    boxes and radio buttons still get px(16) from the style sheet, at every text size."""
+    from PySide6.QtWidgets import QCheckBox, QRadioButton, QStyle
+    assert "pixelMetric" not in vars(theme.AuroraStyle)
+    cb, rb = QCheckBox("x"), QRadioButton("y")
+    for size, want in (("normal", 16), ("large", 18), ("larger", 21)):
+        theme.apply_theme(qapp, appearance="light", text_size=size)
+        st = qapp.style()
+        assert theme.px(16) == want
+        assert st.pixelMetric(QStyle.PM_IndicatorWidth, None, cb) == st.pixelMetric(QStyle.PM_IndicatorHeight, None, cb) == want
+        assert st.pixelMetric(QStyle.PM_ExclusiveIndicatorWidth, None, rb) == want
+    theme.apply_theme(qapp, appearance="light", text_size="normal")
+    cb.deleteLater(); rb.deleteLater()
+
+
 def test_make_plot_and_legend(qapp, monkeypatch):
     import pyqtgraph as pg
     theme.apply_theme(qapp, appearance="light")
