@@ -290,8 +290,9 @@ HELP: dict[str, tuple[str, str, str]] = {
                       "tick of the scan). A row with a bad message starts unticked.", "Looks OK",
                       "51-spectra-to-check"),
     # ------------------------------------------------------------------ compare
-    "compare.add_folder": ("Add the spectra saved in a folder: John Bussey's _full_reduced.csv / _absorption.csv, "
-                           "sgm_report _xanes.csv, AURORA zone CSVs.", "Add saved spectra", "61-loading"),
+    "compare.add_folder": ("Add the spectra saved in a folder: John Bussey's _full_reduced.csv / _absorption.csv "
+                           "(the files Check saves); Advanced mode also reads sgm_report _xanes.csv and AURORA zone "
+                           "CSVs.", "Add saved spectra", "61-loading"),
     "compare.add_csv": ("Add any column file; the energy column is found by name or taken as the first column.",
                         "Add CSV", "61-loading"),
     "compare.references": ("Pick spectra from the reference folder (Settings), filtered by element.", "References",
@@ -336,7 +337,10 @@ HELP: dict[str, tuple[str, str, str]] = {
                          "63-stacked-plot"),
     "compare.col.show": ("Plotted.", "Show", "62-the-table"),
     "compare.col.label": ("Editable; Rename and Duplicate act on the selected rows.", "Label", "62-the-table"),
-    "compare.col.signal": ("sdd-scaled, TEY, sdd1…, as read from the file.", "Signal", "62-the-table"),
+    "compare.col.signal": ("sdd-scaled: the four SDD signals each scaled to 0–1 (min-max), summed and divided by I0 "
+                           "(John Bussey's fluorescence signal); sdd_total: the summed counts / I0; TEY: total electron "
+                           "yield / I0; other files: their columns as named (sdd1…, PFY_…_over_I0).", "Signal",
+                           "62-the-table"),
     "compare.col.shift": ("Added to the energy axis (calibration offsets), eV.", "Shift eV", "62-the-table"),
     "compare.col.norm": ("larch (two lines around E0), legacy (constant pre / post means over absolute windows), "
                          "tey_line (pre-edge line only), none.", "Norm", "62-the-table"),

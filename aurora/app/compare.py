@@ -41,6 +41,12 @@ EASY_COLS = (COL["show"], COL["fit"], COL["label"], COL["signal"], COL["shift"],
 ADVANCED_COLS = tuple(i for i in range(len(COLUMNS)) if i not in EASY_COLS)
 LABEL_MIN_PX = 170                  # the Label column in Advanced: at least this wide, the table scrolls sideways
 AUTO_PRE, AUTO_POST = "auto 15 %", "auto 20 %"
+# the empty library's sentence and the folder dialog's title, by mode (Easy names only what Easy can do)
+EMPTY_TEXT = {False: "The library is empty: save spectra in Check (Save ticked → Compare), or add a folder of John "
+                     "Bussey's saved spectra.",
+              True: "The library is empty: add the spectra saved by Check, pick references, or send a zone from Reduce."}
+FOLDER_TITLE = {False: "Folder of John Bussey's saved spectra (*_full_reduced.csv, *_absorption.csv)",
+                True: "Folder of saved spectra (*_full_reduced.csv, *_absorption.csv, *_xanes.csv, AURORA zone CSVs)"}
 
 
 def pick_colour(parent: QWidget, initial: str, title: str) -> str | None:
@@ -276,10 +282,10 @@ class ComparePerspective(QWidget):
         split.setSizes([600, 900])
         self.body = overlay_host(split)
         root.addWidget(self.body, 1)
-        self.empty_state = EmptyState("The library is empty: add the spectra saved by Check, pick references, or send a "
-                                      "zone from Reduce.",
+        self.empty_state = EmptyState(EMPTY_TEXT[mode.is_advanced()],
                                       [("Add saved spectra…", self._add_folder), ("References…", self._references, True)],
                                       icon="compare", parent=self.body)
+        on_mode_changed(self.empty_state, lambda adv: self.empty_state.label.setText(EMPTY_TEXT[adv]), call_now=False)
         for w, key in ((self.labels_on, "labels"), (self.signal_in_label, "signal_in_label"), (self.deriv, "deriv"),
                        (self.deriv_smooth, "smooth"), (self.diff_btn, "difference"), (self.show_peaks, "peaks")):
             explain(w, f"compare.{key}")
@@ -698,12 +704,11 @@ class ComparePerspective(QWidget):
 
     # ------------------------------------------------------------------ files
     def _add_folder(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Folder of saved spectra (*_full_reduced.csv, *_xanes.csv, AURORA zone CSVs)",
-                                             default_dir("reduced", self.lib))
+        easy = not mode.is_advanced()
+        d = QFileDialog.getExistingDirectory(self, FOLDER_TITLE[not easy], default_dir("reduced", self.lib))
         if not d:
             return
         remember_dir("reduced", Path(d))
-        easy = not mode.is_advanced()
         n = len(self.lib.add_folder(Path(d), john_only=easy))
         skipped = getattr(self.lib, "last_skipped", [])
         self.status.setText(f"{plural(n, 'trace')} added from {d}" if n else f"no reduced CSVs found in {d}")

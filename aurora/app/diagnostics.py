@@ -26,15 +26,24 @@ LOG_TAIL = 200                       # lines of the log copied into the diagnost
 # ----------------------------------------------------------------------------- keyboard shortcuts
 def shortcut_rows(window) -> list[tuple[str, str, str, list]]:
     """[(section, action text, shortcut text, [actions])] for every QAction with a shortcut in the window, grouped by
-    section (shortcuts.add's section, else the action's own), identical entries merged."""
+    section (shortcuts.add's section, else the action's own), identical entries merged. A hidden action is left out
+    (its key does nothing: the Go-to entry of a perspective hidden in Easy mode, or the Easy hint on the same key in
+    Advanced mode), except an Advanced tool's, which is listed with ' (Advanced mode)' in Easy mode."""
     from aurora.app import shortcuts
+    from aurora.app.mode import is_advanced
+    adv = is_advanced()
     rows: dict[tuple[str, str, str], list] = {}
     for a in window.findChildren(QAction):
         seqs = [s for s in a.shortcuts() if not s.isEmpty()]
         if not seqs:
             continue
+        marked = bool(a.property("aurora_advanced"))
+        if not a.isVisible() and not marked:
+            continue
         section = shortcuts.section_of(a)
         text = a.text().replace("&", "").strip() or a.toolTip() or "(unnamed)"
+        if marked and not adv:
+            text += " (Advanced mode)"
         keys = ", ".join(s.toString(QKeySequence.NativeText) for s in seqs)
         rows.setdefault((section, text, keys), []).append(a)
     order = {s: i for i, s in enumerate(("File", "Edit", "View", "Go to", "Help", "General"))}

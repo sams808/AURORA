@@ -151,7 +151,8 @@ def test_the_shortcuts_dialog_lists_every_shortcut(qapp, two_holders):
     listed = {id(a) for _s, _t, _k, acts in d.rows for a in acts}
     with_keys = [a for a in win.findChildren(QAction) if any(not s.isEmpty() for s in a.shortcuts())]
     assert len(with_keys) >= 20
-    missing = [a.text() for a in with_keys if id(a) not in listed]
+    # every key that works is listed; a hidden twin on the same key (Go to > Maps in Easy mode) is not
+    missing = [a.text() for a in with_keys if id(a) not in listed and (a.isVisible() or a.property("aurora_advanced"))]
     assert not missing, missing
     text = d.text()
     for needle in ("Ctrl+3", "Ctrl+Shift+A", "Ctrl+PgDown", "Ctrl+Return", "Ctrl+/", "Shift+F1", "Esc"):
@@ -160,6 +161,34 @@ def test_the_shortcuts_dialog_lists_every_shortcut(qapp, two_holders):
     sections = {s for s, _t, _k, _a in d.rows}
     assert {"File", "View", "Go to", "Help", "General"} <= sections
     d.deleteLater()
+
+
+def test_the_shortcuts_dialog_lists_only_keys_that_work(qapp, two_holders):
+    """Easy mode: one Ctrl+7 row (the hint that Maps is Advanced), the Advanced tools of Reduce marked as such; every
+    listed row has a visible action or carries the mark. Advanced mode: one Ctrl+7 row (Maps), no mark."""
+    from PySide6.QtTest import QTest
+    from aurora.app.diagnostics import shortcut_rows
+    win = two_holders
+    ctrl7 = QKeySequence("Ctrl+7").toString(QKeySequence.NativeText)
+    assert not mode.is_advanced()
+    rows = shortcut_rows(win)
+    assert [(s, t) for s, t, k, _a in rows if k == ctrl7] == [("Go to", "Maps (Advanced mode only)")]
+    texts = {(s, t) for s, t, _k, _a in rows}
+    assert ("Reduce", "Brush tool (brush+) (Advanced mode)") in texts and ("Reduce", "Rectangle tool (rect+)") in texts
+    for s, t, _k, acts in rows:
+        assert any(a.isVisible() for a in acts) or t.endswith(" (Advanced mode)"), (s, t)
+    win.show_perspective("reduce")
+    pump(qapp)
+    QTest.keyClick(win.reduce.map, Qt.Key_B)                  # the dialog's word: B does nothing in Easy mode
+    assert win.reduce.map.vb.tool != "brush+"
+    mode.set_advanced(True)
+    try:
+        rows = shortcut_rows(win)
+        assert [(s, t) for s, t, k, _a in rows if k == ctrl7] == [("Go to", "Maps")]
+        assert not [t for _s, t, _k, _a in rows if "(Advanced mode)" in t]
+        assert ("Reduce", "Brush tool (brush+)") in {(s, t) for s, t, _k, _a in rows}
+    finally:
+        mode.set_advanced(False)
 
 
 def _visible_texts(win) -> list[str]:

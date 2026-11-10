@@ -134,7 +134,7 @@ key also deletes a sample, and the Help window, tooltips and messages show the M
 | General | **Esc** cancel the running task, **Ctrl+Return** the main action of the page |
 | Reduce | **V** navigate, **R** rect+, **L** lasso+, **E** rect- (Advanced), **B** brush+ (Advanced), **Shift+B** brush- (Advanced), **P** polygon+ (Advanced), **+** / **-** brush size (Advanced), **N** new sample, **Del** delete the sample, **Alt+Up** / **Alt+Down** previous / next sample, **[** / **]** previous / next scan, **F** fit the view, **Ctrl+Shift+C** / **Ctrl+Shift+V** copy / paste the scan settings (Advanced) |
 
-The shortcuts of Advanced tools do nothing in Easy mode.
+The shortcuts of Advanced tools do nothing in Easy mode; there the dialog lists them with *(Advanced mode)*.
 
 ### 1.4 The session: saving, undo and backups
 
@@ -145,7 +145,7 @@ and looking at it writes nothing. Every change to zones, settings or good-I0 can
 stroke, or a run of edits of the same kind less than 1.5 s apart, is one step, and so are **New sample** with the
 first rectangle drawn into it, one **Propose zones**, one import and one restore. The undo history lives in memory
 and ends when AURORA closes. **Reload** (**F5**) keeps the holder, the zone and the stack on screen, the stacks already
-read (unless their folder changed) and the undo history; new holders are added at the end.
+read (unless their folder changed), the Check queue and the undo history; new holders are added at the end.
 
 The session is never lost: session.json is replaced in one step (a crash mid-way leaves the previous file), the
 previous good file is kept as `session.json.bak`, and a copy goes to `.aurora/backups/` at most every 10 minutes while
@@ -372,6 +372,8 @@ card on the right. **Propose zones**, **Stitch…**, **Load polygon…** and **S
 (Advanced). **Load polygon…** reads a polygon ROI saved by John Bussey's GUI (`<sample>_polygon_roi.json`, at least
 three [x, y] vertices in mm) into a new sample named after the file; **Save polygon…** writes the selected sample in
 that format when it is exactly one polygon.
+A label picked from the **sample** list renames the sample at once; **Ctrl+Z** in that box undoes the last edit when
+the box has no typing of its own to undo.
 
 A zone is attached to every complete stack of the holder that it covers, loaded or not: the stage coordinates are
 read from each stack's .h5 when the project opens (no detector data is read), and every covered stack gets its
@@ -392,7 +394,8 @@ undo step, and the session is backed up just before.
 - Easy mode (**4 · Reduce**): a read-only line of the settings used, for example *I0 mcc ch1 (Au mesh) · TEY mcc ch4 ·
   zone sum · fluorescence / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3 saturated, left out)*, and **Add to
   Check** (**Ctrl+Return**), which queues the selected sample on the current scan for Check (disabled while the region
-  holds no point). Settings that do not exist yet are made from the Easy defaults.
+  holds no point). Settings that do not exist yet are made from the Easy defaults. A flagged SDD that is still in the
+  sum is named (*SDD1 flagged saturated, still in the sum*), and so is an I0 flagged invalid that is still used.
 - When a sample's settings differ from the Easy defaults (set in Advanced, or by a rule), Easy mode shows the chip
   *advanced settings in use*; its tooltip lists the fields (*fluorescence normalisation: / I0, maximum = 1; SDD3
   off*). **Reset to Easy defaults** rewrites them in one step (**Edit > Undo** brings them back). Switching modes
@@ -525,6 +528,7 @@ A row with a bad message starts unticked. A row whose scan cannot be read shows 
 is reported once). **Tick all** and **Untick all** change every row. Right-click a row for *Show the region in Reduce*
 and *Remove from the queue*. A queued scan whose holder was never checked (no sgm_report summary, no earlier check)
 gets the count-rate probe of its holder in the background, so the messages can name saturated SDDs and an invalid I0.
+The queue is saved with the session: **Reload** and a restart keep it.
 
 **view** (in **Preview of the selected spectrum**) chooses what the preview of the selected row shows (John Bussey's
 five views): *detector signals, cleaned*; *fluorescence sum and its bad points* (crosses at the bad energies, as
@@ -560,7 +564,8 @@ The results are kept in `.aurora/qc.json`: the table is filled again when the pr
 whose files changed since its check (newer or more energy folders) is checked again in the background. The line under
 the table says when the checks ran and that the references are within ±150 eV. AURORA's verdicts act like the
 sgm_report summary: new zones leave saturated SDDs out of the sum and use the good-I0 mean when I0 is invalid, also on
-a beamtime without sgm_report.
+a beamtime without sgm_report. Settings made before a verdict (or before an sgm_report summary that a **Reload** finds)
+follow it too, unless that field was changed on a card: one undo step, named in the status line.
 
 **I0 of the holder's scans (per-pixel mean)** scores every scan's I0 curve: level, biggest step, roughness, number of
 non-positive points. Tick the good ones, or **Auto-select good I0**; their mean is what scans set to *good-I0 mean*
@@ -635,7 +640,7 @@ raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV a
 | Show | plotted |
 | Fit | the row is available in Fit |
 | Label | editable; **Rename** and **Duplicate** act on the selected rows; ink text with a swatch of the trace's colour and dash |
-| Signal | sdd-scaled, TEY, sdd1…, as read from the file (a list of the file's signals) |
+| Signal | a list of the file's signals. John Bussey's files give *sdd-scaled* (the four SDD signals each scaled to 0–1 by their own minimum and maximum, summed, then divided by I0: his fluorescence signal), *sdd_total* (the summed counts / I0) and *TEY* (total electron yield / I0); other files give their columns as named (sdd1…, PFY_…_over_I0) |
 | Norm | larch (two lines around E0), legacy (constant pre / post means over absolute windows), tey_line (pre-edge line only), none (a list) |
 | Shift eV | added to the energy axis (calibration offsets) |
 | Pre lo / hi, Post lo / hi | the fitting windows: eV from E0 for larch and tey_line; absolute eV for legacy, where a blank window reads *auto 15 %* / *auto 20 %* (the first 15 % and the last 20 % of the scan, John Bussey's defaults) |

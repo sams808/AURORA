@@ -269,3 +269,50 @@ def test_a_stack_that_cannot_be_read_gives_an_error_row(qapp, fake_project, erro
     assert error_dialogs                                   # the failed read was reported once, calmly
     win.session._save_timer.stop()
     win.close()
+
+
+def test_the_queue_survives_reload_and_a_restart(qapp, fake_project, monkeypatch):
+    """The queue is saved with the session: File > Reload keeps it and a restart brings it back, with the first
+    verdict applied once (a bad row ticked again by hand stays ticked)."""
+    from aurora.app import check
+    from aurora.app.main import MainWindow
+    from aurora.core.model import Project
+    from wp3_helpers import close, open_window, pump
+    monkeypatch.setattr(check.qc, "check_zone", lambda traces, stack=None, flags=(), n_total=None:
+                        [("bad", "SDD1: no finite values (missing files?)")])
+    win, sid = open_window(qapp, Project.discover(fake_project))
+    try:
+        rd, ses, ck = win.reduce, win.session, win.check
+        x0, x1, y0, y1 = ses.stack_loaded(sid).bbox
+        rd.map.rect_drawn.emit(x0, x1, y0, y1)
+        pump(qapp)
+        z = ses.zone()
+        assert rd.add_to_check() == 1
+        win.show_perspective("check")
+        assert win.jobs.wait_idle(30000)
+        pump(qapp)
+        assert len(ck.queue_rows()) == 1 and z.settings[sid].include is False     # the first verdict: unticked
+        ck.set_all_ok(True)                                                       # ticked again by hand
+        win.home.set_project(Project.discover(fake_project))                      # File > Reload
+        pump(qapp)
+        assert win.jobs.wait_idle(30000)
+        pump(qapp)
+        assert len(ses.check_queue) == 1 and len(ck.queue_rows()) == 1 and not ck.queue_state.isVisible()
+        assert ses.zone(z.id).settings[sid].include is True
+    finally:
+        close(win)
+    win2 = MainWindow()                                                           # a restart
+    win2.resize(1500, 940)
+    win2.show()
+    try:
+        win2.home.set_project(Project.discover(fake_project))
+        pump(qapp)
+        win2.show_perspective("check")
+        assert win2.jobs.wait_idle(30000)
+        pump(qapp)
+        ses2 = win2.session
+        assert [(it.zone_id, it.sid) for it in ses2.check_queue] == [(z.id, sid)]
+        assert len(win2.check.queue_rows()) == 1 and not win2.check.queue_state.isVisible()
+        assert ses2.zone(z.id).settings[sid].include is True                     # not unticked a second time
+    finally:
+        close(win2)

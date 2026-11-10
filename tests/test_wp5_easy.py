@@ -155,3 +155,55 @@ def test_advanced_shows_every_column_with_the_same_rows(qapp, demo):
     mode.set_advanced(False)
     pump(qapp)
     assert [r.to_json() for r in win.library.requests] == reqs
+
+
+def test_easy_texts_name_only_what_easy_can_do(qapp, monkeypatch):
+    """The empty library, the folder dialog's title and the tooltip of 'Add saved spectra' name in Easy mode only what
+    Easy mode reads and shows (no References, no zone sent from Reduce, no _xanes.csv)."""
+    from aurora.app.help_text import HELP
+    from aurora.app.main import MainWindow
+    titles = []
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda parent, title, *a, **k:
+                                                                           titles.append(title) or ""))
+    win = MainWindow()
+    try:
+        cmp_ = win.compare
+        assert not mode.is_advanced()
+        text = cmp_.empty_state.text()
+        assert "John Bussey" in text and "reference" not in text and "Reduce" not in text, text
+        cmp_._add_folder()
+        assert "_full_reduced.csv" in titles[-1] and "xanes" not in titles[-1] and "AURORA zone" not in titles[-1]
+        assert "Advanced mode also reads sgm_report _xanes.csv" in HELP["compare.add_folder"][0]
+        mode.set_advanced(True)
+        assert "pick references" in cmp_.empty_state.text() and "send a zone from Reduce" in cmp_.empty_state.text()
+        cmp_._add_folder()
+        assert "_xanes.csv" in titles[-1] and "AURORA zone CSVs" in titles[-1]
+    finally:
+        mode.set_advanced(False)
+        win.session._save_timer.stop()
+        win.close()
+
+
+def test_sdd_scaled_is_defined_where_it_is_shown(tmp_path):
+    """'sdd-scaled', the main signal of Easy Compare and Fit, is defined in the Signal column's tooltip and in MANUAL
+    6.2 the way John Bussey's xas_core computes it (raw_signal_array: the four detectors min-max scaled and summed;
+    build_signal_frame: then / I0), and load_spectra computes exactly that."""
+    from aurora.app.help_text import HELP
+    from aurora.core.compare import load_spectra
+    tip = HELP["compare.col.signal"][0]
+    assert "as read from the file" not in tip and "scaled to 0–1 (min-max), summed and divided by I0" in tip
+    manual = (Path(__file__).resolve().parent.parent / "aurora" / "resources" / "docs" / "MANUAL.md").read_text(
+        encoding="utf-8")
+    row = next(line for line in manual.splitlines() if line.startswith("| Signal |"))
+    assert "scaled to 0–1 by their own minimum and maximum, summed, then divided by I0" in row
+    E = np.linspace(680.0, 720.0, 21)
+    step = 1.0 / (1.0 + np.exp(-(E - 696.0)))
+    det = [100 + 900 * step, 50 + 300 * step ** 2, 10 + 40 * step, 200 + 100 * np.sqrt(step)]
+    i0 = np.linspace(2.0, 3.0, len(E))
+    rows = "\n".join(",".join(f"{v:.6f}" for v in (e, *(d[k] for d in det), i0[k], 0.5 * step[k], sum(d[k] for d in det)))
+                     for k, e in enumerate(E))
+    p = tmp_path / "S_full_reduced.csv"
+    p.write_text("# sample_label: S\nenergy,sdd1,sdd2,sdd3,sdd4,I0,TEY,sdd_total\n" + rows + "\n", encoding="utf-8")
+    got = next(s for s in load_spectra(p) if s.signal == "sdd-scaled")
+    want = sum((d - d.min()) / (d.max() - d.min()) for d in det) / i0
+    assert np.allclose(got.y, want, rtol=1e-5)
