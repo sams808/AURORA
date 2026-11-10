@@ -25,6 +25,7 @@ SELF = "aurora-sgm"
 # the licence AURORA uses, so the LGPL text of packaging/LICENSES replaces it
 QT_DISTS = ("pyside6", "shiboken6")          # every PySide6* distribution and shiboken6
 LICENCE_WORDS = ("LICENSE", "LICENCE", "COPYING", "NOTICE")
+CODE_SUFFIXES = (".py", ".pyc", ".pyi", ".pyd", ".so", ".dll", ".dylib", ".json", ".html", ".js", ".css", ".png", ".svg")
 
 
 @dataclass
@@ -40,11 +41,21 @@ def _norm(name: str) -> str:
     return name.lower().replace("_", "-").replace(".", "-")
 
 
+def _is_licence_file(name: str) -> bool:
+    """LICENSE, COPYING.txt, NOTICE.md, ... and the files whose suffix names the licence: LICENSE.APACHE and
+    LICENSE.BSD (packaging), LICENSE.external (fontTools). Never code or data (license.py, licenses.json)."""
+    n, suffix = name.upper(), Path(name).suffix.lower()
+    if not any(k in n for k in LICENCE_WORDS):
+        return False
+    return suffix in ("", ".txt", ".md", ".rst") or (n.startswith(LICENCE_WORDS) and suffix[1:].isalpha()
+                                                     and suffix not in CODE_SUFFIXES)
+
+
 def _licence_files(dist) -> list[str]:
     texts = []
     for f in dist.files or []:
         n = f.name.upper()
-        if not any(k in n for k in LICENCE_WORDS) or f.suffix.lower() not in ("", ".txt", ".md", ".rst"):
+        if not _is_licence_file(f.name):
             continue
         if "QT-COMMERCIAL" in n:
             continue
@@ -151,7 +162,9 @@ Other bundled data with their own terms
 ---------------------------------------
 matplotlib fonts: DejaVu (Bitstream Vera licence) and STIX (SIL OFL), licence files under matplotlib/mpl-data/fonts.
 pyqtgraph CET colour maps: CC BY 4.0, licence file under pyqtgraph/colors/maps.
-xraydb: the X-ray database (xraydb.sqlite) is public domain / NIST data as described in its package metadata.
+xraydb: MIT licence (its block below). Its database xraydb.sqlite compiles published X-ray tables (Elam, Chantler,
+Waasmaier-Kirfel, Keski-Rahkonen and Krause, Krause and Oliver and others); its documentation,
+https://xraypy.github.io/XrayDB/, describes the data sources.
 
 {SEP}
 

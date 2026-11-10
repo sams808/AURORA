@@ -17,9 +17,10 @@ from aurora.core.io.raw import read_point_dir
 from aurora.core.model import Project
 from aurora.core.stack import StackData
 
-LEGACY = Path(__file__).resolve().parents[1] / "legacy" / "CLS_GUI_JohnBussey"
-if not LEGACY.is_dir():                      # a worktree has no legacy/ (not tracked): the main checkout's copy
-    LEGACY = Path(os.environ.get("AURORA_LEGACY", r"<repository>\legacy")) / "CLS_GUI_JohnBussey"
+from local_paths import john_gui
+
+# John Bussey's GUI folder (tests/local_paths.py); when absent, a folder that does not exist, so its tests skip
+LEGACY = john_gui() or Path(__file__).resolve().parents[1] / "legacy" / "CLS_GUI_JohnBussey"
 JOHN_STACK = "070810_BO3_LiSO3F_LR_fluorine_k_stack"
 JOHN_LABEL = "BO3_LiSO3F_LR_fluorine_k"
 WINDOWS = {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]}

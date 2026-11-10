@@ -44,6 +44,19 @@ def test_exactly_the_three_findings(tmp_path):
     assert list(p.by_group()) == ["Minerals", "Ungrouped"]
 
 
+def test_the_groups_follow_the_sample_sheet(tmp_path):
+    """The sheet's order of first appearance, then the groups it does not name alphabetically, Ungrouped last: no
+    group list of one lab in the code."""
+    proj = project(tmp_path)
+    zf = testdata.make_fake_zones(proj)
+    z1, z2, z3 = zf.holders["N5"].zones
+    z2.group, z3.group = "Zeta glass", "Alpha"                        # z1 stays in Minerals
+    zf.holders["N5"].zones.append(Zone(id=4, label="4 delta", group="", rects=list(z1.rects)))
+    sheet = _sheet(("N5", "Zeta glass", "2 beta"), ("N5", "Minerals", "1 alpha"), ("N5", "Zeta glass", "x"))
+    assert list(plan(proj, zf, sheet).by_group()) == ["Zeta glass", "Minerals", "Alpha", "Ungrouped"]
+    assert list(plan(proj, zf, []).by_group()) == ["Alpha", "Minerals", "Zeta glass", "Ungrouped"]
+
+
 def test_every_other_kind(tmp_path):
     proj = project(tmp_path, n_holders=2)
     zf = two_holder_zones(proj)                              # '1 alpha' in Minerals on N5 and on N6

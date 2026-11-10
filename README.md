@@ -37,7 +37,7 @@ The manuals live in `aurora/resources/docs/` and open inside the application fro
 [user guide](aurora/resources/docs/USER_GUIDE.md) (short), [manual](aurora/resources/docs/MANUAL.md) (every control),
 [tutorials](aurora/resources/docs/TUTORIALS.md) (nine tutorials, eight on the demo beamtime: `aurora demo <folder>` or
 Help > Open the demo beamtime), [installation](aurora/resources/docs/INSTALL.md). For developers:
-[developer manual](docs/DEVELOPER.md), [brainstorm](docs/BRAINSTORM.md) (feature universe, architecture, roadmap),
+[developer manual](docs/DEVELOPER.md) (architecture, modules, formats, tests),
 [design](docs/DESIGN.md), and the [documentation index](docs/README.md). Logo in `branding/`.
 
 ## Quick start (developers)
@@ -45,7 +45,7 @@ Help > Open the demo beamtime), [installation](aurora/resources/docs/INSTALL.md)
 ```
 py -3.12 -m venv .venv && .venv\Scripts\activate   # own environment: PySide6 >= 6.10 is required (6.9 paints nothing)
 python -m pip install -e ".[dev]"
-python -m pytest                       # synthetic data; the Nov 2026 beamtime tests run when AURORA_REAL_PROJECT exists
+python -m pytest                       # synthetic data; the Nov 2026 beamtime tests run when AURORA_REAL_PROJECT is set
 aurora                                 # the application
 aurora <beamtime folder>               # the application on that beamtime
 aurora project <beamtime folder>       # headless listing of days, holders, scans, status and flags
@@ -85,8 +85,8 @@ opens a draft GitHub release with the four installers, `SHA256SUMS.txt` and the 
 
 AURORA is version 2 of John Bussey's SGM XAS GUI (Washington State University), based on James J. Dynes' SGM_Beamline_Analysis Jupyter notebooks (Canadian Light Source).
 
-- **SGM XAS GUI** by **John Bussey**, Washington State University (2026): the reduce / check / compare / LCF / MCR-ALS / ITFA workflow, the reduced-CSV layout with its provenance header and the settings files. AURORA keeps that workflow and its file formats, and its Easy mode follows the GUI's basic path. Original program: `legacy/CLS_GUI_JohnBussey/`.
-- **SGM_Beamline_Analysis** by **James J. Dynes and the SGM beamline staff**, Canadian Light Source (github.com/Beamlines-CanadianLightSource/SGM_Beamline_Analysis): the notebook toolkit for raw-data parsing, SDD calibration, alignment, the hypercube dashboard, PCA and clustering, PyMca export and stitching. Original toolkit: `legacy/SGM_Beamline_Analysis/`.
+- **SGM XAS GUI** by **John Bussey**, Washington State University (2026): the reduce / check / compare / LCF / MCR-ALS / ITFA workflow, the reduced-CSV layout with its provenance header and the settings files. AURORA keeps that workflow and its file formats, and its Easy mode follows the GUI's basic path. The original program is not part of this repository.
+- **SGM_Beamline_Analysis** by **James J. Dynes and the SGM beamline staff**, Canadian Light Source (github.com/Beamlines-CanadianLightSource/SGM_Beamline_Analysis): the notebook toolkit for raw-data parsing, SDD calibration, alignment, the hypercube dashboard, PCA and clustering, PyMca export and stitching. The original notebooks are on GitHub: https://github.com/Beamlines-CanadianLightSource/SGM_Beamline_Analysis.
 - **sgm_report**, the beamtime reporting pipeline by **Sami Soudani**, Washington State University: survey pad detection, plate layouts, fixed ROI bins, per-SDD checks, saturation detection and holder reports.
 
 Edge and emission-line energies come from xraydb. Data acquired at the SGM beamline of the Canadian Light Source.
@@ -104,16 +104,15 @@ aurora/core/        readers (h5, raw bin/csv, sgm_report caches, config, zones),
                     synthetic test data
 aurora/app/         PySide6 shell: theme, icons, rail, session (undo, backups), jobs; perspectives Home, Survey, Reduce,
                     Check, Compare, Fit, Maps, Report; help browser and diagnostics
-aurora/resources/   icons, licences, and docs/ (the four manuals and their img/ screenshots, made by
+aurora/resources/   icons, ui/ and docs/ (the four manuals and their img/ screenshots, made by
                     docs/make_screenshots.py)
 aurora/cli.py       aurora, aurora <folder>, project, scan, report, demo, --selftest, --distcheck
 aurora/selftest.py  the deep self-test (also Help > Run self-test…)
-tests/              pytest (offscreen Qt); the real-data tests need the beamtime folder
+tests/              pytest (offscreen Qt); the real-data folders come from the environment or tests/local_paths.json
 packaging/          PyInstaller spec, Inno Setup script, build scripts, disk image, constraints, licences
 .github/workflows/  ci.yml (tests, builds, installer and disk-image tests) and release.yml (draft releases)
 branding/           logo (SVG, PNG 16-1024, .ico, .icns), wordmark
-docs/               DEVELOPER, BRAINSTORM, DESIGN, make_screenshots.py
-legacy/             sgm_report v2.5 (the Nov 2026 beamtime scripts); the two parent code bases stay local, not committed
+docs/               DEVELOPER, DESIGN, make_screenshots.py
 ```
 
 Author: Sami Soudani.

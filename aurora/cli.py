@@ -106,7 +106,7 @@ def _guarded(name: str, fn, *args) -> int:
 def cmd_project(path: Path) -> int:
     from aurora.core.model import Project
     proj = Project.discover(path)
-    print(f"project {proj.root}\nraw     {proj.raw}\n{proj.calibration.describe() if proj.calibration else ''}")
+    print(f"project {proj.root}\nraw     {proj.raw}\n{proj.calibration.describe(proj.root) if proj.calibration else ''}")
     if proj.roi_bins and proj.roi_bins.labels:
         print("fixed ROI bins: " + ", ".join(proj.roi_bins.labels))
     for day in proj.days:
@@ -178,7 +178,7 @@ def report_author(given: str | None) -> tuple[str, str]:
 def cmd_report(args) -> int:
     from aurora.core.io.config import ZonesFile
     from aurora.core.model import Project
-    from aurora.core.report import ReportBuilder, holder_keys
+    from aurora.core.report import ReportBuilder, _plural, holder_keys
     proj = Project.discover(args.project)
     zpath = args.zones or (proj.root / ".aurora" / "session.json")
     if not Path(zpath).is_file():
@@ -201,7 +201,8 @@ def cmd_report(args) -> int:
     print(f"{args.preset} report, figures at {builder.png_dpi} dpi, "
           + (f"author {author} (from {source})" if author else "no author line"))
     res = builder.build(progress=lambda i, n, m: print(f"  {i + 1}/{n} {m}", end="\r"))
-    print(f"\n{res.pdf}: {res.pages} pages, {res.entries} zone spectra, {len(res.csvs)} CSV, {len(res.figures)} figures")
+    print(f"\n{res.pdf}: " + ", ".join([_plural(res.pages, "page"), _plural(res.entries, "zone spectrum", "zone spectra"),
+                                        _plural(len(res.csvs), "CSV"), _plural(len(res.figures), "figure")]))
     for s in res.skipped:
         print("  skipped:", s)
     return 0

@@ -1,7 +1,5 @@
 # AURORA design language
 
-Canvas with the brand board and three screen mock-ups (Reduce, Compare, Holder report): (not public).
-
 ## Identity
 - Name: AURORA. Tagline: "Soft X-ray XAS and XRF stacks from the SGM beamline, Canadian Light Source".
 - Mark: rounded square, night-sky gradient, three aurora ribbons (violet, teal, green) whose upper edge is a XANES spectrum, a crisp white line on top, four stars (the four SDDs), a thin horizon bar (the beam). Monochrome variant for 16-32 px and the menu bar on macOS (template icon).
@@ -28,7 +26,8 @@ Plots: viridis for maps (magma for XRF/I0 survey maps as in John's export), Okab
 ## Type
 - Inter (UI): 13 px body, 11 px rail labels, 18 px perspective titles, 13 px semibold section titles.
 - JetBrains Mono: every number, path, channel range, energy, so columns align.
-- Both OFL; bundle the TTFs in `aurora/resources/fonts`.
+- Both OFL. Neither is bundled: the QSS asks for them first and falls back to Segoe UI / SF Pro Text and Consolas /
+  SF Mono / Menlo (`UI_FONT`, `MONO_FONT` in `aurora/app/theme.py`).
 
 ## Layout
 - Top bar 48 px (mark, AURORA, session/day/holder breadcrumb, search, sync/save).

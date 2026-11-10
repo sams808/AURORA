@@ -6,7 +6,8 @@ Run from the repo root with the project's Python:
     python docs/make_screenshots.py --scheme dark --out DIR  # the dark set, somewhere else
 
 Advanced mode, so every control the manual describes is on screen. Writes a fresh demo folder in a temporary
-directory, and the settings go to a temporary folder too: nothing else is touched.
+directory outside the home folder (its path is on screen; see demo_root) and removes it at the end; the settings go
+to a temporary folder too: nothing else is touched.
 """
 from __future__ import annotations
 
@@ -22,6 +23,23 @@ os.environ.setdefault("AURORA_SETTINGS_DIR", str(Path(tempfile.mkdtemp(prefix="a
 
 OUT = ROOT / "aurora" / "resources" / "docs" / "img"          # the manuals bundled with the application
 SIZE = (1500, 940)
+
+
+def demo_root() -> Path:
+    """A new temporary folder whose path names no account: Home's Scans card, the Scan panel's Folder row and the
+    Report output show the demo's full path, and the temporary folder of Windows lies inside the user's profile.
+    Windows: under %PUBLIC%\\Documents; macOS: /Users/Shared; else the system temporary folder (/tmp)."""
+    home = Path.home().resolve()
+    cands = [Path(os.environ["PUBLIC"]) / "Documents"] if os.environ.get("PUBLIC") else []
+    cands += [Path("/Users/Shared"), Path(tempfile.gettempdir())]
+    for c in cands:
+        try:
+            c = c.resolve()
+            if c.is_dir() and os.access(c, os.W_OK) and not c.is_relative_to(home):
+                return Path(tempfile.mkdtemp(prefix="aurora_docs_", dir=c))
+        except OSError:
+            continue
+    raise SystemExit("no writable folder outside the home folder for the demo: the shots would show the account name")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     from aurora.core.model import Project
     from aurora.core.qc import count_rate_probe
 
-    demo = Path(tempfile.mkdtemp(prefix="aurora_docs_")) / "demo_beamtime"
+    base = demo_root()                                # never under the home folder (its path is on screen)
+    demo = base / "demo_beamtime"
     cmd_demo(demo)                                    # raw data, processed/reduced spectra and references
     s = settings()
     s.setValue("appearance", args.scheme)
@@ -127,7 +146,18 @@ def main(argv: list[str] | None = None) -> int:
     code = app.exec()
     ses._save_timer.stop()
     shutdown_app(app, win)
+    remove_later(base)                                # a shared folder (Public Documents): leave nothing behind
     return code
+
+
+def remove_later(folder: Path) -> None:
+    """Remove `folder` once this process has ended: the hypercube cache inside it stays memory-mapped until then."""
+    import subprocess
+    code = ("import shutil, sys, time, pathlib\np = pathlib.Path(sys.argv[1])\nfor _ in range(120):\n"
+            "    shutil.rmtree(p, ignore_errors=True)\n    if not p.exists(): break\n    time.sleep(1)\n")
+    subprocess.Popen([sys.executable, "-c", code, str(folder)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    print(f"the demo folder {folder} is removed once this process has ended")
 
 
 if __name__ == "__main__":

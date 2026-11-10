@@ -17,11 +17,9 @@ from aurora.core.model import Project
 from aurora.core.stack import StackData
 from aurora.core.zones import members, zone_sums, zone_traces
 
-ROOT = Path(__file__).resolve().parents[1]
-JOHN_CANDIDATES = [ROOT / "legacy" / "CLS_GUI_JohnBussey",
-                   Path(os.environ.get("AURORA_JOHN_GUI", "") or "/nonexistent"),
-                   Path(r"<repository>\legacy\CLS_GUI_JohnBussey")]
-JOHN = next((p for p in JOHN_CANDIDATES if (p / "gui_outputs").is_dir()), None)
+from local_paths import john_gui
+
+JOHN = john_gui()                   # John Bussey's GUI folder (tests/local_paths.py), None when absent
 
 
 @pytest.fixture(autouse=True)

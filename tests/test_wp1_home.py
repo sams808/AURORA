@@ -2,6 +2,7 @@
 project summary after an open; John Bussey's 'Scan Analysis Summary' of a scan (energy regions, time per map, grid,
 energy folders found vs planned and incomplete maps); a failed open with Retry and Choose another, never a stat on
 the GUI thread."""
+import re
 import threading
 import time
 
@@ -100,7 +101,8 @@ def test_incomplete_energies_on_the_real_beamtime(real_project):
     assert overview.incomplete_energies(st) == [(696.8, "119 of 121 points")]
     rows = dict(overview.scan_rows(st, proj, incomplete=[]))
     assert rows["energy regions"] == "680–685 eV in 0.5 eV steps; 685–700 eV in 0.1 eV steps; 700–730 eV in 0.2 eV steps"
-    assert rows["grating"] == "MEG" and rows["mirror stripe"] == "Si" and rows["project"] == "00X00000"
+    assert rows["grating"] == "MEG" and rows["mirror stripe"] == "Si"
+    assert re.fullmatch(r"\d{2}G\d{5}", rows["project"]), rows["project"]      # a CLS proposal id, read from the h5
     assert rows["time per map"] == "3 s per map" and rows["estimated total"].startswith("311 maps × 3 s = 15.6 min")
 
 

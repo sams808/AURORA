@@ -75,10 +75,6 @@ log = logging.getLogger("aurora.report")
 
 AUTHOR = ""                     # never a default name: the author is resolved when a report is built (resolve_author)
 CREDIT = CREDITS                # the cover credits: one source, aurora.credits
-# DEFAULT: the sample-sheet groups in the order of the handoff; unknown groups follow alphabetically, blank last
-GROUP_ORDER = ["Minerals", "Group 7", "RE-(O)-F", "Se", "Simple Glass", "Lab beakers",
-               "Standards", "Misc",
-               "Oxyfluoride Glass", "Microfocus"]
 UNGROUPED = "Ungrouped"
 # Okabe-Ito, colour never alone: the line style cycles too
 PAL = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#D55E00", "#F0E442", "#000000"]
@@ -199,6 +195,23 @@ def holder_keys(project: Project | None) -> dict[str, tuple[str, object]]:
         for h in day.holders:
             out[h.name if seen[h.name] == 1 else f"{h.name}_{day.date}"] = (day.date, h)
     return out
+
+
+def group_rank(sheet_rows) -> dict[str, int]:
+    """The sample groups in the order of their first row in the sample sheet ('Sample group' column)."""
+    rank: dict[str, int] = {}
+    for r in sheet_rows or []:
+        g = str(getattr(r, "group", "") or "").strip()
+        if g and g not in rank:
+            rank[g] = len(rank)
+    return rank
+
+
+def group_key(rank: dict[str, int] | None = None):
+    """Sort key of the report's groups: the sample sheet's order (group_rank), then the groups the sheet does not
+    name alphabetically, Ungrouped last."""
+    rank = rank or {}
+    return lambda g: (0, rank[g], "") if g in rank else (2 if g == UNGROUPED else 1, 0, g.lower())
 
 
 def load_sample_sheet(project: Project | None) -> list:
@@ -323,6 +336,7 @@ class Plan:
     """The contents of the next build (group ▸ holder ▸ zone) and the pre-flight findings."""
     zones: list[PlannedZone] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    group_rank: dict[str, int] = field(default_factory=dict)      # the sample sheet's group order
 
     @property
     def n_zones(self) -> int:
@@ -345,7 +359,7 @@ class Plan:
         out: dict[str, list[PlannedZone]] = {}
         for z in self.zones:
             out.setdefault(z.group, []).append(z)
-        return {g: out[g] for g in sorted(out, key=ReportBuilder.group_sort_key)}
+        return {g: out[g] for g in sorted(out, key=group_key(self.group_rank))}
 
 
 def _in_scope(key: str, holder, day: str, holders, days) -> bool:
@@ -369,7 +383,7 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
     rows = load_sample_sheet(project) if sheet_rows is None else list(sheet_rows)
     sheet = {_norm_label(r.sample_id): r.sample_id for r in rows if _norm_label(r.sample_id)}
     good_pool = [g for g, on in zones.good_i0.items() if on]
-    out = Plan()
+    out = Plan(group_rank=group_rank(rows))
     findings: list[Finding] = []
     seen_labels: dict[tuple[str, str], list[tuple[str, int, str]]] = {}    # (group, norm label) -> [(key, zid, holder)]
     in_scope = []
@@ -618,6 +632,7 @@ class ReportBuilder:
         self._page_no = 0
         self.footers: list[str] = []            # the footer text of every page, in order
         self.cover_credits = ""                 # the credits printed on the cover
+        self.cover_lines: list[str] = []        # the text lines of the cover, as printed
         self.appendix_c: list[str] = []         # the text lines of Appendix C
         self.notes: list[str] = []
         self.changes: dict = {}
@@ -722,10 +737,6 @@ class ReportBuilder:
                                  flag_objs=fl, good_sids=good_sids))
         log.info("report: %d zone-scan entries, %d skipped, %d not included", len(entries), len(self.skipped), len(self.not_included))
         return entries
-
-    @staticmethod
-    def group_sort_key(g: str):
-        return (GROUP_ORDER.index(g) if g in GROUP_ORDER else len(GROUP_ORDER) + (1 if g == UNGROUPED else 0), g.lower())
 
     # ------------------------------------------------------------------ state recorded for the next build
     def state(self) -> dict:
@@ -910,7 +921,7 @@ class ReportBuilder:
         by_group: dict[str, list[Entry]] = {}
         for e in entries:
             by_group.setdefault(e.group, []).append(e)
-        groups = sorted(by_group, key=self.group_sort_key)
+        groups = sorted(by_group, key=group_key(group_rank(rows)))         # the sample sheet's order
         date = started.date().isoformat()
         pdf_path = self._target(folder / f"{slug_name(self.title, 80)}_{date}.pdf")
         figures: list[Path] = []
@@ -1120,7 +1131,7 @@ class ReportBuilder:
             "Provenance",
             f"  zones saved {self.zones.exported or '(no date recorded)'}"
             + (f" (zone tool build {self.zones.built})" if self.zones.built else ""),
-            f"  {proj.calibration.describe() if proj.calibration else 'no SDD calibration'}",
+            f"  {proj.calibration.describe(proj.root) if proj.calibration else 'no SDD calibration'}",
             "  fixed ROI windows: " + (", ".join(proj.roi_bins.describe(l) for l in proj.roi_bins.labels[:6]) if proj.roi_bins and proj.roi_bins.labels else "none")
             + (" …" if proj.roi_bins and len(proj.roi_bins.labels) > 6 else ""),
             f"  {APP_NAME} {__version__}, report built {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -1143,6 +1154,11 @@ class ReportBuilder:
             "  Appendix C: quality notes, the check before building, scans not included, skipped",
         ]
         heads = ("Provenance", "How to read the figures", "Contents", "Changes since the previous build")
+        import textwrap
+        # a line wider than the page (the calibration with its file and four gains) wraps, indented, never cut
+        lines = [w for ln in lines for w in (textwrap.wrap(ln, 110, subsequent_indent=" " * (len(ln) - len(ln.lstrip()) + 2))
+                                             if len(ln) > 110 else [ln])]
+        self.cover_lines = lines
         y, x = 0.85, 0.08
         for ln in lines:
             if not ln:
@@ -1150,10 +1166,9 @@ class ReportBuilder:
                 continue
             if y < 0.11 and x == 0.08:                    # second column for a long contents list
                 x, y = 0.52, 0.85 - 0.022 * (lines.index("Contents") + 1)
-            fig.text(x, y, ln[:110], fontsize=9 if not ln.startswith("  ") else 8.5,
+            fig.text(x, y, ln, fontsize=9 if not ln.startswith("  ") else 8.5,
                      weight="bold" if ln.startswith(heads) else "normal", family="DejaVu Sans", color="#15213B")
             y -= 0.022
-        import textwrap
         self.cover_credits = CREDITS
         fig.text(0.08, 0.06, "\n".join(textwrap.wrap(CREDITS, 120)), fontsize=7, color="#4E5D7A", linespacing=1.4)
         self._footer(fig, "page 1")
@@ -1418,7 +1433,7 @@ class ReportBuilder:
                               "erase": e.zone.erase, "polys": e.zone.polys},
             "members": int(e.members.size),
             "flags": list(e.flags),
-            "calibration": cal.describe() if cal else "none",
+            "calibration": cal.describe(self.project.root) if cal else "none",
             "settings": s.to_json(),
         })
         return meta

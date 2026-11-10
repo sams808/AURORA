@@ -1,7 +1,7 @@
 # AURORA developer manual
 
 How the code is organised, the data formats, the rules that keep the Qt side stable, and how to add things.
-`BRAINSTORM.md` is the feature universe and roadmap, `DESIGN.md` the look and tone, `CREDITS.md` the lineage.
+`DESIGN.md` is the look and tone, `CREDITS.md` the lineage.
 
 ## 1. Two layers
 
@@ -39,6 +39,19 @@ every algorithm is testable with plain pytest. A perspective may compute nothing
 | `propose.py` | zone proposals: Otsu on the survey (middle of a flat maximum), pads → zones; sgm_report summary → zones |
 | `deconv.py` | Gaussian PSF, Richardson-Lucy, Wiener, `deconvolve_grid` (PSF in µm, pitch in mm) |
 | `stitch.py` | `Trim`, pixel boxes, `auto_trims` (halve every pairwise overlap), kept mask, `seams`, `stitch` → `StackData` |
+| `io/safety.py`, `io/textio.py` | the folders AURORA never writes into (`AURORA_PROTECT_DIRS`, raw/); UTF-8 text and atomic writes |
+| `cancel.py` | cancelling long core work from the GUI without Qt |
+| `export.py` | John Bussey's files for one zone x scan: `_full_reduced.csv`, `_absorption.csv`, `_polygon_roi.json` / `_zone.json`, `_gui_settings.json` |
+| `figures.py` | the publication figures of Compare and Fit at a fixed size (matplotlib Agg) |
+| `flags.py` | scan flags (saturated SDDs, I0 invalid, high rate), each with its source |
+| `lines.py` | edges and emission lines, from xraydb only |
+| `overview.py` | what Home says about a project and a scan |
+| `provenance.py` | the `# ` header block and the JSON sidecar of exported files |
+| `reportcheck.py` | the release check of a built report folder (pages, an SVG per figure) |
+| `rules.py` | batch settings: rules over many zone x scan settings, copying one card to many |
+| `spectra.py` | zone traces from the channel sums: de-spiking, I0, normalisations |
+| `xrf_windows.py` | per-detector XRF emission windows (John Bussey's step 2) |
+| `yields.py` | inverse partial fluorescence yield (IPFY) |
 
 Everything that reads a file is tolerant: missing attributes, half-written energy folders and damaged npz files
 return partial data with a reason instead of raising, and the reason is printed (the rule: print what you drop).
@@ -58,6 +71,12 @@ return partial data with a reason instead of raising, and the reason is printed 
 | `dialogs.py` | `ReferencesDialog`, `StitchDialog` |
 | `about.py` | versions text and the About dialog |
 | `main.py` | `MainWindow` (rail, menus, perspectives, wiring), `create_app`, `run`, `shutdown_app` |
+| `mode.py`, `vocab.py`, `help_text.py` | Easy / Advanced mode; one vocabulary for names and units; the tooltip, accessible name and manual section of every control |
+| `jobs.py`, `crash.py` | background jobs (one per key, progress, Cancel, results on the GUI thread); unexpected errors logged and shown |
+| `session_ui.py`, `undo.py`, `import_dialog.py` | the window side of the session (messages, history); undo and redo; zone import and restore dialogs |
+| `reduce_window.py`, `grid_dialog.py`, `rules_dialog.py`, `stack_cache.py` | the XRF window step of Reduce; Grid of zones; Rules; re-reducing a stack from the sgm_report cache |
+| `figure_export.py`, `nav.py`, `shortcuts.py`, `pgcompat.py` | figure options of the exports; jumps to a perspective, holder, zone or stack; actions added from anywhere; pyqtgraph fixes |
+| `help.py`, `diagnostics.py`, `updates.py` | the Help browser; Keyboard shortcuts, Report a problem, Licences, Run self-test; Check for updates |
 
 Perspectives talk through the session's signals (`changed`, `zone_selected`, `stack_selected`, …) and a few direct
 calls from `MainWindow` (open a scan in Reduce, send traces to Compare). A perspective never reaches into another
@@ -206,6 +225,13 @@ python -m pytest -q
 | `test_report.py` | a full report build, its files and manifest |
 | `test_app*.py` | the perspectives offscreen: loading, drawing zones, checks, compare and fit, maps, navigation, phase 5 (I0 explorer, references dialog, proposals, stitch dialog, deconvolution, peaks tab) |
 | `test_real_data.py`, `test_real_zones.py` | the Nov 2026 beamtime, read-only, skipped when `AURORA_REAL_PROJECT` is absent; the zone membership of every manual zone-scan pair and the reproduction of the sgm_report CSVs |
+| `test_wp0_*.py` … `test_wp7_*.py` | one file per item of the 0.4 work packages (its docstring names the item): structure (wp0), Home and the project (wp1), the session (wp2), Reduce (wp3), Check and John Bussey's files (wp4), Compare and Fit (wp5), Maps (wp6), Report (wp7) |
+| `test_docs.py`, `test_docs_parity.py`, `test_help.py` | the manuals against the repository and the window: links, every bold name on screen, every control in MANUAL |
+| `test_publication.py` | the public repository: no private files tracked, no home-folder paths, the front pages link only tracked files |
+
+The folders of one machine (the beamtime, John Bussey's GUI) come from `AURORA_REAL_PROJECT`, `AURORA_LEGACY` and
+`AURORA_JOHN_GUI`, else from `tests/local_paths.json` (untracked; copy `tests/local_paths.example.json`); see
+`tests/local_paths.py`. Without them those tests skip.
 
 Rules: a Qt test never touches the real settings (`AURORA_SETTINGS_DIR` from `conftest.py`); a real-data test never
 writes into the beamtime (Session.save is monkeypatched there); and a green suite is not verification, the real-data
@@ -255,13 +281,17 @@ python docs/make_screenshots.py
 writes `aurora/resources/docs/img/*.png` (the screenshots of the bundled manuals) from the demo beamtime in Advanced
 mode (temporary folder, synthetic spectra, nothing else touched); `--scheme dark --out DIR` makes a dark set elsewhere.
 Run it after a visual change and commit the images with the code.
+The demo folder lies outside the home folder (`%PUBLIC%\Documents` on Windows, `/Users/Shared` on macOS), because Home
+and Report show its full path. The committed images are 1656 × 1038: offscreen, that size comes with
+`QT_SCALE_FACTOR=1.104` (and `QT_QPA_FONTDIR` at the system fonts).
 
 ## 8. Conventions
 
 - Author "Sami Soudani". Code, comments and commits in English. Neutral voice in the public docs.
 - `pathlib` everywhere, raw data read-only, units in names (`fwhm_um`, `pitch_mm`, `pre_ev`), no invented values,
   print what you drop, say "not verified" when it is not.
-- The public repository excludes `legacy/CLS_GUI_JohnBussey/`, `legacy/SGM_Beamline_Analysis/`, `docs/HANDOFF.md`
-  and `docs/sources/` (collaborator names, endpoint ids).
+- The public repository excludes `legacy/` (the two parent code bases and the beamtime scripts), `docs/HANDOFF.md`,
+  `docs/BRAINSTORM.md`, `docs/sources/`, `CLAUDE.md` and `tests/local_paths.json` (collaborator names, sample sheets,
+  endpoint ids, decompiled strings, the paths of one machine); `tests/test_publication.py` keeps it that way.
 - Versions: `__version__` in `aurora/__init__.py` is the only source (`pyproject.toml` reads it); a `## <version>`
   section at the top of `CHANGELOG.md` per release; tag `v<version>` (INSTALL §8).

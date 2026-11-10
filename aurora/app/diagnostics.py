@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +15,7 @@ from pathlib import Path
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTabWidget,
-                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget)
 
 from aurora import APP_NAME, __version__, resources_dir
 from aurora.app.help_text import explain_buttons
@@ -86,9 +87,21 @@ def _dir_size(path: Path, limit: int = 20000) -> int:
     return total
 
 
+def tilde_home(text: str) -> str:
+    """The home folder written as '~' in either slash style (case-insensitive on Windows), so a report pasted into the
+    public issues does not carry the account name. A longer name that only starts like the home folder stays."""
+    home = str(Path.home())
+    if len(home.strip("\\/")) < 3:                  # '/' or 'C:\': nothing to hide
+        return text
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    for h in sorted({home, home.replace("\\", "/"), home.replace("/", "\\")}, key=len, reverse=True):
+        text = re.sub(re.escape(h) + r"(?![\w.-])", "~", text, flags=flags)
+    return text
+
+
 def diagnostics_text(window=None) -> str:
     """What to paste into a bug report: versions, OS, project, session schema, cache size, settings location, the
-    credits line and the last 200 lines of the log."""
+    credits line and the last 200 lines of the log, with the home folder written as '~' (tilde_home)."""
     from aurora.app.settings import settings
     from aurora.credits import CREDITS_SHORT
     from aurora.logsetup import log_file
@@ -125,7 +138,7 @@ def diagnostics_text(window=None) -> str:
         lines += tail
     except OSError:
         lines.append(f"no log file at {lf}")
-    return "\n".join(lines)
+    return tilde_home("\n".join(lines))
 
 
 class ReportProblemDialog(QDialog):
@@ -136,12 +149,19 @@ class ReportProblemDialog(QDialog):
         lay = QVBoxLayout(self)
         intro = QLabel("To report a problem, describe what you did and what happened, then paste the diagnostics "
                        "(Copy diagnostics) into the report. Attach the log file when AURORA closed unexpectedly. "
-                       "Reports go to the GitHub issues of the project:")
+                       "Reports go to the GitHub issues of the project, which are public: the diagnostics name folders "
+                       "and carry recent log lines with project, scan and sample names (your home folder is written "
+                       "as ~). Read them and remove what should stay private before posting.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        url = QLabel(ISSUES_URL)
-        url.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.intro = intro
+        url = QLabel(f'<a href="{ISSUES_URL}">{ISSUES_URL}</a>')
+        url.setTextFormat(Qt.RichText)
+        url.setOpenExternalLinks(True)
+        url.setTextInteractionFlags(Qt.TextBrowserInteraction)
         url.setAccessibleName("GitHub issues address")
+        url.setToolTip("Opens the GitHub issues page in the browser (public)")
+        self.url = url
         lay.addWidget(url)
         self.preview = QPlainTextEdit(diagnostics_text(window))
         self.preview.setReadOnly(True)
@@ -224,8 +244,13 @@ class LicencesDialog(QDialog):
         self.tabs = QTabWidget()
         self.texts = licence_texts()
         for title, text in self.texts:
-            ed = QPlainTextEdit(text)
-            ed.setReadOnly(True)
+            if title == "Credits":                         # CREDITS.md: a heading and a table, shown as such
+                ed = QTextBrowser()
+                ed.setOpenExternalLinks(True)
+                ed.setMarkdown(text)
+            else:
+                ed = QPlainTextEdit(text)
+                ed.setReadOnly(True)
             ed.setAccessibleName(title)
             self.tabs.addTab(ed, title)
         lay.addWidget(self.tabs, 1)

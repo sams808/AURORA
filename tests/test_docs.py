@@ -79,6 +79,35 @@ def test_no_raw_angle_brackets_outside_code(name):
     assert not tags, f"{name}: raw HTML-like text outside code: {tags}"
 
 
+@pytest.mark.parametrize("name", ["INSTALL.md", "MANUAL.md", "USER_GUIDE.md", "TUTORIALS.md"])
+def test_no_line_starts_with_a_menu_arrow(name):
+    """The manuals use no block quotes: a line that starts with '>' is a menu path wrapped before its arrow
+    ('**Edit' / '> Undo**'), which Markdown turns into a quote with literal asterisks."""
+    lines = [ln for ln in FENCE.sub("", text_of(name)).splitlines() if ln.lstrip().startswith(">")]
+    assert not lines, f"{name}: lines that start with '>': {lines}"
+
+
+def test_manual_section_references_describe_their_names():
+    """'**Copy to…** on each card and **Rules…** ... (MANUAL 4.5, 4.9)': every bold name of the sentence is in one of
+    the MANUAL sections it cites."""
+    manual = FENCE.sub("", text_of("MANUAL.md"))
+    heads = list(re.finditer(r"^#{2,3}\s+(\d+(?:\.\d+)?)\s", manual, flags=re.M))
+    sections = {m.group(1): manual[m.end():(heads[i + 1].start() if i + 1 < len(heads) else len(manual))]
+                for i, m in enumerate(heads)}
+    checked = 0
+    for name in ("USER_GUIDE.md", "TUTORIALS.md", "INSTALL.md"):
+        text = FENCE.sub("", text_of(name))
+        for m in re.finditer(r"\(MANUAL (\d+(?:\.\d+)?(?:, \d+(?:\.\d+)?)*)\)", text):
+            nums = m.group(1).split(", ")
+            sentence = text[max(text.rfind(". ", 0, m.start()), text.rfind("\n\n", 0, m.start()), 0):m.start()]
+            for term in re.findall(r"\*\*(.+?)\*\*", sentence, flags=re.S):
+                term = re.sub(r"\s+", " ", term)
+                assert any(term in re.sub(r"\s+", " ", sections.get(n, "")) for n in nums), \
+                    f"{name}: '{term}' is not in MANUAL {', '.join(nums)}"
+                checked += 1
+    assert checked, "no MANUAL section reference with a bold name found"
+
+
 # ----------------------------------------------------------------------------- minimum macOS
 FLOOR = re.compile(r"macOS\s+(\d+(?:\.\d+)?)(?:\s+[A-Z][a-z]+)?\s*(?:\+|or later|and later|or newer|and newer)"
                    r"|(?:at least|requires|minimum(?: is)?|needs)\s+macOS\s+(\d+(?:\.\d+)?)")

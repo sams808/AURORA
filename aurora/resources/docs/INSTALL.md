@@ -1,4 +1,4 @@
-# AURORA installation and administration
+# AURORA installation and sharing
 
 AURORA is version 2 of John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_Beamline_Analysis notebooks. Every
 release on the GitHub releases page of the repository (github.com/sams808/AURORA) carries five files:
@@ -104,7 +104,9 @@ option.
 M checks ok*) with **Copy** and **Open folder**; the JSON report is written to the self-test folder of section 5. To
 report a problem, send that JSON file together with the text of **Help > Report a problem…** > **Copy diagnostics**
 (versions, operating system, project, settings location and the last 200 lines of the log); the same dialog has **Open
-the log folder** and the address of the GitHub issues page.
+the log folder** and the address of the GitHub issues page. GitHub issues are public: the JSON and the diagnostics name
+folders, and the log lines name projects, scans and samples (the diagnostics write the home folder as ~), so read them
+before posting.
 
 ## 5. Where things are stored
 
@@ -207,7 +209,8 @@ python -m pytest -q                 # synthetic data, offscreen Qt, a few minute
 AURORA_REAL_PROJECT=<beamtime folder> python -m pytest tests/test_real_data.py tests/test_real_zones.py
 ```
 
-The real-data tests are read-only and skip when the folder is absent. The test session sets `QT_QPA_PLATFORM=offscreen`
+The real-data tests are read-only and skip when the folder is absent; without the variable they read it from the
+untracked `tests/local_paths.json` (copy `tests/local_paths.example.json`). The test session sets `QT_QPA_PLATFORM=offscreen`
 and `AURORA_SETTINGS_DIR`, and logs into a temporary folder, so that no real settings or logs are touched.
 
 ## 10. Known limits

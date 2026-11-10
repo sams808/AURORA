@@ -1,8 +1,9 @@
 # Pins for the FROZEN builds (packaging/build_win.bat, packaging/build_mac.sh, the CI build jobs):
 #   pip install ".[build]" -c packaging/constraints.txt
-# Every package of the build environment, as installed by the last green CI build (run 42466289069, 2026-11-08,
-# Python 3.12, build-windows and build-macos). A build is reproducible from these pins; raise them deliberately, after a
-# green CI run with the new versions (the test jobs install without pins and see new releases first).
+# Every package of the build environment, as installed by the build jobs of CI run 42466289069 (2026-11-08, Python 3.12;
+# build-windows and build-macos passed, the run itself failed in other jobs). A build is reproducible from these pins;
+# raise them deliberately, after a green CI run with the new versions (the test jobs install without pins and see new
+# releases first).
 #
 # PySide6 6.12.0's macOS binaries are built for macOS 26 (LC_BUILD_VERSION minos 26.0, measured 2026-11-07 on the
 # wheels; Finder refuses to open such an app on macOS 15 with error -10825). 6.11.3 requires macOS 15 (minos 15.0)

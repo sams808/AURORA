@@ -33,7 +33,7 @@ from aurora.app.widgets import (Card, ElidedLabel, EmptyState, TaskBar, default_
 from aurora.core import report as core_report
 from aurora.core.io.config import ZonesFile
 from aurora.core.io.textio import read_json
-from aurora.core.report import LATEST, PRESETS, UNGROUPED, Plan, ReportBuilder, ReportResult
+from aurora.core.report import LATEST, PRESETS, UNGROUPED, Plan, ReportBuilder, ReportResult, group_key, group_rank
 
 NO_PROJECT = "open a project first"
 IGNORED_KEY = "preflight_ignored"               # session ui value: ids of the findings ticked 'ignore'
@@ -327,7 +327,7 @@ class ReportPerspective(QWidget):
         found = {(z.group.strip() or UNGROUPED) for h in self.session.zones.holders.values() for z in h.zones}
         self.groups.blockSignals(True)
         self.groups.clear()
-        for g in sorted(found, key=ReportBuilder.group_sort_key):
+        for g in sorted(found, key=group_key(group_rank(self.session.sheet_rows))):
             it = QListWidgetItem(g)
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if ticked.get(g, True) else Qt.Unchecked)

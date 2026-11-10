@@ -430,3 +430,18 @@ def test_the_screenshots_go_into_the_bundled_docs():
     shots = {p.stem for p in (DOCS / "img").glob("*.png")}
     used = {Path(t).stem for d in MANUALS for t in LINK.findall(doc_text(d)) if t.endswith(".png")}
     assert used <= shots
+
+
+def test_the_screenshot_demo_lies_outside_the_home_folder():
+    """Home and Report show the demo's full path, so the shots would carry the account name of whoever makes them
+    (the temporary folder of Windows is inside the profile): the demo goes elsewhere."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("make_screenshots", ROOT / "docs" / "make_screenshots.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    base = mod.demo_root()
+    try:
+        assert base.is_dir() and not base.resolve().is_relative_to(Path.home().resolve()), base
+        assert Path.home().name not in base.parts
+    finally:
+        base.rmdir()

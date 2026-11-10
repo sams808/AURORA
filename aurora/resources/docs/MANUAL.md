@@ -119,7 +119,7 @@ program, no permission) gives one calm dialog that names it.
   every part of this installation on a synthetic beamtime in the background, then shows the summary with **Copy** and
   **Open folder**; see INSTALL §4); **Report a problem…** (what to send, **Copy diagnostics** with the versions, the
   project, the settings location and the last 200 log lines, **Open the log folder**, and the GitHub issues
-  address); **Check for updates…** (asks GitHub whether a newer AURORA exists; nothing is downloaded or installed);
+  address as a link; the issues are public, so the diagnostics write the home folder as ~ and the dialog asks you to read them before posting); **Check for updates…** (asks GitHub whether a newer AURORA exists, or says that no release is published yet; nothing is downloaded or installed);
   **Licences…** (AURORA's MIT licence, the credits, the third-party licences); **About AURORA**.
 
 Keyboard shortcuts (**Help > Keyboard shortcuts** lists the same table, generated from the window). The keys are
@@ -535,8 +535,8 @@ points, noisy (fewer than 3); a ticked SDD with no finite values or a signal zer
 N missing energy points; I0 zero or missing at N energies; I0 varying by more than a factor 3 over the scan; TEY
 without finite values; more than 10 % of the points flagged bad. AURORA adds the scan's flags with their source (SDD
 saturated, high count rate, I0 invalid; from sgm_report or from AURORA's own check) and a note when spikes were found
-within three energy steps of the edge. The thresholds (3 points, factor 3, 10 %) are the values of John Bussey's GUI,
-still to be confirmed with him.
+within three energy steps of the edge. The thresholds (fewer than 3 points, a factor 3, more than 10 %) are those of
+John Bussey's GUI.
 
 A row with a bad message starts unticked. A row whose scan cannot be read shows *✗ bad* with the reason (and the error
 is reported once). **Tick all** and **Untick all** change every row. Right-click a row for *Show the region in Reduce*
@@ -680,8 +680,9 @@ header to show or hide columns.
 `NaF_F_K.csv`), from the scan of a zone trace, else from the edge most stacks of the project were set up for. When E0
 lies further from it than the width of the pre-edge window (15 eV by default), a calm note says so in the E0 eV
 tooltip, the status line and the diagnostics: the E0-relative windows move with E0. A sharp pre-edge peak can catch
-the derivative; `half` or `row:` avoid it. The smoothing width (1.5 eV) and the search window (20 eV) are defaults to
-be confirmed on beamtime data.
+the derivative; `half` or `row:` avoid it. The smoothing width (1.5 eV, **E0 derivative smoothing**) and the search
+window (20 eV either side of the tabulated edge, the start of the default pre-edge window) are AURORA defaults; the
+smoothing keeps the scatter of E0 below 0.5 eV on a synthetic 1 eV wide edge with 2 % noise.
 
 ### 6.3 Stacked plot
 
@@ -892,7 +893,7 @@ converted at the first load without reading the raw data again, then removed.
 
 ![Report](img/report.png)
 
-The final report, organised by sample group, built from the zones and their settings. The Report perspective has
+The final report, organised by sample group (in the order of the sample sheet; groups it does not name follow alphabetically, *Ungrouped* last), built from the zones and their settings. The Report perspective has
 three cards: **Options**, **Check before building** and **Pages**.
 
 ### 9.1 Options
@@ -1132,5 +1133,5 @@ Re-reduce the stack with the project ROI bins** (Advanced) reduces that stack fr
 - **A command prints nothing on Windows**: `AURORA.exe` is the windowed application; use `aurora-cli.exe` in the same
   folder for the command line (INSTALL §4).
 - **Something fails on another computer**: run **Help > Run self-test…** there and send the JSON report with the text
-  of **Help > Report a problem… > Copy diagnostics**.
+  of **Help > Report a problem… > Copy diagnostics**. GitHub issues are public: both name folders, and the log lines name projects, scans and samples, so read them before posting.
 - **Settings look wrong in a test**: set `AURORA_SETTINGS_DIR` so that tests never touch the real settings.

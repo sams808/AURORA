@@ -2,8 +2,6 @@
 stray drags are ignored, right-click menus, lasso and polygon zones (pixel centres inside, John Bussey's rule),
 John's _polygon_roi.json in and out, polygons rasterised for the HTML zone tool, the Reduce shortcuts."""
 import json
-import os
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -17,13 +15,10 @@ from aurora.core import testdata  # noqa: E402
 from aurora.core.io.config import Zone, ZonesFile  # noqa: E402
 from aurora.core.model import Project  # noqa: E402
 from aurora.core.zones import export_ready, members  # noqa: E402
+from local_paths import john_gui  # noqa: E402
 from wp3_helpers import FakeClick, click, close, drag, open_window, pump  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-JOHN = next((p for p in (ROOT / "legacy" / "CLS_GUI_JohnBussey",
-                         Path(os.environ.get("AURORA_JOHN_GUI", "") or "/nonexistent"),
-                         Path(r"<repository>\legacy\CLS_GUI_JohnBussey"))
-             if (p / "gui_outputs").is_dir()), None)
+JOHN = john_gui()                   # John Bussey's GUI folder (tests/local_paths.py), None when absent
 TRIANGLE = [[-0.6, 4.9], [0.35, 4.9], [-0.6, 5.6]]
 TRIANGLE_MEMBERS = [0, 1, 2, 6, 7, 8]       # by hand: snake grid 4 x 3, pitch 0.25 mm from (-0.5, 5.0)
 

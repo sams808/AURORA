@@ -204,6 +204,29 @@ def test_calibration_default_and_file(tmp_path):
     assert np.isclose(c.ch("sdd2", c.ev("sdd2", 42.0)), 42.0)
 
 
+def test_calibration_describe_names_the_file_or_says_not_calibrated(tmp_path, capsys):
+    """The provenance line (aurora project, the report cover, every report CSV): the file used, relative to the project
+    ('../' for the sibling SGM_Beamline_Analysis-main/), its date and the gains; without a file 'not calibrated', never
+    'SDD calibration (?)'."""
+    from aurora.cli import cmd_project
+    root = testdata.make_fake_project(tmp_path / "beamtime")
+    proj = Project.discover(root)
+    text = proj.calibration.describe(proj.root)
+    assert text == "SDD calibration: none found (config/sdd_calibration.json), the default 10 eV/ch is used, not calibrated"
+    gains = {"sdd1": (10.058, 3.9), "sdd2": (9.398, -3.6), "sdd3": (9.852, -1.3), "sdd4": (10.090, 7.9)}
+    lib = tmp_path / "SGM_Beamline_Analysis-main"
+    lib.mkdir()
+    (lib / "sdd_calibration.json").write_text(json.dumps({**{d: {"gain": g, "offset": o} for d, (g, o) in gains.items()},
+                                                          "_metadata": {"last_updated": "2026-11-04 14:06:43"}}))
+    proj = Project.discover(root)
+    text = proj.calibration.describe(proj.root)
+    assert text.startswith("SDD calibration ../SGM_Beamline_Analysis-main/sdd_calibration.json (last updated "
+                           "2026-11-04 14:06:43): sdd1 10.058 eV/ch +3.9;") and text.endswith("sdd4 10.090 eV/ch +7.9")
+    assert cmd_project(root) == 0 and text in capsys.readouterr().out
+    part = Calibration(data={"sdd1": {"gain": 10.1, "offset": 0.0}}).describe()      # a file without three detectors
+    assert "(?)" not in part and "sdd2 10.000 eV/ch +0.0 (not in the file: default, not calibrated)" in part
+
+
 def test_roi_bins_read(tmp_path):
     p = tmp_path / "roi_bins.json"
     p.write_text(json.dumps({"_meta": {"gains": {"sdd1": 10.0}}, "F Kα": {"sdd1": [60, 74], "sdd2": [65, 80],
@@ -227,7 +250,7 @@ def test_sample_sheet(tmp_path):
 
 
 def test_zones_file_round_trip(tmp_path):
-    d = {"version": 1, "exported": "2026-11-06T20:00:00", "project": "00X00000", "built": "x", "notes": "",
+    d = {"version": 1, "exported": "2026-11-06T20:00:00", "project": "00G00000", "built": "x", "notes": "",
          "goodI0": {"2026-11-05_092758_alpha_beta_f_k_stack": True},
          "holders": {"N5": {"holder": "N5", "day": "2026-11-05", "survey": "010013_holderA_survey", "zones": [
              {"id": 1, "label": "13 alpha_beta", "group": "RE-(O)-F", "comment": "", "rects": [[3.5, 4.0, 5.6, 6.1]],

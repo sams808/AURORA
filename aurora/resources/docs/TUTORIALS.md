@@ -64,8 +64,8 @@ headless listing and the tree agree.
 8. *Advanced*: try **brush-** with brush 1 and click a pixel inside zone 1: it is erased from the zone (the info line
    counts it); a click in another zone selects it instead. On the scan card, **Copy to…** > *Copy to this scan in every
    zone of the holder*: zone 2 takes the same detectors. Then **Rules…**: **Add** a rule with **edge** `F K` that
-   writes the TEY normalisation */ I0, pre-edge = 0*, look at the table of what would change, **Apply now**, and **Edit
-   > Undo**.
+   writes the TEY normalisation */ I0, pre-edge = 0*, look at the table of what would change, **Apply now**, and
+   **Edit > Undo**.
 9. Close and reopen AURORA: the zones are back, from `aurora_demo\.aurora\session.json`.
 
 What you learned: zones are in mm and belong to the holder, settings belong to the zone and scan, every edit can be
