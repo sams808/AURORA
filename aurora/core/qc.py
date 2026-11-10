@@ -535,7 +535,8 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
     st = traces.settings
     n = int(traces.n_pix)
     pix = f"{n} of {n_total} pixels" if n_total else _n(n, "pixel")
-    if st is not None and getattr(st, "signal", "pfy") == "ipfy":
+    resonant = any(str(n).startswith("IPFY of the resonant line") for n in traces.notes)
+    if st is not None and getattr(st, "signal", "pfy") == "ipfy" and not resonant:   # (the resonant case warns below)
         from aurora.core.yields import describe
         detail = describe(traces.line, getattr(st, "ipfy_mode", "ratio"))
         tmpl = MSG_IPFY if getattr(st, "ipfy_mode", "ratio") == "ratio" else MSG_IPFY_OTHER
