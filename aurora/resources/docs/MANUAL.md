@@ -590,8 +590,8 @@ For one zone and scan, Check's **Save ticked → Compare** writes into `processe
 | `<sample>_gui_settings.json` | his keys (rois, params {i0, mode, tey}, stack_h5, survey_h5, spike_z, drop_energy_ranges, drop_indices) plus an `aurora` block (version, zone, settings, points, spikes, masked and incomplete energies) |
 
 The numbers follow his reduction: per detector the mean over the zone pixels of the counts in channels [lo, hi) (his
-'mean'; I0 = mcc ch1 and TEY = mcc ch4 over the same pixels). AURORA's processing is stated in the header: each trace
-is interpolated at its own spikes (the zone's de-spike), energies with I0 below 20 % of its median keep their counts
+'mean'; I0 = mcc ch1 and TEY = mcc ch4 over the same pixels; a detector file cut short gives the mean of the pixels it holds, read from the raw folder also where the reduced stack left that energy out). AURORA's processing is stated in the header: each trace
+is interpolated at its own spikes (the zone's de-spike; a spike of the sum in each detector summed, so sdd_total stays sdd1 + … + sdd4), energies with I0 below 20 % of its median keep their counts
 but get an empty I0, and sdd_total / sdd_mean are over the ticked detectors, empty when one of them is missing at that
 energy (his GUI summed the others). bad_point is True at every such energy. On his BO3 stack the written file equals
 his `_full_reduced.csv` in every sdd1–4, I0 and TEY value (relative 1e-12). Compare reads the files as sdd-scaled,

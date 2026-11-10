@@ -147,6 +147,69 @@ def test_masked_and_incomplete_energies_are_flagged(fake, tmp_path):
     assert any(h.startswith("# i0_masked: 686.00 eV") for h in head) and any(h.startswith("# incomplete: 689.00 eV") for h in head)
 
 
+def test_sdd_total_is_the_sum_of_the_written_detector_columns(fake, monkeypatch):
+    """John's sdd_total is sdd1 + sdd2 + sdd3 + sdd4 on every row. A spike that only the coherent rule's sum test finds
+    is interpolated in the detector columns it is the sum of, so the row still adds up (and is bad)."""
+    from aurora.core import export
+    proj, scan, sd, zone = fake
+    sid = f"{scan.day}_{scan.name}"
+    real = export.build_traces
+
+    def with_a_sum_spike(sums, st, *a, **k):
+        t = real(sums, st, *a, **k)
+        t.spikes["sum"] = [2]                     # what coherent_despike reports for an outlier of the sum alone
+        return t
+
+    monkeypatch.setattr(export, "build_traces", with_a_sum_spike)
+    st = ScanSettings(stack=scan.name, line="total XRF", despike_mode="coherent")
+    fr = john_frame(zone, sid, sd, st, project=proj, scan=scan)
+    assert fr.bad[2]
+    assert np.allclose(fr.total, fr.det.sum(axis=1), rtol=1e-12) and np.allclose(fr.mean, fr.total / 4, rtol=1e-12)
+    # interpolated between its neighbours in every ticked detector, the others untouched
+    expect = 0.5 * (fr.det_measured[1] + fr.det_measured[3])
+    assert np.allclose(fr.det[2], expect, rtol=1e-12) and np.array_equal(fr.det[[0, 1, 3, 4]], fr.det_measured[[0, 1, 3, 4]])
+    st2 = ScanSettings(stack=scan.name, line="total XRF", despike_mode="coherent", sdd=[True, False, True, True])
+    fr2 = john_frame(zone, sid, sd, st2, project=proj, scan=scan)
+    assert fr2.det[2, 1] == fr2.det_measured[2, 1]                        # SDD2 is not in the sum
+    assert np.allclose(fr2.total, fr2.det[:, [0, 2, 3]].sum(axis=1), rtol=1e-12)
+
+
+def test_fixed_bins_keep_the_energies_the_stack_left_out(fake_project):
+    """sgm_report's reduction leaves an incomplete map out entirely (I0 and TEY too); John Bussey's GUI reads each
+    detector file on its own and keeps what was measured. The John file on the fixed bins (the Easy default) reads
+    such an energy from its raw folder, by his rule; without the raw folders the energy is empty, bad and named."""
+    proj = Project.discover(fake_project)
+    scan = proj.find(testdata.STACK)
+    e2, p2 = scan.energy_dirs[2]
+    f = Path(p2) / "sdd2_0.bin"
+    np.fromfile(f, dtype=np.uint32)[:6 * N_CH].tofile(f)                  # SDD2 stopped after 6 of 12 pixels
+    sd = StackData.load(proj, scan)
+    assert not sd.valid[2] and np.isnan(sd.i0[2]).all()                   # the stack left the energy out
+    zone = Zone(id=1, label="1 alpha", rects=[[-0.5, -0.25, 5.0, 5.25]])
+    sid = f"{scan.day}_{scan.name}"
+    st = ScanSettings(stack=scan.name, line="total XRF", despike=False)          # the total XRF bins: 5:200
+    fr = john_frame(zone, sid, sd, st, project=proj, scan=scan)
+    assert "fixed bins" in fr.source
+    pix = zone_pixels(zone, sd)
+    mcc = np.loadtxt(Path(p2) / "mcc_flyer_0.csv", delimiter=",", ndmin=2)
+    w = {d: (5, 200) for d in DETS}
+    for k, d in enumerate(DETS):
+        a = np.fromfile(Path(p2) / f"{d}_0.bin", dtype=np.uint32)
+        a = a.reshape(-1, N_CH)
+        have = pix[pix < len(a)]
+        assert fr.det[2, k] == float(np.mean(a[have, w[d][0]:w[d][1]].sum(axis=1).astype(float))), d
+    assert fr.i0[2] == float(np.mean(mcc[pix, 0])) and fr.tey[2] == float(np.mean(mcc[pix, 3]))
+    assert np.isfinite(fr.total[2]) and not fr.bad[2] and fr.incomplete_ev == []
+    assert "1 energy the stack left out read from the raw folders" in fr.source
+    # every other energy is the stack's own (fixed bins), unchanged
+    other = [i for i in range(len(sd.E)) if i != 2]
+    k = sd.roi_index("total XRF")
+    assert np.array_equal(fr.det[other], np.nanmean(sd.roi_pix_det[:, pix, k, :].astype(float), axis=1)[other])
+    # no raw folders: the energy stays empty, and is bad and named in the header
+    fr2 = john_frame(zone, sid, sd, st, project=proj, scan=None)
+    assert np.isnan(fr2.det[2]).all() and np.isnan(fr2.i0[2]) and fr2.bad[2] and fr2.incomplete_ev == [float(e2)]
+
+
 @pytest.mark.skipif(not (LEGACY / JOHN_STACK).is_dir(), reason="John Bussey's GUI fixtures (legacy/, untracked) absent")
 def test_reproduces_johns_bo3_file(tmp_path, monkeypatch):
     """His BO3 stack, polygon and settings: our _full_reduced.csv has his columns, 311 rows, and his numbers. The

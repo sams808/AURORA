@@ -5,12 +5,14 @@ so his Compare tab, AURORA's Compare and his notebooks read them unchanged.
 The numbers follow his `reduce_stack`: per detector the mean over the zone pixels of the counts in channels [lo, hi)
 (his 'mean'; 'sum' is the other spatial reduction), I0 = mcc ch1 and TEY = mcc ch4 over the same pixels, sdd_total and
 sdd_mean. A detector file that holds fewer pixels than the map (an incomplete energy) gives the mean of the zone pixels
-it has, NaN when it has none, as in his GUI. AURORA's own processing on top, stated in the header:
-- the de-spike of the zone settings (classic or coherent) interpolates each trace at its own spikes;
+it has, NaN when it has none, as in his GUI: on the stack's fixed bins too, whose reduction leaves such an energy out
+(sgm_report's rule), the energy is read from its raw folder. AURORA's own processing on top, stated in the header:
+- the de-spike of the zone settings (classic or coherent) interpolates each trace at its own spikes, and the ticked
+  detectors at the spikes of their sum (coherent), so that sdd_total stays the sum of the written columns;
 - energies whose I0 is below I0_LOW_FRAC of its median keep their counts and get an empty I0 (AURORA's / I0 traces
   leave them out, and Compare divides by this column);
 - sdd_total and sdd_mean are over the detectors ticked in the zone settings, empty when one of them is missing;
-- bad_point is True at every spike, low-I0 and incomplete energy.
+- bad_point is True at every spike, low-I0 and incomplete energy (one without a value, too).
 Files are written atomically; nothing is ever written inside a scan folder or a beamline raw/ folder.
 """
 from __future__ import annotations
@@ -171,11 +173,22 @@ def _read_raw(edirs, mask: np.ndarray, windows, mode: str, progress=None):
     return det, i0, tey
 
 
+def _energy_dirs(scan) -> list:
+    if scan is None:
+        return []
+    edirs = getattr(scan, "energy_dirs", None) or []
+    if not edirs:
+        from aurora.core.io.raw import stack_energy_dirs
+        edirs = stack_energy_dirs(scan.path)
+    return list(edirs)
+
+
 def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=None, scan=None, mode: str = "mean",
                good_curve: np.ndarray | None = None, pix=None, progress=None, read_raw: bool | None = None) -> JohnFrame:
     """Reduce one zone x scan in John Bussey's layout. Custom windows (ScanSettings.roi) or read_raw=True read the raw
-    energy folders of `scan`; otherwise the stack's fixed line bins are used (StackData.roi_pix_det). The de-spike and
-    the I0 rule of the zone settings decide the bad points (spectra.build_traces on these very sums)."""
+    energy folders of `scan`; otherwise the stack's fixed line bins are used (StackData.roi_pix_det), and an energy the
+    stack left out (an incomplete map) is read from its raw folder, by John's rule, when `scan` has one. The de-spike
+    and the I0 rule of the zone settings decide the bad points (spectra.build_traces on these very sums)."""
     if mode not in ("mean", "sum"):
         raise ValueError("spatial reduction is 'mean' or 'sum'")
     pix = zone_pixels(zone, stack) if pix is None else np.asarray(pix, int)
@@ -186,10 +199,7 @@ def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=N
     if not use_raw and line not in getattr(stack, "labels", []):
         use_raw = True
     if use_raw:
-        edirs = (getattr(scan, "energy_dirs", None) or []) if scan is not None else []
-        if not edirs and scan is not None:
-            from aurora.core.io.raw import stack_energy_dirs
-            edirs = stack_energy_dirs(scan.path)
+        edirs = _energy_dirs(scan)
         if not edirs:
             raise ValueError(f"{sid}: the raw energy folders are needed for these windows but are not available")
         mask = np.zeros(N, bool)
@@ -208,10 +218,19 @@ def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=N
             iv = stack.i0[:, pix].astype(float); tv = stack.tey[:, pix].astype(float)
             i0 = np.nansum(iv, axis=1) if mode == "sum" else np.nanmean(iv, axis=1)
             tey = np.nansum(tv, axis=1) if mode == "sum" else np.nanmean(tv, axis=1)
+            gone = ~np.isfinite(stack.i0[:, pix]).any(axis=1)
             if mode == "sum":                       # nansum gives 0 for an energy without any value
-                gone = ~np.isfinite(stack.i0[:, pix]).any(axis=1)
                 det[gone] = np.nan; i0[gone] = np.nan; tey[gone] = np.nan
         source = f"{stack.source or 'stack'} (fixed bins of {line})"
+        # the energies the stack left out (an incomplete map, sgm_report's rule): John's GUI keeps what each file holds
+        edirs = _energy_dirs(scan) if (gone.any() and pix.size) else []
+        if len(edirs) == len(E) and np.allclose([e for e, _ in edirs], E):
+            idx = np.where(gone)[0]
+            mask = np.zeros(N, bool)
+            mask[pix[pix < N]] = True
+            det[idx], i0[idx], tey[idx] = _read_raw([edirs[i] for i in idx], mask, windows, mode, progress)
+            source += (f"; {len(idx)} {'energy' if len(idx) == 1 else 'energies'} the stack left out read from the raw "
+                       "folders")
     n = int(pix.size)
     i0_note = ""
     if settings.i0_source == "good" and good_curve is not None:
@@ -229,7 +248,8 @@ def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=N
     sp = traces.spikes if traces is not None else {}
     clean = det.copy()
     for j, d in enumerate(DETS):
-        idx = sp.get(d) or []
+        # a spike of the sum (the coherent rule's own) is interpolated in the detectors it is the sum of
+        idx = sorted(set(sp.get(d) or []) | (set(sp.get("sum") or []) if settings.sdd[j] else set()))
         if idx:
             clean[:, j] = fill_spikes(det[:, j], idx)
     i0w = fill_spikes(i0, sp["i0"]) if sp.get("i0") else i0.copy()
@@ -239,8 +259,6 @@ def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=N
         sub = clean[:, ticked]
         complete = np.isfinite(sub).all(axis=1)
         total = np.where(complete, sub.sum(axis=1), np.nan)
-        if sp.get("sum"):
-            total = fill_spikes(total, sp["sum"])
         mean = total / len(ticked)
     else:
         complete = np.zeros(len(E), bool)
@@ -249,8 +267,7 @@ def john_frame(zone: Zone, sid: str, stack, settings: ScanSettings, *, project=N
     low = np.zeros(len(E), bool) if low is None else np.asarray(low, bool)
     i0w = np.where(low, np.nan, i0w)
     bad = (traces.bad_mask() if traces is not None else np.zeros(len(E), bool)) | low
-    some = np.isfinite(det).any(axis=1) | np.isfinite(i0)
-    incomplete = some & ~(complete & np.isfinite(i0)) if ticked else np.zeros(len(E), bool)
+    incomplete = ~(complete & np.isfinite(i0)) if ticked else np.zeros(len(E), bool)
     bad = bad | incomplete
     fr = JohnFrame(E=E, det=clean, det_measured=det, i0=i0w, i0_measured=i0, tey=teyw, total=total, mean=mean, bad=bad,
                    windows=windows, n=n, N=N, mode=mode, dets_in_total=[DETS[j] for j in ticked], traces=traces,
