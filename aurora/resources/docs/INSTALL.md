@@ -98,7 +98,8 @@ its traceback, writes them to the log and returns exit code 1; it never waits on
 (or a folder dropped on the shortcut, or *Open in AURORA*) opens that beamtime. MANUAL §11 lists every command and
 option.
 
-**Help > Run self-test…** runs the same self-test from inside AURORA in the background, then shows the summary (*N of
+**Help > Run self-test…** runs the same self-test from inside AURORA in the background (progress and **Cancel** in the
+status bar), then shows the summary (*N of
 M checks ok*) with **Copy** and **Open folder**; the JSON report is written to the self-test folder of section 5. To
 report a problem, send that JSON file together with the text of **Help > Report a problem…** > **Copy diagnostics**
 (versions, operating system, project, settings location and the last 200 lines of the log); the same dialog has **Open

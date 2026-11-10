@@ -297,3 +297,36 @@ def test_a_runtime_error_in_a_callback_is_reported(qapp, excepthook_collector):
     assert [str(e) for _t, e, _tb in excepthook_collector] == ["dictionary changed size during iteration"]
     excepthook_collector.clear()
     host.deleteLater()
+
+
+STUCK = textwrap.dedent('''
+    import os, sys, time
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtCore import QTimer
+    from aurora.app import main
+
+    def close(win):
+        print("closing at", time.monotonic(), flush=True)
+        win.close()
+
+    def start(win, project=None):
+        win.jobs.submit("stuck", lambda cb: time.sleep(60), label="one call that does not return")
+        QTimer.singleShot(300, lambda: close(win))
+    main.open_at_start = start
+    sys.exit(main.run())
+''')
+
+
+def test_a_job_stuck_in_one_call_does_not_abort_the_exit(tmp_path):
+    """A job stuck in one call (a share that does not answer) when the window closes: run() ends the process with exit
+    code 0 once EXIT_WAIT_S passed; deleting the application under the running thread aborted it (exit 127)."""
+    from aurora.app.main import CLOSE_WAIT_S, EXIT_WAIT_S
+    env = {**__import__("os").environ, "AURORA_SETTINGS_DIR": str(tmp_path / "settings"),
+           "AURORA_LOG_DIR": str(tmp_path / "logs")}
+    r = subprocess.run([sys.executable, "-c", STUCK], capture_output=True, text=True, timeout=180, env=env)
+    ended = time.monotonic()                                           # one clock for both processes
+    assert r.returncode == 0, (r.returncode, r.stdout[-2000:], r.stderr[-2000:])
+    took = ended - float(r.stdout.split("closing at ")[1].split()[0])
+    assert took < CLOSE_WAIT_S + EXIT_WAIT_S + 8, took                 # not the 60 s of the stuck call
+    log = "".join(p.read_text(encoding="utf-8", errors="replace") for p in (tmp_path / "logs").rglob("*.log"))
+    assert "still running" in log and "one call that does not return" in log

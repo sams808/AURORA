@@ -3,7 +3,7 @@
     job = window.jobs.submit("stack:" + sid, lambda progress: session.stack(sid, progress=progress),
                              on_done=self._loaded, label="reading the stack", taskbar=self.taskbar)
 
-- One running job per key ('stack:<sid>', 'cube:<sid>', 'survey:<holder>', 'report', 'discover', 'check:<holder>'):
+- One running job per key ('stack:<sid>', 'cube:<sid>', 'survey:<holder>', 'report', 'discover:<n>', 'check:<holder>'):
   a second submit with the same key attaches its callbacks to the running job instead of starting another.
 - fn(progress) runs on a Worker thread; progress(i, n, message) raises Cancelled once the job is cancelled.
 - on_done(result), on_failed(traceback), on_end(state) are called on the GUI thread: the Job is a GUI-thread QObject

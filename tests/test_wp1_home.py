@@ -298,6 +298,126 @@ def test_a_failed_open_never_blocks_and_offers_retry(qapp, tmp_path, monkeypatch
     win.close()
 
 
+def test_a_second_open_supersedes_one_in_progress(qapp, tmp_path, monkeypatch, fake_project):
+    """While a share that does not answer is being read, opening another project (recent list, drop, the demo) opens
+    that one: the first discovery is cancelled and its late failure dropped (it was silently ignored, threads-8)."""
+    import pathlib
+    win = _window(qapp)
+    home = win.home
+    target = tmp_path / "share" / "unreachable beamtime"
+    real_is_dir = pathlib.Path.is_dir
+
+    def slow_is_dir(self, *a, **k):
+        if "unreachable beamtime" not in str(self):
+            return real_is_dir(self, *a, **k)
+        time.sleep(2)                                            # the share answers after 2 s, then fails
+        raise OSError(f"{self}: the network share does not answer")
+
+    with monkeypatch.context() as m:
+        m.setattr(pathlib.Path, "is_dir", slow_is_dir)
+        home.open_path(target)
+        pump(qapp)
+        assert not win.jobs.idle() and not home.open_btn.isEnabled()
+        home.open_path(fake_project)                             # the second request, while the first still waits
+        pump(qapp)
+        assert "reading" in home.path_label.text() and str(fake_project.name) in home.path_label.text()
+        wait(qapp, win, 30000)
+    assert home.project is not None and home.project.root == fake_project.resolve()
+    assert not home.failure_state.isVisible() and home.path_label.text().startswith(str(home.project.root))
+    assert home.open_btn.isEnabled() and win.jobs.idle()
+    win.session._save_timer.stop()
+    win.close()
+
+
+def test_the_recent_check_and_discovery_never_wait_for_a_share(tmp_path, monkeypatch):
+    """One look at a share that does not answer blocks for about 20 s in one call. The recent-projects check and the
+    discovery look in threads of their own and keep checking for Cancel, so Cancel (and closing the window) ends the
+    job at once (it waited for the call, threads-11); the answers of the other paths are unchanged."""
+    import os
+    import pathlib
+    import threading
+    from aurora.app.home import check_paths, discover
+    from aurora.core.cancel import CancelToken, Cancelled, cancellable
+    stuck = threading.Event()
+    real_isdir = os.path.isdir
+
+    def isdir(p):
+        if "share that does not answer" in str(p):
+            stuck.wait(20)                                       # released at the end of the test
+            return False
+        return real_isdir(p)
+    real_is_dir = pathlib.Path.is_dir
+    monkeypatch.setattr(os.path, "isdir", isdir)
+    monkeypatch.setattr(pathlib.Path, "is_dir", lambda self: isdir(self) if "does not answer" in str(self) else real_is_dir(self))
+    ok = tmp_path / "here"
+    ok.mkdir()
+    gone = str(tmp_path / "share that does not answer")
+    assert check_paths([str(ok), str(tmp_path / "nowhere")], lambda *a: None) == {str(ok): True,
+                                                                                 str(tmp_path / "nowhere"): False}
+    try:
+        for job in (lambda cb: check_paths([str(ok), gone], cb), lambda cb: discover(pathlib.Path(gone), cb)):
+            token = CancelToken()
+            out: dict = {}
+
+            def run():
+                try:
+                    out["r"] = job(cancellable(None, token))
+                except Cancelled:
+                    out["cancelled"] = time.monotonic()
+            t = threading.Thread(target=run)
+            t.start()
+            time.sleep(0.3)
+            t0 = time.monotonic()
+            token.cancel()
+            t.join(5)
+            assert "cancelled" in out and out["cancelled"] - t0 < 0.5, out
+    finally:
+        stuck.set()
+
+
+def test_the_demo_is_written_in_a_job(qapp, user_data, monkeypatch):
+    """Help > Open the demo beamtime writes the demo in a job with the Home progress strip, then opens it; the GUI
+    thread wrote it (about 1 s frozen, first-run-ux-25)."""
+    import aurora.cli
+    real, writers = aurora.cli.cmd_demo, []
+    monkeypatch.setattr(aurora.cli, "cmd_demo",
+                        lambda root: (writers.append(threading.current_thread() is threading.main_thread()), real(root))[1])
+    win = _window(qapp)
+    win.demo_action.trigger()
+    assert win.jobs.job("demo") is not None and win.home.taskbar.isVisible()
+    assert "demo" in win.home.taskbar.text()
+    wait(qapp, win, 60000)
+    assert writers == [False] and win.home.project is not None and win.home.project.root == user_data.resolve()
+    win.session._save_timer.stop()
+    win.close()
+
+
+def test_the_self_test_shows_its_progress_and_runs_once(qapp, monkeypatch):
+    """Help > Run self-test…: a progress strip with Cancel in the status bar, the menu entry disabled while it runs,
+    and one summary even when clicked twice (two identical dialogs, and 40 s of nothing to see, first-run-ux-11)."""
+    from aurora.app import diagnostics
+    gate, shown = threading.Event(), []
+
+    def fake(progress):
+        for i in range(3):
+            progress(i, diagnostics.EXPECTED_CHECKS, f"ok check {i}")
+            gate.wait(0.2)
+        return {"version": "x", "ok": True, "checks": [{"name": "a", "ok": True}], "json": ""}
+    monkeypatch.setattr(diagnostics, "run_selftest", fake)
+    monkeypatch.setattr(diagnostics, "SelftestDialog", lambda summary, parent: type("D", (), {"show": lambda self: shown.append(summary)})())
+    win = _window(qapp)
+    win.selftest_action.trigger()
+    pump(qapp)
+    bar = win.status_taskbar
+    assert win.jobs.job("selftest") is not None and bar.isVisible() and bar.cancel_btn.isVisible()
+    assert not win.selftest_action.isEnabled() and "running" in win.selftest_action.toolTip()
+    win.run_selftest()                                           # a second click (or the action triggered twice)
+    wait(qapp, win, 30000)
+    assert len(shown) == 1 and win.selftest_action.isEnabled() and not bar.isVisible()
+    win.session._save_timer.stop()
+    win.close()
+
+
 def test_quiet_failure_keeps_the_welcome(qapp, tmp_path):
     win = _window(qapp)
     win.home.open_path(tmp_path / "gone", quiet=True)
