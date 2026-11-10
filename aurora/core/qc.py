@@ -160,7 +160,7 @@ def saturation_check(cr: CountRate, day_kcps: np.ndarray, n_pix: int | None = No
         res.notes.append("high count rate: " + ", ".join(f"{d.upper()} {res.detail[d]['kcps']} kcps ({res.detail[d]['ratio_to_day']}x the day's other scans)"
                                                           for d in res.high_rate)
                          + " with the output barely following I0: dead time / pile-up likely, fluorescence amplitudes not trusted; "
-                           "compare with TEY. (SDD throughput limit: TODO: need reference.)")
+                           "compare with TEY.")
     return res
 
 

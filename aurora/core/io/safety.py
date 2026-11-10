@@ -1,6 +1,7 @@
 """Folders AURORA must never write into.
 
-- anything inside a beamline `raw` folder (a folder named raw that holds YYYY-MM-DD day folders): read-only by rule;
+- anything inside a beamline `raw` folder (a folder named raw that holds YYYY-MM-DD day folders, day folders under
+  another name that hold scan folders, or scan folders): read-only by rule;
 - every folder listed in $AURORA_PROTECT_DIRS (os.pathsep-separated), e.g. a real beamtime during the tests.
 
 Every automatic write (session autosave, caches) and every report / export calls `assert_writable(path)` first. A
@@ -34,13 +35,34 @@ def protected_dirs() -> list[Path]:
 
 
 DAY = re.compile(r"^\d{4}-\d{2}-\d{2}")
+SCAN = re.compile(r"_(survey|stack)$")
+
+
+def _scan_folder(d: Path) -> bool:
+    """A scan folder: named <...>_survey / <...>_stack, or holding the scan's .h5 file directly."""
+    if SCAN.search(d.name):
+        return True
+    try:
+        return any(p.suffix.lower() == ".h5" for p in d.iterdir())
+    except OSError:
+        return False
 
 
 def _is_beamline_raw(d: Path) -> bool:
+    """A folder named raw that holds day folders (YYYY-MM-DD, or any folder of scan folders: 'Nov05', 'day1') or scan
+    folders directly."""
     if d.name.lower() != "raw":
         return False
     try:
-        return any(c.is_dir() and DAY.match(c.name) for c in d.iterdir())
+        kids = [c for c in d.iterdir() if c.is_dir()]
+        if any(DAY.match(c.name) or SCAN.search(c.name) for c in kids):
+            return True
+        for c in kids:
+            if _scan_folder(c):
+                return True
+            if any(g.is_dir() and _scan_folder(g) for g in c.iterdir()):
+                return True
+        return False
     except OSError:
         return False
 

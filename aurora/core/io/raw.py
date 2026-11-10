@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from aurora.core.constants import (DETS, IN_PROGRESS_MIN, MIN_SPAN_EV, N_CH, TEST_NAME_PATTERN)
+from aurora.core.constants import DETS, IN_PROGRESS_MIN, MIN_SPAN_EV, N_CH
 from aurora.core.io.h5 import stack_plan
 
 log = logging.getLogger("aurora.io")
@@ -85,21 +85,26 @@ def stack_last_mtime(edirs: list[tuple[float, Path]]) -> float:
 
 
 def stack_status(stack_dir: Path, edirs: list[tuple[float, Path]] | None = None,
-                 planned: list[float] | None = None, now: float | None = None) -> tuple[str, str]:
+                 planned: list[float] | None = None, now: float | None = None, name_test: bool | None = None,
+                 span_test: bool = True) -> tuple[str, str]:
     """('complete' | 'aborted' | 'in_progress' | 'test' | 'empty', reason).
 
-    test = beamline diagnostic by name, or a span below MIN_SPAN_EV; aborted = fewer energy folders than planned and
-    untouched for IN_PROGRESS_MIN minutes; in_progress = incomplete but still being written.
+    test = beamline diagnostic by name (names.is_test_name, or `name_test` when the caller decided), or a span below
+    MIN_SPAN_EV (unless span_test is False); aborted = fewer energy folders than planned and untouched for
+    IN_PROGRESS_MIN minutes; in_progress = incomplete but still being written.
     """
     stack_dir = Path(stack_dir)
     ed = stack_energy_dirs(stack_dir) if edirs is None else edirs
     n = len(ed)
     if n == 0:
         return "empty", "no energy folders"
-    if re.search(TEST_NAME_PATTERN, stack_dir.name):
+    if name_test is None:
+        from aurora.core.names import is_test_name
+        name_test = is_test_name(stack_dir.name)
+    if name_test:
         return "test", "beamline diagnostic (name), not a sample scan"
     span = ed[-1][0] - ed[0][0]
-    if span < MIN_SPAN_EV:
+    if span_test and span < MIN_SPAN_EV:
         return "test", f"{n} energies over {span:.1f} eV"
     if planned is None:
         _, planned = stack_plan(stack_dir)

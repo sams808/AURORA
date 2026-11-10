@@ -87,17 +87,78 @@ def norm_text(s) -> str:
     return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower())
 
 
+def layout_group_entry(gid: str, rows: int, cols: int, labels, first_number: int = 1) -> tuple[dict, dict]:
+    """(group, samples) to add to a holder of plate_layout.json for a grid of rows x cols: the cells hold plate
+    numbers from `first_number` in reading order (null for an empty position, None in `labels`), and samples maps
+    each number to its label. `labels`: flat in reading order or nested rows; None = numbered positions without
+    names. The layout's own format (sgm_report): {id, rows, cols, cells, match}."""
+    rows, cols = int(rows), int(cols)
+    flat = []
+    if labels is not None:
+        vals = list(labels)
+        flat = [v for row in vals for v in row] if vals and all(isinstance(v, (list, tuple)) for v in vals) else vals
+    cells, samples, n = [], {}, int(first_number)
+    for r in range(rows):
+        row = []
+        for c in range(cols):
+            i = r * cols + c
+            if labels is not None and i < len(flat) and flat[i] is None:
+                row.append(None)
+                continue
+            row.append(n)
+            if labels is not None and i < len(flat) and flat[i]:
+                samples[str(n)] = str(flat[i])
+            n += 1
+        cells.append(row)
+    return {"id": str(gid), "rows": rows, "cols": cols, "cells": cells, "match": []}, samples
+
+
+def add_layout_group(path, holder: str, group: dict, samples: dict) -> None:
+    """Add (or replace, same id) a group of a holder in plate_layout.json, with its plate numbers' names: the file is
+    created when missing, the previous one is kept as plate_layout.backup-<time>.json, everything else in it stays,
+    and the write is atomic. ProtectedPathError in a protected folder; ValueError when the file is not a JSON
+    object."""
+    import datetime as dt
+    import json
+    from pathlib import Path
+    from aurora.core.io.config import load_json_checked
+    from aurora.core.io.safety import assert_writable
+    from aurora.core.io.textio import write_text_atomic
+    path = Path(path)
+    assert_writable(path)
+    raw, problem = load_json_checked(path)
+    if problem or (raw is not None and not isinstance(raw, dict)):
+        raise ValueError(f"{path.name} is {problem or 'not a JSON object'}: fix or move it first, AURORA does not "
+                         "write over it")
+    raw = dict(raw or {})
+    lay = raw.get(holder)
+    if not isinstance(lay, dict):
+        lay = {}
+    lay = dict(lay)
+    lay["samples"] = {**(lay.get("samples") if isinstance(lay.get("samples"), dict) else {}), **samples}
+    groups = [g for g in (lay.get("groups") if isinstance(lay.get("groups"), list) else [])
+              if not (isinstance(g, dict) and str(g.get("id")) == str(group["id"]))]
+    lay["groups"] = groups + [group]
+    raw[holder] = lay
+    if path.exists():
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        write_text_atomic(path.with_name(f"{path.stem}.backup-{stamp}{path.suffix}"), path.read_text(encoding="utf-8-sig"))
+    write_text_atomic(path, json.dumps(raw, indent=1, ensure_ascii=False))
+
+
 def layout_groups(layout: dict, holder: str) -> list[dict]:
     """The groups of plate_layout.json for a holder (rows, cols, cells of plate numbers, match words, names), each
     with its sample names resolved: g['labels'] = the names in the sketch's reading order (None = an empty position),
     nested like g['cells'], or the flat g['names'] list of a group without a known arrangement."""
-    lay = layout.get(holder) if holder else None
+    lay = layout.get(holder) if holder and isinstance(layout, dict) else None
     if not isinstance(lay, dict):
         return []
-    samples = {str(k): v for k, v in (lay.get("samples") or {}).items()}
+    samples = lay.get("samples") if isinstance(lay.get("samples"), dict) else {}
+    samples = {str(k): v for k, v in samples.items()}
     out = []
-    for g in lay.get("groups") or []:
-        if not isinstance(g, dict):
+    for g in lay.get("groups") if isinstance(lay.get("groups"), list) else []:
+        from aurora.core.io.config import _check_layout_group
+        if _check_layout_group(g) is not None:          # a group of the wrong shape is never used (never raises)
             continue
         g = dict(g)
         if g.get("cells"):
@@ -113,11 +174,12 @@ def layout_group(layout: dict, holder: str, label: str) -> dict | None:
     """The layout group of a scan (sgm_report `Config.group_for`): the group one of whose 'match' words (or, unless
     'match_names' is false, a sample name, first 9 letters) is in the scan label; the longest match wins. Words of
     fewer than 3 letters never match."""
-    lay = layout.get(holder) if holder else None
+    lay = layout.get(holder) if holder and isinstance(layout, dict) else None
     if not isinstance(lay, dict) or not lay.get("groups"):
         return None
     t = norm_text(label)
-    samples = {str(k): v for k, v in (lay.get("samples") or {}).items()}
+    samples = lay.get("samples") if isinstance(lay.get("samples"), dict) else {}
+    samples = {str(k): v for k, v in samples.items()}
     best, best_len = None, 0
     for g in layout_groups(layout, holder):
         words = [norm_text(w) for w in g.get("match") or []]

@@ -22,7 +22,8 @@ def test_check_perspective(qapp, fake_project):
     win.home.set_project(proj)
     qapp.processEvents()
     ck = win.check
-    assert ck.table.rowCount() == 1 and ck.table.item(0, 1).text() == "alpha_beta"
+    from aurora.core.names import label_from_name
+    assert ck.table.rowCount() == 1 and ck.table.item(0, 1).text() == label_from_name(testdata.STACK)
     ses = win.session
     sid = ses.stack_id(proj.find(testdata.STACK))
     # the worker's job, done synchronously

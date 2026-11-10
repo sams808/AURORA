@@ -144,15 +144,24 @@ class EdgeLine:
     sigma_ch: float
     n_sigma: float
     sigma_source: str                # where the peak width came from
+    nominal: bool = False            # the channels come from the nominal 10 eV per channel, not a calibration
 
 
-def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
+def edge_line_windows(edge, calibration, roi_bins=None, nominal: bool = False) -> EdgeLine | None:
     """The preset 'line of the edge': the resonant emission line of the edge (xraydb), centre ± n_sigma σ converted to
     channels with Calibration.bounds, the rule of sgm_report's fixed bins. σ is the line's own fitted width in
     roi_bins.json when it has one, else the median width of the other fitted lines, else sgm_report's typical 3.5
-    channels; n_sigma is roi_bins' (1.5). None without a calibration (the channels would be nominal) or an edge."""
-    if edge is None or calibration is None or not getattr(calibration, "calibrated", False):
+    channels; n_sigma is roi_bins' (1.5). None without a calibration (the channels would be nominal) or an edge;
+    nominal=True gives it anyway, on the calibration's nominal gains (UNCALIBRATED_EV_PER_CH per channel for every
+    detector without a valid entry), marked `nominal` (Reduce: 'nominal calibration, check the peak')."""
+    if edge is None:
         return None
+    calibrated = calibration is not None and getattr(calibration, "calibrated", False)
+    if not calibrated and not nominal:
+        return None
+    if calibration is None:
+        from aurora.core.io.config import Calibration
+        calibration = Calibration()
     from aurora.core.lines import resonant_line
     label = resonant_line(*edge)
     ev = emission_line_ev(label)
@@ -173,7 +182,7 @@ def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
     half = n_sigma * sig * gain
     windows = {d: [int(a), int(b)] for d in DETS for a, b in [calibration.bounds(d, ev - half, ev + half)]}
     return EdgeLine(label=label, line_ev=ev, windows=normalise_windows(windows), sigma_ch=sig, n_sigma=n_sigma,
-                    sigma_source=src)
+                    sigma_source=src, nominal=not calibrated)
 
 
 def channel_ev(calibration, det: str, ch: float) -> float:
