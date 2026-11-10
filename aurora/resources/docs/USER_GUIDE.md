@@ -48,7 +48,8 @@ vs planned); double-click a scan to open it in Reduce.
 
 The session (zones, settings, good-I0 choices) is saved automatically to `<project>/.aurora/session.json`, with
 backups in `.aurora/backups/`. Caches of reduced stacks and hypercubes live under `<project>/.aurora/cache/` and can
-be deleted at any time.
+be deleted at any time. One AURORA at a time edits a project: a second one opens it read-only. Edits that could not
+be saved are never dropped without asking: closing the window offers **Export zones…**, *Discard* or *Cancel*.
 
 ## 2. Survey
 

@@ -40,7 +40,7 @@ Contents
   each entry reads like *N5 · 2026-11-05 · 1 stack · 2 zones*. **Ctrl+PgUp** and **Ctrl+PgDown** step to the previous
   and next holder, wrapping around. The save indicator reads *unsaved* while a change waits for the autosave (it is
   written within a second), *saved 12:03* once it is on disk, and *read-only* when the session cannot be saved (a
-  session.json written by a newer AURORA); it is empty until the project has a session file.
+  session.json written by a newer AURORA, the project open in another AURORA, a folder that cannot be written); it is empty until the project has a session file.
 - *Rail* (left): the eight perspectives, **Home** to **Report**, in the order of a normal workflow; **Ctrl+1** …
   **Ctrl+8** open them, and the tooltip of each rail button names its shortcut. **Settings** sits at the bottom.
   Every perspective keeps its state when you switch.
@@ -150,11 +150,20 @@ read (unless their folder changed) and the undo history; new holders are added a
 The session is never lost: session.json is replaced in one step (a crash mid-way leaves the previous file), the
 previous good file is kept as `session.json.bak`, and a copy goes to `.aurora/backups/` at most every 10 minutes while
 you edit and before every import, proposal, rule application and restore (the last 30 are kept). A damaged
-session.json is kept as `session.corrupt-<time>.json` and the zones come back from the .bak (else the newest backup);
+session.json is kept as `session.corrupt-<time>.json` and the zones come back from the newest readable state (the .bak or a backup);
 a message says how many zones were restored and from when. **File > Restore zones from a backup…** (Advanced) lists
 the backups (columns Saved, Kind, Holders, Zones, File) and **Restore** brings one back; a restore is itself one undo
 step. A session.json written by a newer AURORA opens read-only: the zones are shown, edits stay in memory, and the
 status line says *written by a newer AURORA: edits here are not saved; export them to a file*.
+
+One AURORA at a time edits a project: the first to open it holds `.aurora/session.lock` (its process, computer, user
+and time). Another AURORA, on this computer or on another one over a shared folder, opens the project read-only and
+names the one that holds it; close that one, then **Reload**. The lock of an AURORA that has ended, or has not been
+heard from for 10 minutes, is taken over. A project whose session cannot be written (a protected or read-only folder,
+a read-only session.json) opens read-only too, and says why. A session.json changed on disk by another program is
+kept in `.aurora/backups/` before AURORA writes over it. When edits could not be saved (a read-only session, a failed
+save), closing the window or opening another project asks first: **Export zones…** writes them to a zones_all.json
+of your choice (in Easy mode too), *Discard* goes on without them, *Cancel* stays.
 
 The Compare library is saved with the project too, in its own files (6.1); it is not part of the undo history.
 
@@ -286,7 +295,9 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
   zone here are simply added, and a file whose zones are exactly the ones here asks nothing. A backup of the session
   is saved first; the status line reads *imported 12, skipped 3 duplicates, backup saved as
   session-20261108-101500.json*, and **Ctrl+Z** undoes the whole import. A file that cannot be read changes nothing
-  and a message names it.
+  and a message names it (a rectangle or painted square needs 4 numbers, a polygon vertex 2). A holder of the file
+  is matched to this project's by its key, else by its holder name and day, else by its name alone when only one
+  holder has it; the zones of a holder this project does not have are kept but not shown, and the status line counts them.
 - **Export zones…** (Advanced) writes the browser zone tool's zones_all.json for the whole project (every holder):
   version 1, without AURORA's header, `ui` and `rules` blocks. Polygon zones are written as painted squares on the
   pixels inside them, at the pitch of every stack, so the tool finds the same members; AURORA keeps the polygon itself.
@@ -1046,9 +1057,11 @@ Writes:
 | `<project>/.aurora/session.json.bak` | the previous good session.json, replaced at every save |
 | `<project>/.aurora/backups/session-YYYYmmdd-HHMMSS.json` | snapshots: at most one per 10 min of editing, plus one before every import, proposal, rule application and restore; the last 30 are kept; each carries a `backup` note (reason, time) |
 | `<project>/.aurora/session.corrupt-<time>.json` | a session.json that could not be read, set aside once and never overwritten |
+| `<project>/.aurora/session.lock` | the AURORA that has the project open for editing (process, computer, user, start and last-seen time, refreshed every 2 min); removed when it closes; another AURORA opens the project read-only; taken over when its AURORA has ended or has not been heard from for 10 min |
 | `<project>/.aurora/session.v1.bak.json` | the original of a session written by AURORA 0.3 or earlier (schema 1), kept once before the first save in the new schema |
 | `<project>/.aurora/qc.json` | AURORA's checks per scan (I0 level and verdict, kcps per SDD, saturated and high-rate SDDs, notes, when and with which version, the scan's file time for the re-check); written atomically; delete to check again |
 | `<project>/.aurora/library.json`, `library_spectra.npz` | the Compare library of the project (rows, files with absolute and relative paths, E0 choices, colours, the x range and spacing) and the arrays of traces without a file; written atomically a moment after each change, never when nothing changed |
+| `<project>/.aurora/library.corrupt-<time>.json`, `library_spectra.corrupt-<time>.npz` | a library.json that could not be read, and its arrays, set aside (the library then starts empty and a message says so) |
 | `<project>/.aurora/cache/<day>/<scan>/` | reduced stack `_reduced_cache.npz` (numbers and text only, signed with the XRF windows, the energy count and the newest energy-folder time; rebuilt by itself when `config/roi_bins.json` or the energy folders change), `_mcc_curves.json`, `_emission_cache.npz` (per-pixel emission spectra), `_xrf_windows/w<lo>-<hi>_….npz` (counts in custom XRF windows), and the hypercube in `hypercube-<key>/` (`cube_sdd1.npy` … `cube_sdd4.npy` uint16 or uint32, `xrf_total.npy`, `bins_<hash>.npy`, `cube_aux.npz`, `cube_meta.json`); delete at will |
 | `<project>/processed/reduced/<sample>/` | John Bussey-format files written by Check's **Save ticked → Compare** (5.3) |
 | report output folder | one folder per build, `<YYYY-mm-dd_HHMM>_<scope>/`, plus `latest.json` (section 9) |
@@ -1094,10 +1107,11 @@ Re-reduce the stack with the project ROI bins** (Advanced) reduces that stack fr
 - **A `_reduced_cache.npz.bad` file appeared**: the cache was damaged and was set aside; the stack was reduced again
   from `raw/`. The file can be deleted.
 - **session.json was damaged**: AURORA set it aside as `session.corrupt-<time>.json` and restored the zones from
-  `session.json.bak` or the newest file in `.aurora/backups/`; **File > Restore zones from a backup…** (Advanced
+  the newest readable state in `session.json.bak` and `.aurora/backups/`; **File > Restore zones from a backup…** (Advanced
   mode) offers older ones.
-- **The top bar says read-only**: the session.json was written by a newer AURORA. Edits are shown but not saved;
-  Survey > **Export zones…** keeps them in a file, or open the project with the newer AURORA.
+- **The top bar says read-only**: the session.json was written by a newer AURORA, the project is open in another AURORA (the message names it), or its folder cannot be written. Edits are shown but not saved;
+  closing the window offers **Export zones…** (Survey > **Export zones…** in Advanced mode), or open the project with the newer AURORA, or close the other AURORA and **Reload**.
+- **The Compare library came back empty**: its library.json could not be read; it was kept as `library.corrupt-<time>.json`.
 - **Undid too much**: **Ctrl+Y** (or **Ctrl+Shift+Z**) redoes; **Edit > History…** (Advanced mode) jumps to any
   point.
 - **A control described here is missing**: it is probably an Advanced control; switch with **Ctrl+Shift+A**.

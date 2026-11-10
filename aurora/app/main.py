@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         self.session.status.connect(lambda m: self.statusBar().showMessage(m, 6000))
         self.home = HomePerspective()
         self.home.project_opened.connect(self._on_project)
+        self.home.can_leave = self._can_leave
         self.home.scan_activated.connect(self.open_scan_in_reduce)
         self.survey = SurveyPerspective(self.session)
         self.survey.open_requested.connect(self.open_scan_in_reduce)
@@ -158,6 +159,7 @@ class MainWindow(QMainWindow):
         self.report = ReportPerspective(self.session)
         self.check = CheckPerspective(self.session)
         self.library = Library(self)
+        self.library.warning.connect(lambda m: self.session.warned.emit("Compare library", m))
         self.compare = ComparePerspective(self.library)
         self.fit = FitPerspective(self.library)
         self.maps = MapsPerspective(self.session)
@@ -586,8 +588,12 @@ class MainWindow(QMainWindow):
         self.home.open_path(p)
 
     def closeEvent(self, event) -> None:
-        """Cancel every job and wait at most CLOSE_WAIT_S in total behind a 'finishing…' status; a job still running
+        """Zone edits that could not be saved are exported, discarded or kept (Cancel keeps the window open). Then
+        cancel every job and wait at most CLOSE_WAIT_S in total behind a 'finishing…' status; a job still running
         after that is handed to the application (its thread is never destroyed while it runs)."""
+        if not self.session.confirm_leave("close the window"):
+            event.ignore()
+            return
         managers = all_managers(self)
         if any(not m.idle() for m in managers):
             self.statusBar().showMessage("finishing …")
@@ -599,7 +605,16 @@ class MainWindow(QMainWindow):
             for m in managers:
                 m.keep_running()
         self.session.flush()
+        self.session.release_lock()             # another AURORA may edit the project now
         super().closeEvent(event)
+
+    def _can_leave(self, project) -> bool:
+        """Home asks before another project replaces the open one: edits that could not be saved are exported,
+        discarded or kept (Cancel keeps the open project). Reading the same folder again (Reload) loses nothing."""
+        cur = self.session.project
+        if cur is None or Path(cur.root) == Path(project.root):
+            return True
+        return self.session.confirm_leave("open another project")
 
     def _on_project(self, project) -> None:
         self.statusBar().showMessage(f"{plural(len(project.scans), 'scan')} in {project.root}")

@@ -12,8 +12,15 @@ project open, no binary is read), so a zone gets settings for a stack that was n
 Durability: session.json is written atomically; the previous good file is kept as session.json.bak; snapshots go to
 `.aurora/backups/session-YYYYmmdd-HHMMSS.json` (at most one per SNAPSHOT_EVERY_S, the last SNAPSHOTS_KEPT kept, plus
 one before every import, proposal, rule application and restore). A damaged session.json is kept as
-session.corrupt-<time>.json and the session is restored from the .bak, else from the newest snapshot. A file written
-by a newer AURORA (a higher schema) opens read-only.
+session.corrupt-<time>.json and the session is restored from the newest readable state among the .bak and the
+snapshots. A file written by a newer AURORA (a higher schema) opens read-only.
+
+One AURORA at a time edits a project: the session takes the project's lock (.aurora/session.lock,
+aurora.core.io.lock) when it opens it. A project another AURORA holds, or whose session cannot be written (a protected
+or read-only folder, a read-only session.json), opens read-only and says why; Reload tries again. A save first checks
+that the lock is still this session's, and keeps a session.json changed on disk by another program as a snapshot
+before writing over it. Edits that could not be saved are never dropped without asking: confirm_leave() offers
+Export zones… / Discard / Cancel before the window closes or another project opens.
 
 Extension points, so several perspectives share this state without editing this file:
 - `with session.edit(description):` is the one way to change zones, settings or good-I0: it refreshes the memberships,
@@ -24,16 +31,20 @@ Extension points, so several perspectives share this state without editing this 
 - add_flag_source(fn(scan) -> [Flag]) and flags_of(scan): scan flags beyond the sgm_report summary;
 - add_settings_default(fn(scan, ScanSettings)): defaults applied to every new zone x scan settings;
 - flush(), save_state(str) and read_only for the save indicator; undo_stack, undo(), redo();
+- confirm_leave(action), release_lock() and the `warned` signal (a non-modal message: read-only, a foreign change);
 - backup_now(reason), backups(), restore_backup(path) and import_zones(path, policy).
 """
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import hashlib
 import json
 import logging
+import math
 import os
 import re
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -64,6 +75,13 @@ SAVE_DELAY_MS = 800                     # autosave this long after the last chan
 BACKUP_DIR = "backups"
 NEWER_SCHEMA_TEXT = "written by a newer AURORA: edits here are not saved; export them to a file"
 READ_ONLY_TEXT = "this session is read-only: edits here are not saved; export them to a file"
+LOCKED_TEXT = ("this project is open in another AURORA ({who}): this window is read-only, edits here are not saved; "
+               "close the other one, then Reload")
+UNWRITABLE_TEXT = "the session cannot be saved here ({why}): edits here are not saved; export them to a file"
+LOST_TEXT = ("another AURORA took this project over ({who}): edits here are no longer saved; export them to a file, "
+             "or Reload to read its session")
+FOREIGN_TEXT = ("session.json was changed by another program since this window read it: that version was kept as "
+                "{name}, and the zones of this window were saved over it")
 # edits that get a snapshot of the session first (large changes made in one click)
 SNAPSHOT_BEFORE = re.compile(r"^(propose|apply|restore)\b|\brules?\b", re.IGNORECASE)
 _SNAP_NAME = re.compile(r"^session-(\d{8}-\d{6})(?:_(\d+))?\.json$")     # '_2' sorts after '.json'
@@ -98,6 +116,7 @@ class ImportResult:
     imported: int = 0
     duplicates: int = 0
     holders_skipped: int = 0
+    unmatched: int = 0                  # zones of holders this project does not have (kept under their own key)
     backup: Path | None = None
     cancelled: bool = False
     error: str = ""
@@ -155,6 +174,33 @@ def _file_stamp(path: Path) -> tuple[int, int] | None:
     return st.st_mtime_ns, st.st_size
 
 
+def _os_text(err: Exception) -> str:
+    """A failure in words: 'Access is denied: C:\\…\\session.json', never the repr of the exception (which doubles
+    every backslash of a Windows path)."""
+    reason = getattr(err, "strerror", None)
+    if not reason:
+        return str(err) or type(err).__name__
+    name = getattr(err, "filename2", None) or getattr(err, "filename", None)     # a rename names its target second
+    return f"{reason}: {name}" if name else str(reason)
+
+
+def _content_digest(d: dict) -> bytes:
+    """A digest of a session's content except its time stamp and header (equal content, equal digest)."""
+    d = dict(d)
+    for k in ("exported",) + ZonesFile.HEADER_KEYS:
+        d.pop(k, None)
+    return hashlib.blake2b(dumps(d).encode("utf-8"), digest_size=20).digest()
+
+
+def _local_naive(text: str) -> dt.datetime | None:
+    """An ISO time read from a file as a naive local time (an aware one is converted), None when it does not parse."""
+    try:
+        t = dt.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return t.astimezone().replace(tzinfo=None) if t.tzinfo is not None else t
+
+
 def _geometry(z: Zone) -> tuple:
     """What makes two zones the same area (import duplicates): rectangles, erase rectangles, painted and erased
     squares and polygons, rounded to 1 nm."""
@@ -174,6 +220,7 @@ class Session(QObject):
     save_state = Signal(str)                # '' (no session file) | 'unsaved' | 'saved HH:MM' | 'not saved' | 'read-only'
     recovered = Signal(str)                 # a damaged session.json was set aside; the text says what was restored
     reloaded = Signal(str)                  # Reload of the same project kept the place; the stack id kept ('' = none)
+    warned = Signal(str, str)               # (title, text): opened read-only, the lock taken over, a foreign change
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -187,7 +234,9 @@ class Session(QObject):
         self._surveys: dict[str, SurveyData] = {}
         self.sheet_rows: list = []
         self.check_queue: list[CheckItem] = []
-        self.read_only = False                  # True: edits stay in memory, save() refuses (a newer session schema)
+        self.read_only = False                  # True: edits stay in memory, save() refuses (a newer session schema,
+        #                                         the project open in another AURORA, a folder that cannot be written)
+        self.read_only_reason = ""              # why, in words ('' when the session saves)
         self.last_import = ImportResult()
         self._flag_sources: list = []
         self._settings_defaults: list = []
@@ -199,8 +248,18 @@ class Session(QObject):
         self._coords: dict[str, tuple[np.ndarray, np.ndarray, tuple[float, float], int]] = {}
         self._stack_stamp: dict[str, tuple] = {}        # sid -> (folder mtime, energy folders) when it was loaded
         self._fresh: set[str] = set()                   # stacks loaded since the last touch()
+        self._generation = 0                            # +1 at every project open: a stack read for the previous one
+        self._cache_lock = threading.Lock()             # is never stored (stack() runs in a worker)
         # saving
         self._dirty = False
+        self._user_edits = False                        # dirty through an edit of the user (not only a stack load)
+        self._newer = False                             # session.json has a newer schema (read-only)
+        self._save_error = ""                           # why the last save did not happen ('' after a good save)
+        self._lock = None                               # aurora.core.io.lock.ProjectLock while this session may save
+        self._lock_timer = QTimer(self)                 # refreshes the lock (a live holder is never taken over)
+        from aurora.core.io.lock import LOCK_REFRESH_S
+        self._lock_timer.setInterval(LOCK_REFRESH_S * 1000)
+        self._lock_timer.timeout.connect(self._refresh_lock)
         self._known_sig: bytes | None = None            # content signature of what is on disk (or was at open)
         self._pending_path: Path | None = None          # the session file the pending autosave belongs to
         self._file_stamp: tuple | None = None           # (mtime_ns, size) of session.json after our last read / write
@@ -231,17 +290,22 @@ class Session(QObject):
             self._open(project)
 
     def _open(self, project: Project) -> None:
-        self.project = project
-        for cache in (self._stacks, self._surveys, self._coords, self._stack_stamp, self._fresh):
-            cache.clear()
+        self.release_lock()
+        with self._cache_lock:
+            self.project = project
+            self._generation += 1
+            for cache in (self._stacks, self._surveys, self._coords, self._stack_stamp, self._fresh):
+                cache.clear()
         self.undo_stack.clear()
-        self.read_only = False
-        self._dirty = False
+        self.read_only = self._newer = False
+        self.read_only_reason = self._save_error = ""
+        self._dirty = self._user_edits = False
         self._pending_path = None
         self._file_stamp = self._file_schema = self._file_bytes = None
         self._last_snapshot = self._newest_snapshot_time()
         self.zones = ZonesFile(project=self._project_id())
-        notice = self._read_session_file()
+        locked = self._take_lock()                  # before reading: a recovery writes only when this session may
+        notice = "; ".join(t for t in (self._read_session_file(), locked) if t)
         self.holder_keys = self._keys_for(project, self._file_preferences())
         self._read_sheet()
         self.current_holder = next(iter(self.holder_keys), None)
@@ -257,6 +321,8 @@ class Session(QObject):
         self.save_state.emit(self._idle_state())
         if notice:
             self.status.emit(notice)
+        if locked:
+            self.warned.emit("Read-only session", locked)
 
     def _reload(self, project: Project) -> None:
         keep_holder, keep_zone, keep_stack = self.current_holder, self.current_zone, self.current_stack
@@ -278,7 +344,15 @@ class Session(QObject):
             old, new = old_keys.get(key), self.holder_keys.get(key)
             if not (old and new and old[1].survey and new[1].survey and old[1].survey.path == new[1].survey.path):
                 self._surveys.pop(key, None)
-        notice = self._reread_if_changed()
+        regained = ""
+        if self._lock is None:                      # read-only for want of the lock: try again
+            if self._take_lock():
+                regained = self.read_only_reason
+            else:
+                self.read_only = self._newer
+                self.read_only_reason = NEWER_SCHEMA_TEXT if self._newer else ""
+                regained = "this window may save the session again"
+        notice = "; ".join(t for t in (self._reread_if_changed(), regained) if t)
         self._read_sheet()
         self.current_holder = keep_holder if keep_holder in self.holder_keys else next(iter(self.holder_keys), None)
         same = self.current_holder == keep_holder
@@ -356,7 +430,20 @@ class Session(QObject):
         return {chosen[i]: (day, h) for i, (day, h) in enumerate(pairs)}
 
     def _file_preferences(self) -> dict[tuple[str, str], str]:
-        return {(hz.day, hz.holder): key for key, hz in self.zones.holders.items() if hz.day or hz.holder}
+        """(day, holder name) -> the session key of those zones. When two keys claim one holder (a session written by
+        AURORA 0.4.0 after importing zones keyed by a bare holder name), the first keeps it: the zones drawn there
+        stay on the holder, the others stay in the file under their key (logged)."""
+        out: dict[tuple[str, str], str] = {}
+        for key, hz in self.zones.holders.items():
+            if not (hz.day or hz.holder):
+                continue
+            pair = (hz.day, hz.holder)
+            if pair in out:
+                log.warning("zones under %r and %r both belong to holder %s of %s: %r is shown, %r kept in the file",
+                            out[pair], key, hz.holder, hz.day, out[pair], key)
+                continue
+            out[pair] = key
+        return out
 
     @property
     def session_file(self) -> Path:
@@ -371,6 +458,82 @@ class Session(QObject):
         """Changes not written to session.json yet."""
         return self._dirty
 
+    # ------------------------------------------------------------------ one AURORA per project
+    def _take_lock(self) -> str:
+        """Take the project's lock (aurora.core.io.lock) and check that session.json can be written. '' when this
+        session may save; otherwise the session is read-only and the text says why."""
+        from aurora.core.io.lock import ProjectLock
+        try:
+            lock, other = ProjectLock.acquire(self.project.root, f"AURORA {__version__}")
+            if lock is None:
+                text = LOCKED_TEXT.format(who=other.describe())
+            elif self.session_file.exists() and not os.access(self.session_file, os.W_OK):
+                lock.release()
+                raise PermissionError(errno.EACCES, "session.json is a read-only file", str(self.session_file))
+            else:
+                self._lock = lock
+                self._lock_timer.start()
+                return ""
+        except OSError as err:              # a protected folder, a read-only share or file
+            reason = getattr(err, "strerror", None) or str(err)
+            text = UNWRITABLE_TEXT.format(why=reason)
+        log.warning("%s: %s", self.project.root, text)
+        self.read_only = True
+        self.read_only_reason = text
+        return text
+
+    def release_lock(self) -> None:
+        """Let the project go (the window closes, another project opens): another AURORA may then edit it."""
+        self._lock_timer.stop()
+        if self._lock is not None:
+            self._lock.release()
+            self._lock = None
+
+    def _check_lock(self) -> bool:
+        """Before a save: the lock is still this session's. A lock file gone missing while session.json did not change
+        is created again; a lock another AURORA holds now makes this session read-only, and says so."""
+        lock = self._lock
+        if lock is None:
+            text = self._take_lock()
+            if text:
+                self.status.emit(text)
+            return not text
+        if lock.still_ours():
+            return True
+        other = lock.holder()
+        if other is None and _file_stamp(self.session_file) == self._file_stamp and lock.reclaim():
+            return True
+        self._lock_timer.stop()
+        lock.release()
+        self._lock = None
+        text = LOST_TEXT.format(who=other.describe() if other is not None else "its lock file was removed")
+        log.warning("%s: %s", self.session_file, text)
+        self.read_only = True
+        self.read_only_reason = text
+        self.status.emit(text)
+        self.warned.emit("Project open elsewhere", text)
+        return False
+
+    def _refresh_lock(self) -> None:
+        if self._lock is not None and not self._lock.refresh():
+            if self._check_lock():
+                return
+            self.save_state.emit("read-only")
+
+    def confirm_leave(self, action: str = "close the window") -> bool:
+        """Before the window closes or another project opens: write a pending change, and when edits remain that could
+        not be saved (a failed save, a read-only session), ask in the window: Export zones… / Discard / Cancel.
+        True when it is fine to go on; without a window (tests, the command line) it always is."""
+        if self.flush() or self._ui is None or not self._user_edits:
+            return True
+        return self._ui.ask_unsaved(action, self._save_error or self.read_only_reason or READ_ONLY_TEXT)
+
+    def discard_unsaved(self) -> None:
+        """The user let the edits that could not be saved go (or exported them): nothing is pending any more."""
+        self._save_timer.stop()
+        self._dirty = self._user_edits = False
+        self._pending_path = None
+
     # ------------------------------------------------------------------ reading session.json
     def _read_session_file(self) -> str:
         """Read session.json into self.zones. Returns a status text for the user ('' when all is normal)."""
@@ -382,16 +545,19 @@ class Session(QObject):
         except OSError as err:
             self.read_only = True                   # never overwrite a file that could not even be read
             log.warning("%s could not be read (%s): the session is read-only", sf, err)
-            return f"session.json could not be read ({err}): edits here are not saved; export them to a file"
+            self.read_only_reason = (f"session.json could not be read ({_os_text(err)}): edits here are not saved; "
+                                     f"export them to a file")
+            return self.read_only_reason
         try:
-            d = json.loads(data.decode("utf-8"))
+            d = json.loads(data.decode("utf-8-sig"))         # a BOM (Notepad, PowerShell 5) is not damage
             if not isinstance(d, dict):
                 raise ValueError("a JSON object is expected")
         except (UnicodeDecodeError, ValueError) as err:
             return self._recover(sf, err)
         schema = file_schema(d)
         if schema > SESSION_SCHEMA:
-            self.read_only = True
+            self.read_only = self._newer = True
+            self.read_only_reason = NEWER_SCHEMA_TEXT
             try:
                 self.zones = ZonesFile.from_json(d)
             except Exception as err:            # a newer layout this version cannot even read: show nothing, keep it
@@ -420,15 +586,19 @@ class Session(QObject):
         """session.json does not parse: keep it as session.corrupt-<time>.json, restore from the .bak or the newest
         snapshot, and write the restored session at once (so a valid session.json exists again)."""
         log.warning("%s is damaged (%s)", sf, err)
-        kept = self._set_aside(sf)
+        locked = self.read_only                 # another AURORA holds the project (or it cannot be written): no write
+        kept = None if locked else self._set_aside(sf)
         restored = None
         for cand in self._recovery_candidates():
             zf = self._load_backup(cand.path)
             if zf is not None:
                 restored = (cand, zf)
                 break
-        if kept is None:
+        if locked:
+            where = "the damaged file was left as it is (this session is read-only)"
+        elif kept is None:
             self.read_only = True
+            self.read_only_reason = "session.json is damaged and could not be moved aside: edits here are not saved"
             where = "the damaged file could not be moved aside, so this session is read-only"
         else:
             where = f"the damaged file was kept as {kept.name}"
@@ -472,21 +642,29 @@ class Session(QObject):
             return None
 
     def _recovery_candidates(self) -> list[BackupInfo]:
-        """The .bak first, then the snapshots, newest first."""
+        """The .bak and the snapshots, the newest state first. Each is timed by the state it holds: a snapshot by its
+        name, the .bak by the 'exported' stamp inside it (it holds the save before the last one, so its file time,
+        that of the last save, would put an older state before a newer snapshot)."""
         bak = self.session_file.with_name("session.json.bak")
         out = []
         if bak.exists():
             try:
-                out.append(BackupInfo(bak, dt.datetime.fromtimestamp(bak.stat().st_mtime), "previous save"))
+                when = None
+                try:
+                    d = json.loads(bak.read_bytes().decode("utf-8-sig"))
+                    when = _local_naive(d.get("exported", "")) if isinstance(d, dict) else None
+                except (UnicodeDecodeError, ValueError):
+                    pass
+                out.append(BackupInfo(bak, when or dt.datetime.fromtimestamp(bak.stat().st_mtime), "previous save"))
             except OSError:
                 pass
-        out += [b for b in self._snapshot_files()[::-1]]
-        return out
+        out += self._snapshot_files()
+        return sorted(out, key=lambda b: b.time, reverse=True)
 
     def _load_backup(self, path: Path) -> ZonesFile | None:
         """A backup or snapshot as a ZonesFile of this schema (its 'backup' note removed), None when unreadable."""
         try:
-            d = json.loads(Path(path).read_text(encoding="utf-8"))
+            d = json.loads(Path(path).read_text(encoding="utf-8-sig"))
             if not isinstance(d, dict) or file_schema(d) > SESSION_SCHEMA:
                 return None
             d.pop("backup", None)
@@ -503,13 +681,15 @@ class Session(QObject):
         if stamp is None or stamp == self._file_stamp:
             return ""
         try:
-            d = json.loads(sf.read_bytes().decode("utf-8"))
+            d = json.loads(sf.read_bytes().decode("utf-8-sig"))
             if not isinstance(d, dict):
                 raise ValueError("a JSON object is expected")
             schema = file_schema(d)
             zf = ZonesFile.from_json(self._migrate(d, schema) if schema <= SESSION_SCHEMA else d)
         except Exception as err:
             log.warning("%s changed on disk and is damaged (%s)", sf, err)
+            if self.read_only:                  # another AURORA holds the project: its file is not ours to move
+                return "session.json on disk is damaged; this window is read-only and left it as it is"
             kept = self._set_aside(sf)
             if kept is None:
                 self.read_only = True
@@ -519,14 +699,25 @@ class Session(QObject):
             msg = f"session.json on disk was damaged; the zones in memory were saved again; it was kept as {kept.name}"
             self.recovered.emit(msg)
             return msg
+        kept = None
+        if self._dirty and self._user_edits and _content_digest(zf.to_json()) != self._signature():
+            # edits of this window that were never saved (read-only meanwhile): kept before the file replaces them
+            kept = self.backup_now("unsaved edits of this window, replaced by session.json changed on disk")
+            if kept is None:                    # nowhere to keep them (read-only): they stay on screen
+                log.warning("%s changed on disk; the unsaved edits of this window are kept on screen", sf)
+                return ("session.json changed on disk, but this window has edits that are not saved: they stay on "
+                        "screen; export them (closing the window offers it), then Reload")
         self.zones = zf
         self.undo_stack.clear()                 # the history belongs to the state that was replaced
-        self.read_only = schema > SESSION_SCHEMA
+        self.read_only = self._newer = schema > SESSION_SCHEMA
+        if self.read_only:
+            self.read_only_reason = NEWER_SCHEMA_TEXT
         self._file_schema = schema
         self._file_bytes = None
         self._file_stamp = stamp
-        self._dirty = False
-        return NEWER_SCHEMA_TEXT if self.read_only else "session.json changed on disk: read again"
+        self._dirty = self._user_edits = False
+        msg = NEWER_SCHEMA_TEXT if self.read_only else "session.json changed on disk: read again"
+        return msg + (f"; the unsaved edits of this window were kept as {kept.name}" if kept is not None else "")
 
     def _idle_state(self) -> str:
         if self.read_only:
@@ -585,17 +776,31 @@ class Session(QObject):
 
     def stack(self, sid: str, progress=None) -> StackData:
         """The stack, loaded on first use (runs in the loading worker). Its own coordinates replace those read from
-        the .h5 (an sgm_report cache may hold fewer pixels); the next touch() recomputes the members from them."""
-        if sid not in self._stacks:
-            scan = self.scan_of(sid)
-            if scan is None:
-                raise KeyError(sid)
-            sd = StackData.load(self.project, scan, progress=progress)
-            self._stack_stamp[sid] = self._scan_stamp(scan)
-            self._coords[sid] = (sd.x, sd.y, sd.pitch, sd.n_pix)
-            self._stacks[sid] = sd
-            self._fresh.add(sid)
-        return self._stacks[sid]
+        the .h5 (an sgm_report cache may hold fewer pixels); the next touch() recomputes the members from them.
+        A stack is only stored in the session of the project it was read from: when another project was opened while
+        it was read, it is read again from the open project (the job's callbacks get that project's data), and a job
+        for a scan the open project does not have ends as cancelled."""
+        with self._cache_lock:
+            sd, project, gen = self._stacks.get(sid), self.project, self._generation
+        if sd is not None:
+            return sd
+        scan = project.find(split_stack_id(sid)[1]) if project is not None else None
+        if scan is None:
+            raise KeyError(sid)
+        sd = StackData.load(project, scan, progress=progress)
+        stamp = self._scan_stamp(scan)
+        with self._cache_lock:
+            if self._generation == gen:
+                self._stack_stamp[sid] = stamp
+                self._coords[sid] = (sd.x, sd.y, sd.pitch, sd.n_pix)
+                self._stacks[sid] = sd
+                self._fresh.add(sid)
+                return sd
+        log.info("%s was read for %s, which is no longer open: not kept", sid, project.root)
+        if self.scan_of(sid) is None:
+            from aurora.core.cancel import Cancelled
+            raise Cancelled(f"{sid}: the project changed while it was read")
+        return self.stack(sid, progress)
 
     @staticmethod
     def _scan_stamp(scan) -> tuple:
@@ -643,9 +848,18 @@ class Session(QObject):
         return self._coords.get(sid)
 
     def _attach_all(self) -> None:
-        for key, hz in list(self.zones.holders.items()):
-            for z in hz.zones:
-                self.attach_scans(z, key)
+        self._attach_holders(list(self.zones.holders))
+
+    def _attach_holders(self, keys) -> None:
+        """attach_scans for every zone of these holders. A zone that cannot be placed (a geometry this version cannot
+        read) is logged and left as it is, so it never blocks the others, an edit's undo step or a project open."""
+        for key in keys:
+            hz = self.zones.holders.get(key) if key else None
+            for z in (hz.zones if hz else []):
+                try:
+                    self.attach_scans(z, key)
+                except Exception as err:            # noqa: BLE001
+                    log.warning("zone %s of %s not attached to its scans (%s)", z.id, key, err)
 
     def _holder_of_zone(self, z: Zone) -> str | None:
         for key, hz in self.zones.holders.items():
@@ -736,6 +950,7 @@ class Session(QObject):
                                           attached=self._attached_set(), before=Snapshot(holders={}, good_i0=""))
             self._widen_edit(key)
             self._edit_state.before["good_i0"] = dumps(self.zones.good_i0)
+            self._edit_state.before["rules"] = dumps(self.zones.rules)
             if SNAPSHOT_BEFORE.search(str(description)) and self.project is not None:
                 self.backup_now(str(description))
         elif self._edit_state is not None:
@@ -753,6 +968,8 @@ class Session(QObject):
                     self._finish_edit(str(description), state)
                 except Exception:
                     log.exception("finishing the edit %r failed", description)
+                    if self.project is not None:
+                        self._mark_dirty()          # the change is in memory: it is still saved
 
     @property
     def editing(self) -> str | None:
@@ -775,7 +992,7 @@ class Session(QObject):
     def _snapshot(self, keys) -> Snapshot:
         hz = self.zones.holders
         return Snapshot(holders={k: (dumps(hz[k].to_json()) if k in hz else None) for k in keys},
-                        good_i0=dumps(self.zones.good_i0))
+                        good_i0=dumps(self.zones.good_i0), rules=dumps(self.zones.rules))
 
     def _attached_set(self) -> frozenset | None:
         z = self.zone() if self.current_zone is not None else None
@@ -785,12 +1002,10 @@ class Session(QObject):
         keys = list(state.before["holders"])
         if state.all_:
             keys = list(dict.fromkeys(keys + list(self.zones.holders)))
-        for k in keys:
-            hz = self.zones.holders.get(k)
-            for z in (hz.zones if hz else []):
-                self.attach_scans(z, k)
+        self._attach_holders(keys)
         after = self._snapshot(keys)
-        before = Snapshot(holders={k: state.before["holders"].get(k) for k in keys}, good_i0=state.before["good_i0"])
+        before = Snapshot(holders={k: state.before["holders"].get(k) for k in keys}, good_i0=state.before["good_i0"],
+                          rules=state.before["rules"])
         self.zones_changed.emit()
         if after == before:
             # nothing changed in the holders the edit covers; a change elsewhere (a holder the edit did not name, the
@@ -821,10 +1036,9 @@ class Session(QObject):
             else:
                 self.zones.holders[k] = HolderZones.from_json(json.loads(text), k)
         self.zones.good_i0 = {k: bool(v) for k, v in json.loads(snap["good_i0"]).items()}
-        for k in snap["holders"]:
-            hz = self.zones.holders.get(k)
-            for z in (hz.zones if hz else []):
-                self.attach_scans(z, k)
+        if snap.get("rules") is not None:           # the settings rules (Save rules, Remember the XRF window)
+            self.zones.rules = json.loads(snap["rules"])
+        self._attach_holders(list(snap["holders"]))
         holder, zid = place
         if holder in self.holder_keys and holder != self.current_holder:
             self.set_holder(holder)
@@ -920,28 +1134,24 @@ class Session(QObject):
         fresh = set(list(self._fresh))
         self._fresh.difference_update(fresh)
         keys = {self.current_holder} | {self.holder_of_stack(sid) for sid in fresh}
-        for key in [k for k in keys if k]:
-            hz = self.zones.holders.get(key)
-            for z in (hz.zones if hz else []):
-                self.attach_scans(z, key)
+        self._attach_holders([k for k in keys if k])
         self.zones_changed.emit()
         if self.project is not None and self._signature() != self._known_sig:
-            self._mark_dirty()
+            self._mark_dirty(user=False)
 
     def _signature(self) -> bytes:
         """A digest of everything session.json holds except the time stamp and the header."""
-        d = self.zones.to_json()
-        for k in ("exported",) + ZonesFile.HEADER_KEYS:
-            d.pop(k, None)
         try:
-            text = dumps(d)
+            return _content_digest(self.zones.to_json())
         except (TypeError, ValueError) as err:      # a ui value that is not JSON: the save will say so
             log.warning("session content not serialisable (%s)", err)
             return b""
-        return hashlib.blake2b(text.encode("utf-8"), digest_size=20).digest()
 
-    def _mark_dirty(self) -> None:
+    def _mark_dirty(self, user: bool = True) -> None:
+        """Something to save. user=False: only memberships recomputed after a stack load (touch), which the next open
+        recomputes anyway, so they alone never make closing ask about unsaved edits."""
         self._dirty = True
+        self._user_edits = self._user_edits or user
         self._schedule_save()
 
     def _schedule_save(self) -> None:
@@ -1030,13 +1240,15 @@ class Session(QObject):
         return good_i0_curve(E, curves) if curves else None
 
     # ------------------------------------------------------------------ persistence
-    def flush(self) -> None:
+    def flush(self) -> bool:
         """Write a pending change now (closing the window, opening another project, importing): the timer stops and,
-        when the session is dirty, it is saved to the file of the project it belongs to."""
+        when the session is dirty, it is saved to the file of the project it belongs to. True when nothing unsaved
+        remains (False: the save failed, or the session is read-only and has edits)."""
         self._save_timer.stop()
         if self._dirty and self.project is not None:
             self.save()
         self._pending_path = None
+        return not (self._dirty and self.project is not None)
 
     def _autosave(self) -> None:
         if self._dirty:
@@ -1053,8 +1265,8 @@ class Session(QObject):
         if pending is not None and pending != path:     # never write one project's zones into another's file
             log.warning("autosave for %s dropped: the project is now %s", pending, path)
             return False
-        if self.read_only:
-            self.status.emit(READ_ONLY_TEXT)
+        if self.read_only or not self._check_lock():
+            self.status.emit(self.read_only_reason or READ_ONLY_TEXT)
             self.save_state.emit("read-only")
             return False
         from aurora.core.io.safety import assert_writable
@@ -1062,6 +1274,7 @@ class Session(QObject):
         now = self.clock()
         try:
             assert_writable(path)
+            foreign = self._keep_foreign(path, now)
             self._keep_old_schema(path)
             self._keep_previous(path)
             self.zones.exported = now.isoformat(timespec="seconds")
@@ -1071,20 +1284,49 @@ class Session(QObject):
         except Exception as err:            # OSError (disk, permission, protected), TypeError (a ui value)
             self._remove_tmp(path)
             log.warning("could not save the session to %s: %s", path, err)
-            self.status.emit(f"could not save the session: {err}")
+            self._save_error = f"the last save failed ({_os_text(err)})"
+            self.status.emit(f"could not save the session: {_os_text(err)}")
             self.save_state.emit("not saved")
             return False
         self._file_stamp = _file_stamp(path)
         self._file_schema = SESSION_SCHEMA
         self._file_bytes = None
-        self._dirty = False
+        self._dirty = self._user_edits = False
+        self._save_error = ""
         self._known_sig = self._signature()
         self.status.emit(f"zones saved to {path}")
         self.save_state.emit(f"saved {now:%H:%M}")
-        if self._last_snapshot is None or (now - self._last_snapshot).total_seconds() >= SNAPSHOT_EVERY_S:
+        last = self._last_snapshot
+        # a newest snapshot 'in the future' (named before a move to a time zone further west, or before a DST change)
+        # never holds the next one back
+        if last is None or last > now or (now - last).total_seconds() >= SNAPSHOT_EVERY_S:
             if self._write_snapshot(d, "autosave", now) is not None:
                 self._last_snapshot = now
+        if foreign is not None:
+            text = FOREIGN_TEXT.format(name=foreign.relative_to(path.parent).as_posix())
+            log.warning("%s: %s", path, text)
+            self.status.emit(text)
+            self.warned.emit("Session changed on disk", text)
         return True
+
+    def _keep_foreign(self, path: Path, now: dt.datetime) -> Path | None:
+        """session.json changed on disk since this session last read or wrote it (another program, a second session,
+        a sync tool) and holds other zones than this session knows: keep that version as a snapshot before it is
+        written over. Returns the snapshot, None when nothing needed keeping."""
+        stamp = _file_stamp(path)
+        if stamp is None or stamp == self._file_stamp:
+            return None
+        try:
+            d = json.loads(path.read_bytes().decode("utf-8-sig"))
+            if not isinstance(d, dict) or file_schema(d) > SESSION_SCHEMA:
+                return None
+            if _content_digest(ZonesFile.from_json(self._migrate(d, file_schema(d))).to_json()) == self._known_sig:
+                return None                     # the same content (touched, or copied back): nothing to keep
+        except Exception as err:                # noqa: BLE001  unreadable: kept as session.corrupt-<time>.json
+            log.warning("%s changed on disk and does not parse (%s)", path, err)
+            return self._set_aside(path)
+        d.pop("backup", None)
+        return self._write_snapshot(d, "changed on disk by another program", now)
 
     def _keep_old_schema(self, path: Path) -> None:
         """Before the first save over an older-schema file: its original bytes as session.v<old>.bak.json (once)."""
@@ -1104,7 +1346,7 @@ class Session(QObject):
         try:
             data = path.read_bytes()
             if stamp != self._file_stamp:               # not the file this session wrote or read: check it parses
-                d = json.loads(data.decode("utf-8"))
+                d = json.loads(data.decode("utf-8-sig"))
                 if not isinstance(d, dict):
                     return
             self._write_bytes_atomic(path.with_name("session.json.bak"), data)
@@ -1211,7 +1453,7 @@ class Session(QObject):
         out = self._recovery_candidates()
         for b in out:
             try:
-                d = json.loads(b.path.read_text(encoding="utf-8"))
+                d = json.loads(b.path.read_text(encoding="utf-8-sig"))
                 if not isinstance(d, dict):
                     raise ValueError("not a JSON object")
                 holders = d.get("holders", {}) or {}
@@ -1224,9 +1466,9 @@ class Session(QObject):
         return sorted(out, key=lambda b: b.time, reverse=True)
 
     def restore_backup(self, path: Path) -> int:
-        """Replace the zones of every holder and the good-I0 choices by a backup's. The current state is snapshotted
-        first and the restore is one undo step. Returns the number of zones restored (0 and a status line when the
-        backup cannot be read)."""
+        """Replace the zones of every holder, the good-I0 choices and the settings rules by a backup's (a backup without
+        a rules block keeps the current rules). The current state is snapshotted first and the restore is one undo
+        step. Returns the number of zones restored (0 and a status line when the backup cannot be read)."""
         path = Path(path)
         zf = self._load_backup(path)
         if zf is None:
@@ -1239,6 +1481,8 @@ class Session(QObject):
         with self.edit(f"restore zones from the backup of {when:%Y-%m-%d %H:%M}", holder=ALL_HOLDERS):
             self.zones.holders = dict(zf.holders)
             self.zones.good_i0 = dict(zf.good_i0)
+            if zf.rules or "rules" in zf._seen:        # the settings rules of the backup (an old one may have none)
+                self.zones.rules = list(zf.rules)
             if zf.notes:
                 self.zones.notes = zf.notes
             self.current_zone = None
@@ -1256,12 +1500,16 @@ class Session(QObject):
         appended with free ids, and a zone with the same rectangles, erase rectangles, painted squares and polygons
         as an existing one is skipped as a duplicate), 'replace' (the file's zones replace the holder's) or 'skip';
         'ask' shows the per-holder dialog when the session is in a window (otherwise merge); a dict gives one policy
-        per holder key. The pending autosave is written and a snapshot saved first; the import is one edit (one undo
+        per holder key. A holder of the file is matched to a holder of this project by its key, else by its holder name
+        and day, else by its name alone when only one holder has it (zones exported from a one-day project, keyed
+        'N5', land on 'N5_2026-11-05' here); the zones of a holder that matches none are kept under their own key and
+        counted apart. The pending autosave is written and a snapshot saved first; the import is one edit (one undo
         step). A file that cannot be read changes nothing, never raises, and says so. Returns the zones imported."""
         path = Path(path)
         self.last_import = res = ImportResult()
         try:
             zf = ZonesFile.load(path)
+            zf.holders, unmatched = self._import_targets(zf)
         except Exception as err:
             res.error = str(err)
             text = f"Could not read {path.name}: {err}. The zones are unchanged."
@@ -1286,7 +1534,10 @@ class Session(QObject):
                 cur = self.zones.holders.get(key)
                 if cur is None or pol == "replace":
                     self.zones.holders[key] = hz
-                    res.imported += len(hz.zones)
+                    if key in unmatched:
+                        res.unmatched += len(hz.zones)
+                    else:
+                        res.imported += len(hz.zones)
                     continue
                 for k, v in hz.extra.items():
                     cur.extra.setdefault(k, v)
@@ -1302,7 +1553,10 @@ class Session(QObject):
                     ids.add(z.id)
                     have.add(g)
                     cur.zones.append(z)
-                    res.imported += 1
+                    if key in unmatched:
+                        res.unmatched += 1
+                    else:
+                        res.imported += 1
             for sid, good in zf.good_i0.items():
                 owner = self.holder_of_stack(sid) or next(
                     (k for k, h in zf.holders.items() if any(sid in z.settings or sid in z.members for z in h.zones)),
@@ -1320,9 +1574,54 @@ class Session(QObject):
         msg = f"imported {res.imported}, skipped {plural(res.duplicates, 'duplicate')}"
         if res.holders_skipped:
             msg += f", {plural(res.holders_skipped, 'holder')} left as they were"
+        if res.unmatched:
+            msg += (f", {plural(res.unmatched, 'zone')} of holders this project does not have "
+                    f"({', '.join(sorted(unmatched))}) kept in the session but not shown")
         msg += f", backup saved as {res.backup.name}" if res.backup is not None else ", no backup could be saved"
         self.status.emit(msg)
         return res.imported
+
+    def _project_key(self, key: str, hz: HolderZones) -> str | None:
+        """The holder key of this project an imported holder belongs to: the same key, else the holder of the same name
+        on the same day, else the only holder of that name; None when no holder of the project matches."""
+        if key in self.holder_keys:
+            return key
+        name = hz.holder or key
+        for pairs in ([k for k, (day, h) in self.holder_keys.items() if h.name == name and day == hz.day],
+                      [k for k, (_day, h) in self.holder_keys.items() if h.name == name]):
+            if len(pairs) == 1:
+                return pairs[0]
+        return None
+
+    def _import_targets(self, zf: ZonesFile) -> tuple[dict[str, HolderZones], set[str]]:
+        """The holders of an imported file under this project's keys (_project_key), with the holder name and day of
+        the holder they land on; two of them landing on one holder are joined (ids made unique). Returns the holders
+        and the keys that match no holder of the project (kept as they are)."""
+        out: dict[str, HolderZones] = {}
+        unmatched: set[str] = set()
+        for key, hz in zf.holders.items():
+            target = self._project_key(key, hz)
+            if target is None:
+                target = key
+                unmatched.add(key)
+            else:
+                day, h = self.holder_keys[target]
+                hz.holder, hz.day = h.name, day
+                if target != key:
+                    log.info("imported holder %r matched to %r of this project", key, target)
+            have = out.get(target)
+            if have is None:
+                out[target] = hz
+                continue
+            ids = {z.id for z in have.zones}
+            for z in hz.zones:
+                if z.id in ids:
+                    z.id = max(ids, default=0) + 1
+                ids.add(z.id)
+                have.zones.append(z)
+            for k, v in hz.extra.items():
+                have.extra.setdefault(k, v)
+        return out, unmatched
 
     def _import_policies(self, path: Path, zf: ZonesFile, policy) -> dict[str, str] | None:
         if isinstance(policy, dict):

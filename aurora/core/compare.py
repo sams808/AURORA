@@ -743,8 +743,8 @@ def save_config(path: Path, reqs: list[TraceRequest], sources: dict[str, str], e
 
 
 def read_config(path: Path) -> dict:
-    """The parsed config JSON (ValueError when it is not a library or config file)."""
-    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    """The parsed config JSON (ValueError when it is not a library or config file); a leading BOM is accepted."""
+    d = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(d, dict) or not isinstance(d.get("rows", []), list):
         raise ValueError(f"{Path(path).name} is not a Compare config")
     return d
