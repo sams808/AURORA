@@ -8,6 +8,7 @@ import csv
 import datetime as dt
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,6 +38,7 @@ class Calibration:
         self.path = Path(path) if path else None
         self.data = dict(data) if data is not None else _read_json(self.path, {}) if self.path else {}
         self.calibrated = all(d in self.data for d in DETS)
+        self.missing = [d for d in DETS if d not in self.data]      # detectors on the nominal gain
         for d in DETS:
             self.data.setdefault(d, {"gain": UNCALIBRATED_EV_PER_CH, "offset": 0.0, "note": "DEFAULT, not calibrated"})
 
@@ -55,9 +57,24 @@ class Calibration:
     def last_updated(self) -> str:
         return str(self.data.get("_metadata", {}).get("last_updated", "?"))
 
-    def describe(self) -> str:
-        return (f"SDD calibration ({self.last_updated}): " +
-                "; ".join(f"{d} {self.data[d]['gain']:.3f} eV/ch {self.data[d]['offset']:+.1f}" for d in DETS))
+    def describe(self, root: Path | None = None) -> str:
+        """One provenance line: the file used (relative to the project `root` when given, '../' for the sibling
+        SGM_Beamline_Analysis-main/) with its date and the gains, or 'none found ... not calibrated'."""
+        where = "sdd_calibration.json"
+        if self.path is not None:
+            where = str(self.path)
+            if root is not None:
+                try:
+                    where = Path(os.path.relpath(self.path, root)).as_posix()
+                except ValueError:                  # another drive (Windows): the full path
+                    pass
+        if len(self.missing) == len(DETS):
+            return (f"SDD calibration: none found ({where}), the default {UNCALIBRATED_EV_PER_CH:g} eV/ch is used, "
+                    "not calibrated")
+        date = self.data.get("_metadata", {}).get("last_updated")
+        return (f"SDD calibration {where} ({f'last updated {date}' if date else 'no date recorded'}): " +
+                "; ".join(f"{d} {self.data[d]['gain']:.3f} eV/ch {self.data[d]['offset']:+.1f}"
+                          + (" (not in the file: default, not calibrated)" if d in self.missing else "") for d in DETS))
 
     def save(self, meta: dict | None = None) -> None:
         if self.path is None:

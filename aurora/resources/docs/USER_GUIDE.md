@@ -81,7 +81,7 @@ survey), **Stitch…** (overlapping tiles into one stack), **Load polygon…** /
 which line, PFY or IPFY, fluorescence normalisation (raw counts, / I0, / I0, pre-edge = 0, / I0, edge jump = 1, / I0,
 area = 1, / I0, maximum = 1), TEY and its normalisation, de-spike threshold k, I0 source (own, or the good-I0 mean of
 the scans chosen in Check), pre/post windows in eV. **Copy to…** on each card and **Rules…** set many cards at once
-(MANUAL 4.8, 4.9). Defaults for new settings come from Settings; saturated SDDs start unticked and scans with an
+(MANUAL 4.5, 4.9). Defaults for new settings come from Settings; saturated SDDs start unticked and scans with an
 invalid I0 start with the good-I0 mean. A setting made in Advanced stays in force in Easy, where the chip *advanced
 settings in use* says so (**Reset to Easy defaults** goes back).
 

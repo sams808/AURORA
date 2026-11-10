@@ -240,6 +240,16 @@ def test_report_flags_reach_the_builder(demo, zones, fake_builder, monkeypatch, 
     assert kw["author"] == "" and "no author line" in capsys.readouterr().out
 
 
+def test_report_summary_counts_in_words(demo, zones, fake_builder, monkeypatch, capsys):
+    """'5 pages, 1 zone spectrum, 1 CSV, 1 figure', never '1 figures'."""
+    from types import SimpleNamespace
+    monkeypatch.setattr(cli, "settings_author", lambda: "")
+    monkeypatch.setattr(_Builder, "build", lambda self, progress=None: SimpleNamespace(
+        pdf=Path("r.pdf"), pages=5, entries=1, csvs=[Path("a.csv")], figures=[Path("f.png")], skipped=[]))
+    assert cli.main(["report", str(demo), *zones, "--author", "A B"]) == 0
+    assert "r.pdf: 5 pages, 1 zone spectrum, 1 CSV, 1 figure\n" in capsys.readouterr().out
+
+
 def test_report_author_order_settings_then_system_account(demo, zones, fake_builder, monkeypatch, tmp_path, capsys):
     from aurora.core import report
     monkeypatch.setattr(report, "os_full_name", lambda: "Test User")

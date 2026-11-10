@@ -180,3 +180,30 @@ def test_notes_err_and_masked_energies_reach_the_csv(demo, tmp_path, monkeypatch
     from aurora.core.compare import read_csv_table
     _h, cols, data = read_csv_table(res.csvs[0])
     assert np.allclose(data[:, cols.index("fluo_sum_err")], 0.01)
+
+
+def test_cover_and_csvs_name_the_calibration_and_groups_follow_the_sheet(tmp_path):
+    """The cover prints the whole calibration line (wrapped, never cut at the page width, so sdd4 is there), every CSV
+    names the calibration file, and the groups follow the sample sheet's order, not a list kept in the code."""
+    from aurora.core.io.config import SheetRow
+    root = testdata.make_fake_project(tmp_path / "beamtime")
+    gains = {"sdd1": (10.058, 3.9), "sdd2": (9.398, -3.6), "sdd3": (9.852, -1.3), "sdd4": (10.090, 7.9)}
+    (root / "config" / "sdd_calibration.json").write_text(json.dumps(
+        {**{d: {"gain": g, "offset": o} for d, (g, o) in gains.items()},
+         "_metadata": {"last_updated": "2026-11-04 14:06:43"}}), encoding="utf-8")
+    proj = Project.discover(root)
+    zf = testdata.make_fake_zones(proj)
+    zf.holders["N5"].zones[1].group = "Zeta glass"                      # '1 alpha' stays in Minerals
+    sheet = [SheetRow(plate="N5", group=g, sample_id=s, composition="", f_k_edge="", other_edges="", notes="")
+             for g, s in (("Zeta glass", "2 beta"), ("Minerals", "1 alpha"))]
+    b = ReportBuilder(proj, zf, tmp_path / "reports", sheet_rows=sheet, png_dpi=40, page_png_dpi=0)
+    res = b.build()
+    cover = " ".join(ln.strip() for ln in b.cover_lines)
+    assert ("SDD calibration config/sdd_calibration.json (last updated 2026-11-04 14:06:43): sdd1 10.058 eV/ch +3.9; "
+            "sdd2 9.398 eV/ch -3.6; sdd3 9.852 eV/ch -1.3; sdd4 10.090 eV/ch +7.9") in cover
+    assert all(len(ln) <= 110 for ln in b.cover_lines)
+    start = b.cover_lines.index("Contents") + 1
+    assert [ln.split(":")[0].strip() for ln in b.cover_lines[start:start + 2]] == ["Zeta glass", "Minerals"]
+    for csv in res.csvs:
+        cal = provenance.read_header(csv)["calibration"]
+        assert cal.startswith("SDD calibration config/sdd_calibration.json") and "sdd4 10.090 eV/ch +7.9" in cal

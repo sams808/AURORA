@@ -51,8 +51,9 @@ DESPIKE_K = 6.0                         # |residual to the running median| > k *
 COHERENT_MIN_SDDS = 3
 EDGE_SPIKE_STEPS = 3                    # spikes within this many energy steps of the edge get a 'check the preview' note
 
-# sanity checks of a zone x scan (aurora.core.qc.check_zone), John Bussey's `check_reduced`. The values are the ones
-# in his xas_core module (SGM_XAS_GUI): DEFAULT, confirm with John Bussey.
+# sanity checks of a zone x scan (aurora.core.qc.check_zone), John Bussey's `check_reduced` with his values: a region
+# of fewer than 3 points, I0 max / min above 3, more than 10 % of the energies flagged bad (checked on his
+# SGM_XAS_GUI.exe, 2026-11-10)
 FEW_POINTS = 3                          # a region with fewer measurement points than this: 'spectra will be noisy'
 I0_VARIES_FACTOR = 3.0                  # max(I0) / min(I0) over the scan above this: 'I0 varies by a factor X'
 BAD_POINT_FRACTION = 0.1                # more than this fraction of the energies flagged bad: warn
