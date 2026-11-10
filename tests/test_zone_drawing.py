@@ -1,8 +1,10 @@
 """Drawing and erasing zones on the stack map with real mouse strokes (QTest press / move / release on the map's
 viewport): one stroke is one edit and one undo step, the right button and Shift erase, Esc cancels any stroke, empty
 strokes write nothing, erase outlines (epolys), the zone a stroke goes to, the shared trace cache and the views that
-wait until they are shown. Stage A of the zone-drawing work (spec items Z1, Z2, Z3, Z5, Z9, Z12, Z13); the tool bar,
-the Survey preview and the live preview build on it."""
+wait until they are shown (stage A: spec items Z1, Z2, Z3, Z5, Z9, Z12, Z13). Stage B (Z4, Z6, Z7, Z8, Z10, Z11, Z14,
+Z15, Z17): the shared tool bar in Easy and Advanced, drawing on the Survey map, the Survey's Zone preview (XRF emission
+of the zone's survey points, XAS on a covered stack), the throttled live preview, the preview height at 1200 x 760,
+the map hints and stroke highlights, 'survey, inside the zone' in step 2, the keys of both perspectives."""
 import json
 
 import numpy as np
@@ -14,6 +16,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
 from aurora.app import mode  # noqa: E402
+from aurora.app.zone_tools import idle_hint  # noqa: E402
 from aurora.core import testdata  # noqa: E402
 from aurora.core.model import Project  # noqa: E402
 from aurora.core.zones import members  # noqa: E402
@@ -97,11 +100,13 @@ def test_reduce_left_drag_draws_one_step(qapp, win):
     assert len(zs) == 1 and len(zs[0].rects) == 1 and ses.current_zone == zs[0].id
     assert len(members(zs[0], sd.x, sd.y, sd.pitch)) > 0 and ses.undo_stack.count() == n + 1
     assert ses.undo_stack.text(n) == "add a rectangle to a new zone"
-    assert rd.preview._traces and rd.map.hint_text() == ""
+    assert rd.preview._traces and rd.map.hint_text() == idle_hint("rect+")       # back to what a drag does
     win.activateWindow()
     QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier)
     pump(qapp)
+    from aurora.app.reduce import PREVIEW_NO_ZONE
     assert not _zones(ses) and ses.zone() is None and rd.preview._traces == []
+    assert rd.preview._waiting == PREVIEW_NO_ZONE                               # 'Draw a zone on the map (drag) ...' 
 
 
 def test_new_sample_then_the_first_stroke_is_one_step(qapp, win):
@@ -241,14 +246,16 @@ def test_esc_cancels_any_stroke(qapp, wide):
         n = ses.undo_stack.count()
         qdrag(qapp, rd.map, pts[:4] + [(pts[3][0], pts[3][1] + sd.pitch[1])], release=False)
         assert rd.map.vb.drawing() == tool[:-1] and rd.map.hint_text().startswith("new zone 1")
+        assert rd.map.stroke_preview_counts()[0] > 0                            # the points it would add
         rd.map.setFocus()
         QTest.keyClick(rd.map, Qt.Key_Escape)
-        assert rd.map.vb.drawing() == "" and rd.map.hint_text() == ""
+        assert rd.map.vb.drawing() == "" and rd.map.hint_text() == idle_hint(tool)
         qmove(qapp, rd.map, pts[5])
         qrelease(qapp, rd.map, pts[5])
         pump(qapp)
-        assert ses.undo_stack.count() == n and not _zones(ses) and rd.map.hint_text() == ""
+        assert ses.undo_stack.count() == n and not _zones(ses) and rd.map.hint_text() == idle_hint(tool)
         assert not rd.map.vb._rubber.isVisible() and len(rd.map.vb._trace.getData()[0] or []) == 0
+        assert rd.map.stroke_preview_counts() == (0, 0)
     assert len(seen) == 3
     # Ctrl+Z during a stroke cancels the stroke and undoes nothing
     rd.set_tool("rect+")
@@ -368,15 +375,21 @@ def test_legacy_signals_are_emitted_once_and_never_edit_twice(qapp, win):
 
 # ----------------------------------------------------------------------------- caches and hidden views
 def test_trace_cache_shared(qapp, win, monkeypatch):
-    """After a stroke, with Reduce shown and Check hidden, the zone's traces are computed once (Reduce's preview);
-    showing Check reuses them. A hidden Check or Survey does nothing on a zone edit until it is shown."""
+    """After a stroke, with Reduce shown and Check hidden, the zone's traces are computed once (the live preview of
+    the stroke's last state, which the commit's preview then reads from the cache); showing Check reuses them. A
+    hidden Check or Survey does nothing on a zone edit until it is shown."""
     import aurora.core.zones as zmod
     from aurora.app import trace_cache
     rd, ses, ck, sv = win.reduce, win.session, win.check, win.survey
     sd = ses.stack_loaded(win.sid)
-    calls, sdd, maps = [], [], []
+    calls, sdd, maps, keys = [], [], [], []
     real = zmod.zone_traces
-    monkeypatch.setattr(zmod, "zone_traces", lambda *a, **k: (calls.append(a[0].id), real(*a, **k))[1])
+
+    def counted(*a, **k):
+        calls.append(a[0].id)
+        keys.append(tuple(np.asarray(a[1], int).tolist()))
+        return real(*a, **k)
+    monkeypatch.setattr(zmod, "zone_traces", counted)
     real_sdd, real_redraw = ck._update_sdd, sv.redraw_map
     monkeypatch.setattr(ck, "_update_sdd", lambda: (sdd.append(1), real_sdd())[1])
     monkeypatch.setattr(sv, "redraw_map", lambda: (maps.append(1), real_redraw())[1])
@@ -385,13 +398,16 @@ def test_trace_cache_shared(qapp, win, monkeypatch):
     qdrag(qapp, rd.map, _box_path(*inner_box(sd, 0.05)))
     z = ses.zone()
     assert z is not None and not ck.isVisible() and not sv.isVisible()
-    assert calls == [win.sid] and maps == []
+    final = tuple(members(z, sd.x, sd.y, sd.pitch).tolist())
+    assert set(calls) == {win.sid} and keys.count(final) == 1 and maps == []      # the committed zone: once
     sdd.clear()
     rd.set_tool("rect-")                                   # an edit of the selected zone: Check stays idle
     qdrag(qapp, rd.map, _around(sd, np.array([0])))
-    assert len(calls) == 2 and sdd == [] and maps == []
+    final = tuple(members(z, sd.x, sd.y, sd.pitch).tolist())
+    assert keys.count(final) == 1 and sdd == [] and maps == []
+    n_calls = len(calls)
     win.show_perspective("check"); pump(qapp)
-    assert sdd and len(calls) == 2                          # drawn from the cache, with the zone as it is now
+    assert sdd and len(calls) == n_calls                    # drawn from the cache, with the zone as it is now
     assert ck.sdd_note.text().startswith(f"{z.label} · {testdata.STACK} · {len(z.members[win.sid])} px")
     win.show_perspective("survey"); pump(qapp)
     assert maps == [1] and sv.zone_table.rowCount() == 1
@@ -399,7 +415,7 @@ def test_trace_cache_shared(qapp, win, monkeypatch):
     hits = trace_cache.stats["hits"]
     win.show_perspective("reduce"); pump(qapp)
     rd.update_preview()
-    assert trace_cache.stats["hits"] > hits and len(calls) == 2
+    assert trace_cache.stats["hits"] > hits and len(calls) == n_calls
 
 
 def test_survey_spectra_kept_for_two_holders(qapp, tmp_path):

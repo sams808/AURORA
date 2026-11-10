@@ -71,7 +71,7 @@ in Report, and the same chip over the Compare library).
 |---|---|---|
 | Home | the scan tree, the project summary and the scan analysis summary | the Kind column, the folder, kind and label rows, the sgm_report notes, the full table of h5 attributes, the SDD geometry, the full error of a failed open |
 | Survey | the holder, the plate map with footprints and zones, the footprint legend, the sketch, the sample-sheet rows | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…** |
-| Reduce | the four numbered steps: **Scans of holder N5**, **XRF window** (preset, lo, hi), **Region** (**navigate**, **rect+**, **lasso+**, **Clear**, **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **polygon+**, **rect-**, **brush+**, **brush-**, the brush size, **rect+ starts a new zone**, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview toggles |
+| Reduce | the four numbered steps: **Scans of holder N5**, **XRF window** (preset, lo, hi), **Region** (the zone tool bar: **Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**; **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **Polygon** and **every stroke starts a new zone** in the tool bar, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview's **Show** menu |
 | Check | **Spectra to check** (**Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder N5** (**Run the checks on holder N5**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
 | Fit | the **LCF** tab with its fixed options stated; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
@@ -136,7 +136,8 @@ key also deletes a sample, and the Help window, tooltips and messages show the M
 | Go to | **Ctrl+1** Home, **Ctrl+2** Survey, **Ctrl+3** Reduce, **Ctrl+4** Check, **Ctrl+5** Compare, **Ctrl+6** Fit, **Ctrl+7** Maps (Advanced), **Ctrl+8** Report |
 | Help | **F1** help on this page, **Ctrl+/** keyboard shortcuts, **Shift+F1** what's this |
 | General | **Esc** cancel the running task, **Ctrl+Return** the main action of the page |
-| Reduce | **V** navigate, **R** rect+, **L** lasso+, **E** rect- (Advanced), **B** brush+ (Advanced), **Shift+B** brush- (Advanced), **P** polygon+ (Advanced), **+** / **-** brush size (Advanced), **N** new sample, **Del** delete the sample, **Alt+Up** / **Alt+Down** previous / next sample, **[** / **]** previous / next scan, **F** fit the view, **Ctrl+Shift+C** / **Ctrl+Shift+V** copy / paste the scan settings (Advanced) |
+| Survey and Reduce | **V** Move (pan and zoom), **R** Rectangle, **B** Brush, **L** Lasso, **P** Polygon (Advanced): these keep the mode; **D** Draw mode, **E** Erase mode, **X** switch between Draw and Erase (so **E** then **R** erases with a rectangle, the former rect-), **Shift+B** Brush in Erase mode, **+** / **-** brush size, **N** new sample, **Del** delete the sample, **Alt+Up** / **Alt+Down** previous / next sample, **F** fit the view, **Esc** (or **Ctrl+Z**) cancels the stroke in progress. Each page's keys work while it is shown |
+| Reduce | **[** / **]** previous / next scan, **Ctrl+Shift+C** / **Ctrl+Shift+V** copy / paste the scan settings (Advanced) |
 
 The shortcuts of Advanced tools do nothing in Easy mode; there the dialog lists them with *(Advanced mode)*.
 
@@ -361,23 +362,42 @@ appear at the end of the list.
 - **show** (Advanced): the line (a fixed line, the total XRF, or *XRF window* when the zone uses custom windows), the
   detector (sum or one SDD), what to map (*integrated above edge*, *all energies*, *edge jump*, or *at energy* with
   the energy box, which shows the energy in eV), **/ I0**, **log**.
-- Tools: **navigate** (pan with the left button, wheel to zoom), **rect+** adds a rectangle to the current zone,
-  **lasso+** draws a free outline (a vertex about every half pitch; the outline closes when the button is released,
-  **Esc** cancels), **polygon+** places the corners of a polygon one click at a time (double-click closes, **Esc**
-  cancels), **rect-** removes a rectangle, **brush+** / **brush-** paint or erase single pixels, the **brush** size
-  being n×n pixels; **Clear** removes the drawing of the selected sample. **rect+ starts a new zone** makes every
-  rectangle, lasso or polygon a new zone, useful when drawing many samples in a row. Easy mode shows **navigate**,
-  **rect+**, **lasso+** and **Clear**.
+- The zone tool bar (the Survey's too, in Easy and Advanced): a tool is a mode and a shape.
+  - **Draw** adds to the zone, **Erase** removes from the selected zone.
+  - **Move** pans with the left button and zooms with the wheel; **Rectangle** drags a rectangle; **Brush** paints or
+    erases the points under it as you drag (its size beside it, n × n points, shown while the brush is chosen; a dashed
+    square under the pointer shows what it covers; a fast drag leaves no gap); **Lasso** draws a free outline (a vertex
+    about every half pitch, closed when the button is released); **Polygon** (Advanced) places the corners one click
+    at a time (double-click closes). John Bussey's users know them as rect+ / rect- (Rectangle in Draw / Erase),
+    brush+ / brush-, lasso+ and polygon+.
+  - **Undo** undoes the last edit (as **Ctrl+Z**); **Clear** removes the drawing of the selected sample.
+  - **every stroke starts a new zone** (Advanced) makes every stroke a new zone, useful when drawing many samples in a
+    row.
+- A drag with the right button, or one started with **Shift** held, uses the other mode (an erase in Draw mode); a
+  right click without a drag still opens the menu. **Esc** (or **Ctrl+Z**) during a drag cancels it and nothing is
+  written. One stroke is one undo step, however long it took, and two quick strokes are two steps.
+- The zone a stroke goes to: an erase goes to the selected zone, or with none selected to the zone under its start
+  (which becomes selected). A draw stroke starts a new zone when none is selected; otherwise it adds to the selected
+  zone, except a stroke that neither overlaps nor touches it, which starts a new zone ("draw one sample, then the
+  next"); hold **Ctrl** at the release to add it to the selected zone anyway (a sample in two parts).
+- While a stroke moves, the map highlights the points it would add (in the zone's colour) or remove (crossed), and a
+  line over the top-left of the map says what the release will do: *adds 12 points to zone 3 'NaF'*, *new zone 4: 12
+  points*, *erases 5 points from zone 3*. Between strokes it says what a drag does (*Drag to draw a zone ·
+  right-drag erases · Ctrl+Z undoes*). A stroke that would write nothing is not written, and the line says why:
+  *outside scan 09:27 alpha_beta: draw over its pixels* (Reduce), *no measured point there: draw over the coloured
+  map* (Survey), *nothing of zone 3 there to erase*, *nothing to erase here: no zone under the pointer*. No stroke
+  creates an empty zone (**New sample** does).
+- Drawing over an erased area takes it back on the scan it is drawn on (the newest stroke wins). An erased lasso or
+  polygon is kept as an outline, drawn dashed in the erase colour (*minus 1 erased outline* in the caption).
 - Clicks: a click inside a zone other than the selected one selects it (where zones overlap, the smallest one); a
-  click outside every zone, or a **Shift**+click, applies the tool to the pixel under the pointer (rect+ and lasso+
-  add it, rect- and brush- remove it from the selected zone). A drag shorter than half a pixel pitch is a stray drag
-  and is ignored.
+  click outside every zone, or a **Shift**+click, applies the tool to the pixel under the pointer (Draw adds it, Erase
+  removes it from the selected zone). A drag shorter than half a pixel pitch is a stray drag and is ignored.
 - Membership: a pixel belongs to a rectangle when its square touches it (tolerance 0.45 of the pitch), to a painted
   square within 0.51 of the pitch, and to a polygon when its centre lies inside the polygon (John Bussey's rule,
   matplotlib `Path.contains_points`); erase rectangles and squares remove it again. The rectangle rule is the browser
   zone tool's, so the two agree pixel for pixel. It differs from John Bussey's GUI, which turned a rectangle into a
   polygon and took only the pixels whose centre lies inside: a rectangle here also takes the edge pixels whose square
-  it touches (draw the shape with lasso+ for his strict rule).
+  it touches (draw the shape with the **Lasso** for his strict rule).
 - Right-click on a zone: **Rename…**, **Set group** (Advanced), **Duplicate**, **Delete**, **Send to Compare**
   (Advanced), **Copy geometry**, **Zoom to zone**. Right-click on the empty map: **New zone here**, **Paste zone** (the
   copied geometry, centred where the menu opened), **Fit view**.
@@ -482,15 +502,24 @@ A plate measured as several overlapping stacks (tiles) becomes one stack with **
 
 Three linked panels for the current zone and selected scan: fluorescence (the four detectors and their sum, spikes
 marked), TEY, I0 (zone sum). **all scans of the sample** overlays every included scan; Easy mode keeps only this
-toggle, Advanced adds **SDDs**, **sum**, **TEY**, **I0** and **spikes**. The per-detector scale is the sum's scale
+toggle, Advanced adds the **Show** menu: *SDDs*, *sum*, *TEY*, *I0* and *spikes*. The hover readout is the line under
+the plots. The preview follows a stroke while it is drawn, on the current scan (at most every 0.15 s; on a scan large
+enough to make it slow, without the de-spike, then only when you let go: the map's line then says *preview updates
+when you let go (large scan)*); the release draws the zone as written. The plots never get less than 180 px, the
+fluorescence panel 110 px: at the smallest window the zone card above scrolls first, and below 260 px the TEY and I0
+panels hide so the fluorescence takes the height (*TEY and I0 panels* in the **Show** menu brings them back). An empty
+preview says why: *Pick a scan in step 1*, *Draw a zone on the map (drag) to see its spectrum here*, *zone 3 is
+empty: drag on the map to draw it*, *zone 3 holds no pixel of 09:27: it lies outside this scan. Scans it covers:
+09:30 (pick one in step 1)*, *reading the XRF windows of … *. The per-detector scale is the sum's scale
 divided by the number of ticked detectors, so a missing detector is visible as a gap rather than hidden by rescaling.
 In the coherent de-spike mode the sum may carry spike markers of its own.
 
 ### 4.8 XRF windows
 
 Step 2 of John Bussey's GUI. The **XRF window** card shows the emission spectrum (log scale) of the stack summed over
-its energies (*the whole stack*); in Advanced, **spectrum of** also offers the *survey* and the pixels *inside the
-region*. The first time, the raw spectra are read in the background (**Cancel** in the progress strip) and cached under
+its energies (*the whole stack*); in Advanced, **spectrum of** also offers the *survey*, the pixels *inside the
+region*, and the survey points inside the selected sample (*survey, inside the zone*: John Bussey's "XRF from survey,
+only inside region"; the whole survey, and why, when the zone holds no survey point). The first time, the raw spectra are read in the background (**Cancel** in the progress strip) and cached under
 `.aurora/cache/<day>/<scan>/_emission_cache.npz`.
 
 - **preset**: every fixed line of `config/roi_bins.json` (*F Kα (fixed bins)*; a line the stack was reduced without

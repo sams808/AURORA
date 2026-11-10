@@ -111,21 +111,12 @@ HELP: dict[str, tuple[str, str, str]] = {
                         "41-scans-of-the-holder"),
     "reduce.scans": ("The complete stacks of the holder: pick one to load it (cached after the first read).",
                      "scans of the holder", "41-scans-of-the-holder"),
-    "reduce.new_zone": ("Start a new, empty zone; draw it with rect+ on the stack map.", "New sample", "43-zones"),
+    "reduce.new_zone": ("Start a new, empty zone; draw it on the map (Draw, then drag).", "New sample", "43-zones"),
     "reduce.delete_zone": ("Delete the selected zone (its settings for every scan go with it).", "Delete", "43-zones"),
     "reduce.propose": ("Zones from sgm_report's summary of the day, else from the bright pads of the survey map, as "
                        "a proposal to edit or delete.", "Propose zones", "43-zones"),
     "reduce.stitch": ("Join overlapping stacks (tiles) of the holder into one stack (after Load all).", "Stitch tiles",
                       "46-stitching-tiles"),
-    "reduce.tool.navigate": ("Pan with the left button, zoom with the wheel.", "navigate", "42-stack-map"),
-    "reduce.tool.rect+": ("Drag a rectangle to add to the zone (a new zone when none is selected).", "add a rectangle",
-                          "42-stack-map"),
-    "reduce.tool.rect-": ("Drag a rectangle to remove from the zone.", "remove a rectangle", "42-stack-map"),
-    "reduce.tool.brush+": ("Click or drag to paint pixels into the zone.", "paint pixels", "42-stack-map"),
-    "reduce.tool.brush-": ("Click or drag to erase pixels from the zone.", "erase pixels", "42-stack-map"),
-    "reduce.brush": ("Brush size: n × n pixels.", "brush size", "42-stack-map"),
-    "reduce.target_new": ("Every rectangle starts a new zone (drawing many samples in a row).",
-                          "rect+ starts a new zone", "42-stack-map"),
     "reduce.map_line": ("The emission line shown on the stack map.", "map line", "42-stack-map"),
     "reduce.map_sdd": ("The sum of the four detectors, or one detector.", "map detector", "42-stack-map"),
     "reduce.map_mode": ("What the map integrates: above the edge, all energies, the edge jump, or one energy.",
@@ -177,13 +168,9 @@ HELP: dict[str, tuple[str, str, str]] = {
     "preview.spikes": ("Mark the interpolated spikes.", "show spikes", "47-preview"),
     "preview.all_scans": ("Overlay every included scan of the sample.", "all scans of the sample", "47-preview"),
     # Reduce, WP3: map tools, XRF windows (step 2), Easy steps, batch settings
-    "reduce.tool.lasso+": ("Drag freehand around the sample: the outline closes when you let go (Esc cancels). Pixels "
-                           "whose centre lies inside belong to the zone.", "lasso", "42-stack-map"),
-    "reduce.tool.polygon+": ("Click the corners of a polygon, double-click to close it (Esc cancels). Pixels whose centre "
-                             "lies inside belong to the zone.", "polygon", "42-stack-map"),
     "reduce.clear": ("Remove the drawing of the selected sample (rectangles, polygons, painted pixels), to draw it again. "
-                     "John Bussey's 'Clear (full map)' went back to every point instead: drag rect+ over the whole "
-                     "map for that.",
+                     "John Bussey's 'Clear (full map)' went back to every point instead: draw a Rectangle over the "
+                     "whole map for that.",
                      "Clear the region", "42-stack-map"),
     "reduce.zones": ("The samples (zones) of the holder: pick one to edit it. A click inside a zone on the map also "
                      "selects it.", "samples of the holder", "43-zones"),
@@ -198,8 +185,34 @@ HELP: dict[str, tuple[str, str, str]] = {
     "reduce.window.hi": ("End of the window (excluded): 60 to 83 sums channels 60 to 82, as in John Bussey's GUI.",
                          "window end channel", "48-xrf-windows"),
     "reduce.window.source": ("The emission spectrum shown: the whole stack summed over its energies, the survey of the "
-                             "holder, or the pixels of the selected sample.", "emission spectrum source",
+                             "holder, the pixels of the selected sample, or the survey points inside the selected "
+                             "sample (John Bussey's 'only inside region').", "emission spectrum source",
                              "48-xrf-windows"),
+    # zones: the tool bar of the Survey map and the stack map, the Survey's zone preview
+    "zones.draw": ("Draw zones: drag on the map to add to the zone; right-drag erases (D).", "draw zones",
+                   "42-stack-map"),
+    "zones.erase": ("Erase: drag on the map to remove from the selected zone (E). Right-drag draws.",
+                    "erase from the zone", "42-stack-map"),
+    "zones.move": ("Move the view: drag to pan, the wheel zooms (V). A click on a zone selects it.", "move the view",
+                   "42-stack-map"),
+    "zones.rect": ("Drag a rectangle (R).", "rectangle", "42-stack-map"),
+    "zones.brush": ("Paint or erase points under the brush as you drag (B); its size is beside it.", "brush",
+                    "42-stack-map"),
+    "zones.lasso": ("Drag freehand around the sample; the outline closes when you let go (L). Points whose centre "
+                    "lies inside count.", "lasso", "42-stack-map"),
+    "zones.polygon": ("Click the corners, double-click to close (P). Points whose centre lies inside count.",
+                      "polygon", "42-stack-map"),
+    "zones.brush_size": ("The brush covers n × n points of the map (+ / - change it).", "brush size in map points",
+                         "42-stack-map"),
+    "zones.undo": ("Undo the last zone edit (Ctrl+Z). One stroke is one step.", "undo the last zone edit",
+                   "42-stack-map"),
+    "zones.clear": ("Remove the drawing of the selected sample (every drawn and erased shape), to draw it again; the "
+                    "sample and its name stay. One step of Undo.", "Clear the region", "42-stack-map"),
+    "zones.new_each": ("Every stroke starts a new zone, even one that touches the selected zone (drawing many samples "
+                       "in a row).", "every stroke starts a new zone", "42-stack-map"),
+    "zones.preview.scan": ("The scan whose spectrum of the zone is shown: the scans the zone covers.",
+                           "scan of the zone preview", "3-survey"),
+    "zones.preview.open": ("Open this scan in Reduce with the zone selected.", "Open in Reduce", "3-survey"),
     "reduce.window.same": ("One window for all four detectors: dragging one region moves the four. Untick to set each "
                            "detector's window apart.", "same range for all detectors", "48-xrf-windows"),
     "reduce.window.det": ("The detector whose window the lo / hi boxes edit when the windows are set apart.",

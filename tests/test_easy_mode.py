@@ -16,7 +16,9 @@ from aurora.app import mode  # noqa: E402
 # buttons (property aurora_help_button) open the manual and are not counted.
 # Report: title, output, Browse…, Build, the 'Check before building' / Contents view (one tab shown), ◀, ▶, Open PDF,
 # Open folder (I40 adds the findings view to the eight of WP0).
-LIMITS = {"home": 8, "survey": 2, "reduce": 18, "check": 10, "compare": 12, "fit": 10, "report": 9}
+# Survey and Reduce: the zone tool bar (Draw, Erase, Move, Rectangle, Brush, Lasso, Undo, Clear; owner's request 3: an
+# easy way to draw and erase zones), and on the Survey the Zone preview's scan and Open in Reduce.
+LIMITS = {"home": 8, "survey": 11, "reduce": 22, "check": 10, "compare": 12, "fit": 10, "report": 9}
 VIEWS_NOT_COUNTED = {"survey", "check"}
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider)
 

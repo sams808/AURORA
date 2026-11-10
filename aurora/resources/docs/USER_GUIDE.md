@@ -68,10 +68,12 @@ Easy mode shows John Bussey's four steps as numbered cards:
 1. **1 · Scans of holder N5**: pick a scan of the holder (the holder is chosen in the top bar).
 2. **2 · XRF window**: keep the fixed line (*F Kα (fixed bins)*) or drag the window over the emission line; **lo** /
    **hi** are in channels (hi excluded).
-3. **3 · Region**: draw the sample with **rect+** or **lasso+**; a click inside another sample selects it; **New
-   sample** starts the next one; the caption counts the points (*Region: 6 of 12 points of …*). Unlike John Bussey's
-   GUI, a rectangle also takes the edge pixels whose square it touches; lasso+ takes only the pixels whose centre is
-   inside (his rule). Zones are in mm, so
+3. **3 · Region**: choose **Draw** and a shape (**Rectangle**, **Brush** or **Lasso**) and drag over the sample;
+   **Erase** (or a right-drag) removes points again, and the map highlights what a stroke adds or removes before you
+   let go. A click inside another sample selects it; **New sample** starts the next one; the caption counts the
+   points (*Region: 6 of 12 points of …*), and the preview follows the stroke. Unlike John Bussey's GUI, a rectangle
+   also takes the edge pixels whose square it touches; the lasso takes only the pixels whose centre is inside (his
+   rule). Zones are in mm, so
    every scan of the holder that covers the area attaches to the zone automatically, loaded or not.
 4. **4 · Reduce**: check the settings line and press **Add to Check**. **Load polygon…** reads a polygon saved by
    John Bussey's GUI (`_polygon_roi.json`) into a new sample. Name the sample before saving it in Check: a sample
@@ -80,8 +82,7 @@ Easy mode shows John Bussey's four steps as numbered cards:
 Made a mistake? **Ctrl+Z** undoes the last zone or settings change (**Edit > Undo** names it), **Ctrl+Y** redoes it;
 the zones are saved by themselves within a second.
 
-Advanced mode adds **rect-** (remove a rectangle), **brush+** / **brush-** (paint or erase single pixels),
-**polygon+**, **Load all**, **Propose zones** (a first guess from the sgm_report summary or the bright pads of the
+Advanced mode adds **Polygon**, **every stroke starts a new zone**, **Load all**, **Propose zones** (a first guess from the sgm_report summary or the bright pads of the
 survey), **Stitch…** (overlapping tiles into one stack), **Save polygon…** (John Bussey's
 `_polygon_roi.json`), the group and comment of the zone, and one settings card per attached scan: include, which SDDs,
 which line, PFY or IPFY, fluorescence normalisation (raw counts, / I0, / I0, pre-edge = 0, / I0, edge jump = 1, / I0,

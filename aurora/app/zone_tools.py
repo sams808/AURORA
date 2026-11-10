@@ -1,4 +1,5 @@
-"""Zone editing on a map: one ZoneEditor per zone map (Reduce's stack map; the Survey plate map uses the same class).
+"""Zone editing on a map: one ZoneEditor per zone map (Reduce's stack map, the Survey plate map), the ZoneToolBar
+both maps share, the PreviewThrottle of their live previews, their keyboard shortcuts and the shared zone menu.
 
 The map (aurora.app.mapview.MapView) turns every gesture into an aurora.core.zones.Stroke. The editor:
 - picks the zone the stroke goes to (target_for). An Erase stroke goes to the selected zone, or else to the zone under
@@ -15,6 +16,10 @@ The map (aurora.app.mapview.MapView) turns every gesture into an aurora.core.zon
   written (a Draw stroke over no measured point of the map, an Erase stroke that removes nothing), and the hint and
   the status line (message) say why. No stroke ever creates an empty zone.
 
+While a stroke moves, the map shows the points it would add (in the target zone's colour) or remove (crossed), and
+between strokes the hint says what a drag does with the tool (idle_hint). On the Survey (thousands of points) the
+feedback is coalesced to one update every FEEDBACK_MS.
+
 rect_drawn / brush_at / polygon_drawn emitted by code rather than by a stroke (scripts, the self-test, older tests)
 still edit the zone as they always did (commit(..., legacy=True)): the tool's mode, the old target rule, one edit per
 signal merged by time and description.
@@ -25,15 +30,22 @@ import re
 from functools import cached_property
 
 import numpy as np
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtWidgets import QWidget
 
+from aurora.app.mapview import SHAPES, split_tool, tool_name
 from aurora.app.vocab import plural
 from aurora.core.io.config import Zone
 from aurora.core.zones import Stroke, apply_stroke, brush_squares, members, stroke_covers, stroke_zone
 
 TOUCH_PITCH = 1.0               # a Draw stroke within this many pitches of the selected zone's points adds to it
 TOUCH_TOL = 1.25                # ... measured with this slack (jittered stage positions)
+FEEDBACK_MS = 50                # the Survey's stroke feedback at most this often (thousands of points)
 NO_PROJECT = "open a project first"
+IDLE_DRAW = "Drag to draw a zone · right-drag erases · Ctrl+Z undoes"
+IDLE_ERASE = "Drag over the selected zone to erase · right-drag draws"
+IDLE_POLYGON = "Click the corners of the zone · double-click closes it · Esc cancels"
+IDLE_POLYGON_ERASE = "Click the corners of the part to erase · double-click closes it · Esc cancels"
 _DEFAULT_LABEL = re.compile(r"^zone \d+$")
 
 
@@ -106,6 +118,13 @@ class ZoneEditor(QObject):
         self.where = where
         self.new_each = lambda: False
         self.enabled = lambda: True
+        self.throttle = None                    # the perspective's PreviewThrottle: its 'release' state shows in the hint
+        self.feedback_ms = 0                    # > 0: stroke feedback coalesced (the Survey's survey points)
+        self.last_committed = False             # the last stroke that ended was written
+        self._pending: Stroke | None = None
+        self._feedback_timer = QTimer(self)
+        self._feedback_timer.setSingleShot(True)
+        self._feedback_timer.timeout.connect(self._feedback_due)
         self._draft: ZoneDraft | None = None
         self._serial = -1                       # the stroke the caches below belong to
         self._before: dict = {}                 # target id -> members before (this stroke)
@@ -123,9 +142,63 @@ class ZoneEditor(QObject):
         return self._draft
 
     def idle(self) -> None:
-        """No stroke and no message on the map (a tool, scan or holder change)."""
+        """No stroke on the map (a tool, scan or holder change): the stroke preview goes, the hint says what a drag
+        does with the tool."""
         self._draft = None
-        self.map.set_hint("")
+        self._pending = None
+        self._feedback_timer.stop()
+        self.map.clear_stroke_preview()
+        self.map.set_hint(self.idle_hint(), idle=True)
+
+    def set_tool(self, tool: str, brush_n: int = 1) -> None:
+        """Give the map a tool (a stroke in progress is cancelled), with the brush square for the brush, and the idle
+        hint of the tool."""
+        self.map.set_tool(tool)
+        self.set_brush(brush_n)
+        self.idle()
+
+    def set_brush(self, n: int) -> None:
+        """The brush size (n x n points) of the next stroke, and of the square under the pointer."""
+        self.map.set_brush_size(n)
+        shape, erase = split_tool(self.map.vb.tool)
+        self.map.set_brush_footprint(int(n) if shape == "brush" and self.map.zone_tools else 0, erase)
+
+    def idle_hint(self) -> str:
+        """idle_hint(tool) on a map with points, '' otherwise (no scan shown, a disabled editor)."""
+        if not self.enabled() or self._points() is None:
+            return ""
+        return idle_hint(self.map.vb.tool)
+
+    def colour_of(self, zid: int | None) -> str:
+        """The colour the maps draw a zone in (theme.curve of its place in the holder); the next one for a new zone."""
+        from aurora.app.theme import curve
+        hz = self.session.holder_zones(create=False) if self.session.project is not None else None
+        zones = hz.zones if hz else []
+        for i, z in enumerate(zones):
+            if z.id == zid:
+                return curve(i)
+        return curve(len(zones))
+
+    def _hint_of(self, d: ZoneDraft) -> str:
+        hint = d.hint
+        if self.throttle is not None and getattr(self.throttle, "state", "") == "release" and not d.empty:
+            hint += f" · {SLOW_HINT}"
+        return hint
+
+    def refresh_hint(self, *_a) -> None:
+        """The hint of the stroke in progress again (the throttle went to 'release')."""
+        if self._draft is not None:
+            self.map.set_hint(self._hint_of(self._draft))
+
+    def _show_feedback(self, d: ZoneDraft) -> None:
+        pts = d._points
+        if pts is None:
+            self.map.clear_stroke_preview()
+            return
+        x, y, pitch = pts[:3]
+        add, rem = (d.added, d.removed) if not d.empty else (np.zeros(0, int), np.zeros(0, int))
+        self.map.show_stroke_preview((x[add], y[add]), (x[rem], y[rem]), pitch,
+                                     self.colour_of(None if d.new else d.target_id))
 
     def _points(self):
         try:
@@ -271,25 +344,44 @@ class ZoneEditor(QObject):
     def _changed(self, stroke: Stroke) -> None:
         if not self.enabled():
             return
-        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
         stroke.force_add = bool(QApplication.keyboardModifiers() & Qt.ControlModifier)    # the hint follows Ctrl
+        if self.feedback_ms > 0:                # coalesced: the latest stroke state, at most every feedback_ms
+            self._pending = stroke
+            if not self._feedback_timer.isActive():
+                self._feedback_timer.start(self.feedback_ms)
+            return
+        self._update_draft(stroke)
+
+    def _feedback_due(self) -> None:
+        st, self._pending = self._pending, None
+        if st is not None and not st.finished and self.map.vb.stroke() is st:
+            self._update_draft(st)
+
+    def _update_draft(self, stroke: Stroke) -> None:
         self._draft = self.make_draft(stroke)
-        self.map.set_hint(self._draft.hint)
+        self.map.set_hint(self._hint_of(self._draft))
+        self._show_feedback(self._draft)
         self.draft_changed.emit(self._draft)
 
     def _cancelled(self) -> None:
-        if self._draft is not None or self.map.hint_text():
+        self._pending = None
+        self._feedback_timer.stop()
+        self.map.clear_stroke_preview()
+        if self._draft is not None or self.map.hint_text() != self.idle_hint():
             self._draft = None
-            self.map.set_hint("")
+            self.map.set_hint(self.idle_hint(), idle=True)
             self.draft_changed.emit(None)
         self._serial = -1
 
     def _finished(self, stroke: Stroke) -> None:
         if not self.enabled():
             return
+        self._pending = None
+        self._feedback_timer.stop()
         self._draft = None
-        self.commit(stroke)
+        self.map.clear_stroke_preview()
+        self.last_committed = self.commit(stroke) is not None
         self.draft_changed.emit(None)
         self._serial = -1
 
@@ -343,6 +435,378 @@ class ZoneEditor(QObject):
         if z is None:
             return None
         if not legacy:
-            self.map.set_hint("")
+            self.map.set_hint(self.idle_hint(), idle=True)
         self.committed.emit(z.id)
         return z.id
+
+
+# ====================================================================== the tool bar (Survey and Reduce)
+SHAPE_TEXT = {"navigate": "Move", "rect": "Rectangle", "brush": "Brush", "lasso": "Lasso", "polygon": "Polygon"}
+SHAPE_ICON = {"navigate": "move", "rect": "rect", "brush": "brush", "lasso": "lasso", "polygon": "polygon"}
+SHAPE_HELP = {"navigate": "zones.move", "rect": "zones.rect", "brush": "zones.brush", "lasso": "zones.lasso",
+              "polygon": "zones.polygon"}
+NEW_EACH_TEXT = "every stroke starts a new zone"
+
+
+class ZoneToolBar(QWidget):
+    """The zone tools of a map, the same on the Survey and in Reduce: [Draw | Erase], [Move] [Rectangle] [Brush]
+    [Lasso] (+ [Polygon] in Advanced), the brush size (only while Brush is the shape), Undo, Clear, and in Advanced
+    'every stroke starts a new zone'. A tool is a shape and a mode (mapview.tool_name): tool() is the composite string
+    ('rect+', 'brush-', 'navigate') the map takes. Picking Draw or Erase while Move is the shape goes back to the last
+    drawing shape, so 'Draw, then drag' always draws. Clear is only a button here: each perspective connects it."""
+    tool_changed = Signal(str)
+    brush_changed = Signal(int)
+
+    def __init__(self, session, default: str = "rect+", parent: QWidget | None = None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QButtonGroup, QCheckBox, QPushButton, QSpinBox, QToolButton
+        from aurora.app.help_text import explain
+        from aurora.app.mode import mark_advanced, on_mode_changed
+        from aurora.app.theme import on_theme_changed
+        from aurora.app.vocab import unit_suffix
+        from aurora.app.widgets import FlowLayout
+        self.session = session
+        self.setObjectName("zonetools")
+        lay = FlowLayout(self, spacing=6)
+        lay.setContentsMargins(0, 0, 0, 0)
+        shape, erase = split_tool(default)
+        self._shape, self._erase = shape, erase
+        self._last_shape = shape if shape != "navigate" else "rect"
+        self._icons: list[tuple[QToolButton, str]] = []
+
+        def tool_button(text: str, icon: str, key: str) -> QToolButton:
+            b = QToolButton()
+            b.setText(text)
+            b.setCheckable(True)
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            explain(b, key)
+            self._icons.append((b, icon))
+            return b
+
+        self.draw_btn = tool_button("Draw", "draw", "zones.draw")
+        self.erase_btn = tool_button("Erase", "erase", "zones.erase")
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.setExclusive(True)
+        for b in (self.draw_btn, self.erase_btn):
+            self.mode_group.addButton(b)
+            lay.addWidget(b)
+        self.draw_btn.clicked.connect(lambda: self.set_erase(False))
+        self.erase_btn.clicked.connect(lambda: self.set_erase(True))
+        self.shape_group = QButtonGroup(self)
+        self.shape_group.setExclusive(True)
+        self.shape_buttons: dict[str, QToolButton] = {}
+        for s in SHAPES:
+            b = tool_button(SHAPE_TEXT[s], SHAPE_ICON[s], SHAPE_HELP[s])
+            self.shape_group.addButton(b)
+            self.shape_buttons[s] = b
+            lay.addWidget(b)
+            b.clicked.connect(lambda _c=False, ss=s: self.set_shape(ss))
+        self.brush_size = QSpinBox()
+        self.brush_size.setRange(1, 9)
+        self.brush_size.setValue(1)
+        self.brush_size.setSuffix(unit_suffix("pixels"))
+        explain(self.brush_size, "zones.brush_size")
+        self.brush_size.valueChanged.connect(self.brush_changed)
+        lay.addWidget(self.brush_size)
+        self.undo_btn = tool_button("Undo", "undo", "zones.undo")
+        self.undo_btn.setCheckable(False)
+        self.undo_btn.clicked.connect(lambda: self.session.undo())
+        lay.addWidget(self.undo_btn)
+        self.clear_btn = QPushButton("Clear")
+        explain(self.clear_btn, "zones.clear")
+        lay.addWidget(self.clear_btn)
+        self.new_each = QCheckBox(NEW_EACH_TEXT)
+        explain(self.new_each, "zones.new_each")
+        lay.addWidget(self.new_each)
+        stack = getattr(session, "undo_stack", None)
+        if stack is not None:
+            self.undo_btn.setEnabled(stack.canUndo())
+            stack.canUndoChanged.connect(self.undo_btn.setEnabled)
+        mark_advanced(self.shape_buttons["polygon"], self.new_each)
+        self._show_state()
+        self._paint_icons()
+        on_theme_changed(self, lambda _s: self._paint_icons())
+        on_mode_changed(self, self._mode_changed, call_now=False)
+
+    # ------------------------------------------------------------------ state
+    def tool(self) -> str:
+        return tool_name(self._shape, self._erase)
+
+    def shape(self) -> str:
+        return self._shape
+
+    def erase(self) -> bool:
+        return self._erase
+
+    def brush_n(self) -> int:
+        return int(self.brush_size.value())
+
+    def shape_button(self, shape: str):
+        return self.shape_buttons[shape]
+
+    def set_tool(self, tool: str) -> None:
+        """Show a tool string ('lasso-', 'navigate'); emits tool_changed when it changes."""
+        shape, erase = split_tool(tool)
+        if shape == "navigate":
+            erase = self._erase                         # Move keeps the mode shown
+        self._apply(shape, erase)
+
+    def set_shape(self, shape: str) -> None:
+        """A shape, keeping the mode (R, B, L, P, V and the shape buttons)."""
+        from aurora.app.mode import is_advanced
+        if shape not in SHAPES or (shape == "polygon" and not is_advanced()):
+            self._show_state()
+            return
+        self._apply(shape, self._erase)
+
+    def set_erase(self, erase: bool) -> None:
+        """Draw (False) or Erase (True); from Move, back to the last drawing shape."""
+        shape = self._shape if self._shape != "navigate" else self._last_shape
+        self._apply(shape, bool(erase))
+
+    def toggle_erase(self) -> None:
+        self.set_erase(not self._erase)
+
+    def step_brush(self, d: int) -> None:
+        self.brush_size.setValue(self.brush_size.value() + int(d))
+
+    def _apply(self, shape: str, erase: bool) -> None:
+        before = self.tool()
+        self._shape, self._erase = shape, bool(erase)
+        if shape != "navigate":
+            self._last_shape = shape
+        self._show_state()
+        if self.tool() != before:
+            self.tool_changed.emit(self.tool())
+
+    def _show_state(self) -> None:
+        for b, on in ((self.draw_btn, not self._erase), (self.erase_btn, self._erase)):
+            if b.isChecked() != on:
+                b.setChecked(on)
+        b = self.shape_buttons.get(self._shape)
+        if b is not None and not b.isChecked():
+            b.setChecked(True)
+        self.brush_size.setVisible(self._shape == "brush")
+
+    def _mode_changed(self, adv: bool) -> None:
+        if not adv and self._shape == "polygon":
+            self.set_shape("rect")
+
+    def _paint_icons(self) -> None:
+        from aurora.app.icons import icon
+        from aurora.app.theme import TOKENS
+        for b, name in self._icons:
+            b.setIcon(icon(name, TOKENS["ink"], 16))
+
+
+def idle_hint(tool: str) -> str:
+    """The map hint while no stroke is in progress: what a drag does with this tool ('' in Move)."""
+    from aurora.app.shortcuts import native_text
+    shape, erase = split_tool(tool)
+    if shape == "navigate":
+        return ""
+    if shape == "polygon":
+        return IDLE_POLYGON_ERASE if erase else IDLE_POLYGON
+    return native_text(IDLE_ERASE if erase else IDLE_DRAW)
+
+
+# ====================================================================== the live preview, throttled
+FIRST_MS = 60                   # the first preview of a stroke at most this long after it starts
+INTERVAL_MS = 150               # then at most one every INTERVAL_MS while it changes
+SLOW_MS = 120                   # a preview slower than this (EMA): the rest of the stroke without de-spike, then at release
+EMA_ALPHA = 0.5
+SLOW_HINT = "preview updates when you let go (large scan)"
+
+
+class PreviewThrottle(QObject):
+    """Runs run(draft, fast) for the drafts of a stroke: the first at most FIRST_MS after the stroke's first draft,
+    then at most one every INTERVAL_MS, always with the latest draft (the ones in between are skipped). Each run is
+    timed (an EMA): above SLOW_MS the next runs of the stroke get fast=True (no de-spike); still above, the preview
+    waits for the release (state 'release'; the zone editor's hint says so). clock() is time.perf_counter (tests
+    replace it)."""
+    state_changed = Signal(str)                 # 'live' | 'fast' | 'release'
+
+    def __init__(self, run, parent: QObject | None = None):
+        super().__init__(parent)
+        import time
+        from PySide6.QtCore import QTimer
+        self._run = run
+        self.clock = time.perf_counter
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._fire)
+        self._latest = None
+        self._serial = None
+        self._last: float | None = None         # clock() of the last run of this stroke
+        self.ema: float | None = None           # ms
+        self.state = "live"
+        self.runs = 0                           # previews run (all strokes), read by the tests
+
+    def request(self, draft) -> None:
+        if draft is None:
+            self.cancel()
+            return
+        serial = getattr(getattr(draft, "stroke", None), "serial", None)
+        if serial != self._serial:
+            self._serial, self._last, self.ema = serial, None, None
+            self._set_state("live")
+        self._latest = draft
+        if self.state == "release" or self._timer.isActive():
+            return
+        if self._last is None:
+            delay = FIRST_MS
+        else:
+            delay = max(0.0, INTERVAL_MS - (self.clock() - self._last) * 1000.0)
+        self._timer.start(int(round(delay)))
+
+    def flush(self) -> None:
+        """Run the pending draft now (nothing when none is pending)."""
+        if self._timer.isActive():
+            self._timer.stop()
+            self._fire()
+
+    def cancel(self) -> None:
+        """The stroke ended or was cancelled: nothing pending, the next stroke starts live."""
+        self._timer.stop()
+        self._latest = None
+        self._serial = None
+        self._set_state("live")
+
+    def pending(self) -> bool:
+        return self._timer.isActive()
+
+    def _set_state(self, state: str) -> None:
+        if state != self.state:
+            self.state = state
+            self.state_changed.emit(state)
+
+    def _fire(self) -> None:
+        d = self._latest
+        if d is None or self.state == "release":
+            return
+        t0 = self.clock()
+        self._last = t0
+        try:
+            self._run(d, self.state == "fast")
+        finally:
+            ms = (self.clock() - t0) * 1000.0
+            self.runs += 1
+            self.ema = ms if self.ema is None else EMA_ALPHA * ms + (1 - EMA_ALPHA) * self.ema
+            if self.ema > SLOW_MS:
+                self.ema = None                 # measured again in the next state
+                self._set_state("fast" if self.state == "live" else "release")
+
+
+def fast_settings(st):
+    """A copy of ScanSettings without the de-spike (the live preview of a large scan)."""
+    import copy
+    out = copy.deepcopy(st)
+    out.despike = False
+    return out
+
+
+# ====================================================================== shortcuts
+def register_shortcuts(owner, bar: ZoneToolBar, section: str) -> dict:
+    """The zone-tool keys of a perspective (Help > Keyboard shortcuts lists them under `section`); they work while
+    the perspective is shown. R, B, L and P keep the mode; D, E and X set or switch it."""
+    from aurora.app import shortcuts
+    from aurora.app.mode import mark_advanced_action
+    add = lambda text, key, fn: shortcuts.add(owner, text, key, fn, section=section)   # noqa: E731
+    a = {
+        "navigate": add("Move (pan and zoom)", "V", lambda: bar.set_shape("navigate")),
+        "rect": add("Rectangle", "R", lambda: bar.set_shape("rect")),
+        "brush": add("Brush", "B", lambda: bar.set_shape("brush")),
+        "lasso": add("Lasso", "L", lambda: bar.set_shape("lasso")),
+        "polygon": add("Polygon", "P", lambda: bar.set_shape("polygon")),
+        "draw": add("Draw mode", "D", lambda: bar.set_erase(False)),
+        "erase": add("Erase mode", "E", lambda: bar.set_erase(True)),
+        "switch": add("Switch between Draw and Erase", "X", bar.toggle_erase),
+        "brush_erase": add("Brush in Erase mode", "Shift+B", lambda: bar.set_tool("brush-")),
+        "bigger": add("Larger brush", "+", lambda: bar.step_brush(1)),
+        "smaller": add("Smaller brush", "-", lambda: bar.step_brush(-1)),
+    }
+    mark_advanced_action(owner, a["polygon"])
+    return a
+
+
+# ====================================================================== zone actions shared by the maps
+GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy geometry'
+
+
+def clear_zone(session) -> int | None:
+    """Clear the selected zone's drawing (every add and erase shape) in one edit; its id, None without a zone."""
+    z = session.zone() if session.project is not None else None
+    if z is None:
+        return None
+    with session.edit(f"clear zone {z.id}"):
+        z.rects, z.erects, z.paint, z.erase, z.polys, z.epolys = [], [], [], [], [], []
+    return z.id
+
+
+def zone_drawn(z: Zone | None) -> bool:
+    return z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys or z.epolys)
+
+
+def rename_zone(session, zid: int, label: str) -> bool:
+    z = session.zone(zid)
+    label = (label or "").strip()
+    if z is None or not label or label == z.label:
+        return False
+    with session.edit(f"rename zone {zid}"):
+        z.label = label
+    return True
+
+
+def duplicate_zone(session, zid: int) -> Zone | None:
+    """A copy of the zone (drawing and settings) as a new zone, selected."""
+    import copy as _copy
+    from aurora.core.zones import geometry, set_geometry
+    z = session.zone(zid)
+    hz = session.holder_zones(create=False)
+    if z is None or hz is None:
+        return None
+    nid = max((zz.id for zz in hz.zones), default=0) + 1
+    with session.edit(f"duplicate zone {zid}"):
+        dup = Zone(id=nid, label=f"{z.label} (copy)", group=z.group, comment=z.comment)
+        set_geometry(dup, geometry(z))
+        dup.settings = {sid: _copy.deepcopy(st) for sid, st in z.settings.items()}
+        hz.zones.append(dup)
+        session.current_zone = nid
+    session.select_zone(nid)
+    return dup
+
+
+def geometry_text(z: Zone) -> str:
+    """The clipboard JSON of 'Copy geometry' (Reduce's 'Paste zone' reads it)."""
+    import json
+    from aurora.core.zones import geometry
+    return json.dumps({GEOMETRY_MARK: 1, "label": z.label, **geometry(z)})
+
+
+def zone_menu(parent, session, zid: int, map_view, extra=()):
+    """The right-click menu of a zone on a map: Rename…, Duplicate, Delete, Copy geometry, Zoom to zone, then the
+    `extra` (text, callable) entries (the Survey's 'Open <scan> in Reduce')."""
+    from PySide6.QtWidgets import QApplication, QInputDialog, QMenu
+    from aurora.core.zones import zone_bbox
+    m = QMenu(parent)
+    z = session.zone(zid)
+    if z is None:
+        return m
+
+    def rename():
+        label, ok = QInputDialog.getText(parent, "Rename the sample", "label", text=z.label)
+        if ok:
+            rename_zone(session, zid, label)
+    m.addAction("Rename…", rename)
+    m.addAction("Duplicate", lambda: duplicate_zone(session, zid))
+    m.addAction("Delete", lambda: session.delete_zone(zid))
+    m.addSeparator()
+    m.addAction("Copy geometry", lambda: QApplication.clipboard().setText(geometry_text(z)))
+    bb = zone_bbox(z)
+    za = m.addAction("Zoom to zone", lambda: map_view.zoom_to(*bb) if bb is not None else None)
+    za.setEnabled(bb is not None)
+    if extra:
+        m.addSeparator()
+        for text, fn in extra:
+            m.addAction(text, fn)
+    return m

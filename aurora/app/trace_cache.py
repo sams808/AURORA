@@ -3,7 +3,9 @@ zone preview): after a zone edit each (zone pixels, stack, settings) is computed
 
 zone_traces_cached(sd, pix, settings, good) is aurora.core.zones.zone_traces with an LRU of CACHE_SIZE entries. The key
 holds everything the traces depend on: the stack object (a reload is a new object, a weak reference checks that the
-cached one is still the same), its id, the pixels (a digest of their bytes), the settings (their JSON), the good-I0
+cached one is still the same), its id, the pixels (a digest of their bytes), the settings (the processing choices,
+ScanSettings.SETTINGS_FIELDS: include, n, stack and pinned are bookkeeping, so the live preview of a stroke and the
+written zone, whose n differs, share their traces), the good-I0
 curve (a digest) and whether the stack's XRF window counts are ready (zone_sums reads them, or falls back to the fixed
 bins with a note). The cached ZoneTraces are shared: callers read them and never change them.
 """
@@ -44,7 +46,8 @@ def _windows_ready(sd, settings) -> bool:
 
 def key_of(sd, pix, settings, good=None) -> tuple:
     pix = np.asarray(pix, int)
-    st = json.dumps(settings.to_json(), sort_keys=True, default=json_default) if settings is not None else ""
+    st = (json.dumps({f: getattr(settings, f) for f in settings.SETTINGS_FIELDS}, sort_keys=True, default=json_default)
+          if settings is not None else "")
     return (id(sd), str(getattr(sd, "id", "")), _digest(pix), st, _digest(None if good is None else np.asarray(good, float)),
             _windows_ready(sd, settings))
 

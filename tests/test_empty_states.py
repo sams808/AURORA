@@ -49,7 +49,7 @@ def test_a_fresh_window(qapp, fake_project):
         assert not win.pages[key].empty_state.isVisible(), key
     win.show_perspective("reduce")
     pump(qapp)
-    assert win.reduce.zone_state.isVisible() and "rect+" in win.reduce.zone_state.text()   # no zone yet
+    assert win.reduce.zone_state.isVisible() and "Draw" in win.reduce.zone_state.text()    # no zone yet: the tool bar
     assert win.reduce.new_zone_btn.isEnabled()
     win.show_perspective("check")
     pump(qapp)
