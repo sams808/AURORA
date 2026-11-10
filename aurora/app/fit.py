@@ -22,7 +22,7 @@ from aurora.app import jobs, nav
 from aurora.app.help import set_help_anchor
 from aurora.app.help_text import HELP, explain, explain_all, header_tips, labelled
 from aurora.app.library import Library
-from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
+from aurora.app.mode import JOHN_DEFAULTS, mark_advanced, mark_advanced_tab, mark_easy
 from aurora.app.theme import curve, dash, make_plot, on_theme_changed, role_pen
 from aurora.app.vocab import plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, default_path,
@@ -149,6 +149,10 @@ class FitPerspective(QWidget):
                  "negative coefficients allowed" if self.allow_neg.isChecked() else "no negative coefficients",
                  f"± from {n} bootstrap draws" if n else "± from the covariance (no bootstrap)",
                  "fit range: the Compare x range when the boxes are blank"]
+        j = JOHN_DEFAULTS["lcf"]
+        parts.append(f"John Bussey's GUI: {'sum to 1' if j['sum_to_one'] else 'sum free'}, "
+                     f"{'negatives allowed' if j['allow_negative'] else 'no negatives'}, "
+                     f"{j['fit_range'][0]:g}–{j['fit_range'][1]:g} eV")
         self.lcf_fixed.setText(" · ".join(parts))
 
     def update_actions(self) -> None:

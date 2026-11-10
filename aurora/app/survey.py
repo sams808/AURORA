@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 
 from aurora.app import nav
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import MapView
+from aurora.app.mapview import MapView, scale_label
 from aurora.app.mode import mark_advanced
 from aurora.app.session import Session
 from aurora.app.theme import FOOTPRINTS, MAP_OVERLAY, curve, on_theme_changed, swatch_icon
@@ -291,6 +291,9 @@ class SurveyPerspective(QWidget):
         vals = sv.values(ch, det=det, per_i0=self.per_i0.isChecked(), log10=self.log.isChecked(),
                          invert=self.invert.isChecked(), clip=(c, 100 - c))
         self.map.set_grid(sv.grid(vals))
+        self.map.set_scale_label(scale_label("counts" if ch not in ("I0", "TEY") else ch,
+                                             per_i0=self.per_i0.isChecked() and sv.i0_usable and ch != "I0",
+                                             log=self.log.isChecked() and ch != "I0", inverted=self.invert.isChecked()))
         if self.show_footprints.isChecked():
             for s in self._footprints():
                 box = self._bbox(s)

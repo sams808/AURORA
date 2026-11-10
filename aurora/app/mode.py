@@ -58,6 +58,12 @@ EASY_DEFAULTS: dict[str, dict] = {
     "report": {"groups": "all", "appendix_a": True, "appendix_b": True, "preset": "final", "dpi": 600},
 }
 EASY_DEFAULTS_K_FALLBACK = DESPIKE_K
+# John Bussey's own defaults where Easy differs from them, read from his SGM_XAS_GUI.exe (xas_core.DEFAULT_REQUEST and
+# the LCF tab) during the 0.4.0 review; Easy states them next to its own values (Compare's Easy line, the LCF line).
+JOHN_DEFAULTS: dict[str, dict] = {
+    "compare": {"pre": (-10.0, -5.0), "post": (10.0, 34.0), "flatten": False},
+    "lcf": {"sum_to_one": False, "allow_negative": True, "fit_range": (685.0, 705.0)},
+}
 
 # perspectives shown only in Advanced mode (MainWindow marks them; plain strings, no Qt objects at module level)
 _ADVANCED_PERSPECTIVES: set[str] = set()
@@ -284,17 +290,26 @@ def easy_line(scan, labels: list[str] | None = None) -> str:
     return lines.resonant_line(*edge) if edge else ""
 
 
+def flag_defaults(flags=()) -> dict:
+    """The fields of the defaults that follow a scan's flags: {'sdd': SDD1-4 on except the ones flagged saturated,
+    'i0_source': 'good' (the good-I0 mean) when I0 is flagged invalid, else 'own'}."""
+    from aurora.core import flags as fl
+    from aurora.core.constants import DETS
+    d = EASY_DEFAULTS["zone_scan"]
+    flags = list(flags or [])
+    sat = fl.saturated_dets(flags)
+    return {"sdd": [bool(on) and det not in sat for det, on in zip(DETS, d["sdd"])],
+            "i0_source": "good" if fl.i0_invalid(flags) else str(d["i0_source"])}
+
+
 def easy_scan_settings(scan, flags=(), labels: list[str] | None = None):
     """A ScanSettings built from EASY_DEFAULTS for one zone x scan: Settings normalisations and k, TEY and the
     coherent de-spike on, SDD1-4 on except the ones flagged saturated, I0 'own' (the good-I0 mean when I0 is flagged
     invalid), pre / post automatic, the holder's main line, and the default signal of that line
     (lines.default_signal, the same rule as check.science_defaults)."""
-    from aurora.core import flags as fl
-    from aurora.core.constants import DETS
     from aurora.core.io.config import ScanSettings
     d = EASY_DEFAULTS["zone_scan"]
-    flags = list(flags or [])
-    sat = fl.saturated_dets(flags)
+    by_flags = flag_defaults(flags)
     try:
         k = float(easy_value("zone_scan", "k"))
     except (TypeError, ValueError):
@@ -302,8 +317,8 @@ def easy_scan_settings(scan, flags=(), labels: list[str] | None = None):
     st = ScanSettings(stack=getattr(scan, "name", "") or "", line=easy_line(scan, labels),
                       fluo_norm=str(easy_value("zone_scan", "fluo_norm")), tey=bool(d["tey"]),
                       tey_norm=str(easy_value("zone_scan", "tey_norm")), despike=bool(d["despike"]), k=k,
-                      i0_source="good" if fl.i0_invalid(flags) else str(d["i0_source"]), pre=d["pre"], post=d["post"])
-    st.sdd = [bool(on) and det not in sat for det, on in zip(DETS, d["sdd"])]
+                      i0_source=by_flags["i0_source"], pre=d["pre"], post=d["post"])
+    st.sdd = by_flags["sdd"]
     if hasattr(st, "despike_mode"):
         st.despike_mode = str(d["despike_mode"])
     if hasattr(st, "signal"):

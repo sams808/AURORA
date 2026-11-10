@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("pyqtgraph")
 
 from aurora.core import testdata  # noqa: E402
+from aurora.core import xrf_windows as xw  # noqa: E402
 from aurora.core.constants import DETS  # noqa: E402
 from aurora.core.io.config import RoiBins  # noqa: E402
 from aurora.core.model import Project  # noqa: E402
@@ -107,8 +108,16 @@ def test_save_as_a_fixed_line_on_a_raw_only_beamtime(qapp, tmp_path, error_dialo
         ses, wc = win.session, win.reduce.window_card
         assert wc.bins_note.isVisible() and wc.bins_note.text() == NO_FIXED_LINES
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items[0] == "total XRF (fixed bins)"
-        assert items[1].startswith("line of the edge: F Kα") and items[1].endswith("(nominal calibration, check the peak)")
+        assert items == ["total XRF (fixed bins)", "John Bussey's 60:83 (F Kα)", "custom"]     # it holds F Kα
+        sd0, scan0 = ses.stack_loaded(sid), ses.scan_of(sid)
+        sd0.edge = ("O", "K")                         # an edge John Bussey's 60:83 does not hold (O Kα is channel 52)
+        wc.set_stack(sd0, scan0)
+        items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
+        assert items[1].startswith("line of the edge: O Kα") and items[1].endswith("(nominal calibration, check the peak)")
+        el = wc._edge_line
+        assert el.nominal and el.windows == xw.edge_line_windows(("O", "K"), None, None, nominal=True).windows
+        sd0.edge = ("F", "K")
+        wc.set_stack(sd0, scan0)
         assert wc.save_line_btn.isVisible() and wc.save_line_btn.isEnabled() and wc.save_line_btn.text() == SAVE_LINE
         assert wc.default_line_name() == "F Kα"
         wc.set_window(None, 60, 75, commit=False)
@@ -412,6 +421,30 @@ def test_grid_of_zones_saves_a_plate_layout(qapp, tmp_path):
         dlg = sv.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
         assert [dlg.layout_combo.itemText(i) for i in range(dlg.layout_combo.count())] == ["none", "two pads (1 × 2)"]
         dlg.reject()
+    finally:
+        mode.set_advanced(False)
+        close(win)
+
+
+def test_a_bad_plate_layout_opens_the_grid_on_numbers(qapp, tmp_path, error_dialogs):
+    """BL-20: a group of the wrong shape is left out: the Grid of zones dialog opens with zone numbers, and Home's
+    summary names the problem."""
+    from aurora.app import mode
+    root = testdata.make_fake_project(tmp_path / "bt")
+    (root / "config" / "plate_layout.json").write_text(json.dumps(
+        {HOLDER: {"groups": [{"id": "g1", "rows": "two", "cols": 3}, {"id": "g2", "rows": 2, "cols": 2, "cells": 5}],
+                  "samples": []}}), encoding="utf-8")
+    win = window(qapp, root)
+    try:
+        assert "config/plate_layout.json" in details(win) and "rows must be a whole number" in details(win)
+        mode.set_advanced(True)
+        win.show_perspective("survey")
+        pump(qapp)
+        dlg = win.survey.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
+        pump(qapp)
+        assert dlg.layout_combo.count() == 1 and dlg.source() == "numbers"
+        dlg.reject()
+        assert not error_dialogs
     finally:
         mode.set_advanced(False)
         close(win)

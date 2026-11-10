@@ -27,6 +27,7 @@ from aurora.core.io.raw import read_point_dir, stack_energy_dirs, stack_last_mti
 from aurora.core.lines import edge_energy, main_line
 from aurora.core.model import Project, ScanInfo
 from aurora.core.names import pretty_edge, target_edge
+from aurora.core.spectra import i0_low_mask
 from aurora.core.zones import grid_pitch
 
 log = logging.getLogger("aurora.stack")
@@ -119,14 +120,18 @@ class StackData:
     def map_values(self, label: str, det: int | None = None, mode: str = "above", energy_index: int | None = None,
                    per_i0: bool = True) -> np.ndarray:
         """Per-pixel map: ROI counts of `label` (one detector or the 4-SDD sum), integrated 'above' the edge, over
-        'all' valid energies, 'at' one energy, or the edge 'jump' (above minus below); divided by I0 per pixel when asked."""
+        'all' valid energies, 'at' one energy, or the edge 'jump' (above minus below); divided by I0 per pixel when asked,
+        and then the energies whose map I0 is below I0_LOW_FRAC x its median (beam loss) are left out of the means."""
         k = self.roi_index(label)
         a = self.roi_pix_det[:, :, k, :].sum(axis=2) if det is None else self.roi_pix_det[:, :, k, det]
         a = a.astype(float)
+        v = self.valid
         if per_i0:
             with np.errstate(all="ignore"):
                 a = np.where(self.i0 > 0, a / self.i0, np.nan)
-        v = self.valid
+            s = np.full(self.n_energies, np.nan)
+            s[v] = np.nansum(np.asarray(self.i0, float)[v], axis=1)
+            v = v & ~i0_low_mask(s)
         if mode == "at" and energy_index is not None:
             return a[energy_index]
         if self.edge_ev is not None and self.E.min() < self.edge_ev < self.E.max():

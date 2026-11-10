@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleS
 
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import MapView
+from aurora.app.mapview import MapView, colour_bar, scale_label
 from aurora.app.session import Session
 from aurora.app.theme import (MAP_OVERLAY, TOKENS, categorical, composite, curve, dash, make_plot, on_theme_changed,
                               pc, restyle_plot, role_pen, set_tone, style_plot, swatch_icon, with_alpha)
@@ -38,7 +38,7 @@ from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskB
                                 notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
 from aurora.core import hypercube as hcmod
 from aurora.core.compare import Spectrum
-from aurora.core.constants import DETS
+from aurora.core.constants import DETS, I0_LOW_FRAC
 from aurora.core.deconv import deconvolve_cost, deconvolve_grid
 from aurora.core.flags import saturated_dets
 from aurora.core.grid import Grid, to_grid
@@ -124,6 +124,8 @@ class MapsPerspective(QWidget):
         self._dirty = False                          # a zone changed while Maps was hidden
         self._flagged: dict[int, str] = {}           # SDD index -> 'flagged saturated (source)'
         self._load_note = ""
+        self._el_label = ""                          # the quantity of the elemental maps (their colour scales)
+        self._i0_low_text = ""                       # the low-I0 energies of the cube, for the line under the map
         self.stats = {"redraws": 0, "maps": 0, "spectra": 0, "xanes": 0}
         self._map_cache = _LRU(CACHE_ENTRIES)
         self._spec_cache = _LRU(CACHE_ENTRIES)
@@ -422,7 +424,10 @@ class MapsPerspective(QWidget):
         left.body.addWidget(row_box)
         self.cluster_map = MapView(); self.cluster_map.set_tool("navigate")
         self.cluster_map.set_lookup(self._cluster_lut(self.n_k.value()))       # categorical colours, one per cluster
+        self.cluster_map.hovered.connect(self._cluster_hover)
         left.body.addWidget(self.cluster_map, 1)
+        self.cluster_at = ElidedLabel("", Qt.ElideRight); self.cluster_at.setObjectName("muted")   # not colour alone
+        left.body.addWidget(self.cluster_at)
         self.cluster_info = QLabel(""); self.cluster_info.setObjectName("muted"); self.cluster_info.setWordWrap(True); left.body.addWidget(self.cluster_info)
         w.addWidget(left)
         right = Card("Clusters: tick to merge", help_anchor="84-clusters")
@@ -487,7 +492,7 @@ class MapsPerspective(QWidget):
         self._cluster = None; self._cluster_M = None; self._cluster_meta = {}
         self.cluster_list.blockSignals(True); self.cluster_list.clear(); self.cluster_list.blockSignals(False)
         self.cluster_map.clear_overlays(); self.cluster_map.set_grid(None)
-        self.cluster_info.setText("")
+        self.cluster_info.setText(""); self.cluster_at.setText("")
         self._draw_clusters()
         self.element_grids = []
         self.map.clear_overlays(); self.map.set_grid(None)
@@ -507,13 +512,22 @@ class MapsPerspective(QWidget):
                 return Hypercube.load(project, scan, progress=cb)
             except CacheSpaceError as err:          # a calm refusal: nothing was written
                 return err
-        jobs.of(self).submit(f"cube:{sid}", work, on_done=self._loaded,
+        gen = self._gen
+        jobs.of(self).submit(f"cube:{sid}", work, on_done=lambda hc: self._loaded(hc, (gen, sid, project), scan.name),
                              on_failed=lambda t: self.status.setText(t.strip().splitlines()[-1]),
                              on_end=lambda _s: self.update_actions(), label=f"loading the hypercube of {scan.name}",
                              taskbar=self.taskbar)
         self.update_actions()
 
-    def _loaded(self, hc) -> None:
+    def _loaded(self, hc, asked=None, name: str = "") -> None:
+        """A cube job ended. `asked` = (generation, stack id, project) when Load was clicked: a cube that lands after
+        the holder, the picked stack or the project changed is not shown (it stays cached: Load opens it at once)."""
+        gen, sid, project = asked if asked is not None else (self._gen, self.scan_combo.currentData(), self.session.project)
+        if gen != self._gen or sid != self.scan_combo.currentData() or project is not self.session.project:
+            self.status.setText(f"hypercube of {name} not loaded: {hc}" if isinstance(hc, CacheSpaceError) else
+                                f"hypercube of {name} not shown: another holder, stack or project was picked while it "
+                                f"loaded (it is cached: Load opens it at once)")
+            return
         if isinstance(hc, CacheSpaceError):
             self._load_note = f"Not loaded: the hypercube {hc}. Free some disk space, then load it again."
             self.status.setText(f"hypercube not loaded: {hc}")
@@ -547,6 +561,11 @@ class MapsPerspective(QWidget):
         self.energy.blockSignals(True); self.energy.setRange(0, hc.n_energies - 1); self.energy.setValue(hc.n_energies // 2); self.energy.blockSignals(False)
         self._fill_lines()
         self._apply_flags(hc)
+        low = np.where(hc.valid & hc.i0_low())[0]
+        self._i0_low_text = ("" if not low.size else
+                             f"/ I0 leaves out {plural(low.size, 'energy', 'energies')} with I0 below "
+                             f"{I0_LOW_FRAC:.0%} of its median ({', '.join(f'{hc.E[e]:.2f}' for e in low[:4])}"
+                             f"{' …' if low.size > 4 else ''} eV)")
         sat = ", ".join(DET_LABELS[k] for k in sorted(self._flagged))
         self.status.setText(f"{hc.name}: {hc.n_energies} energies x {hc.n_pix} px x 256 ch x 4"
                             + (f" ({hc.dtype})" if hc.dtype else "") + (f" · saturated {sat}" if sat else "")
@@ -788,6 +807,7 @@ class MapsPerspective(QWidget):
             with np.errstate(all="ignore"):
                 g = replace(g, img=np.log10(np.maximum(g.img, 0) + 1.0))
         self.map.set_grid(g)
+        self.map.set_scale_label(scale_label(per_i0=self.per_i0.isChecked(), log=self.log.isChecked()))
         rk = (self._gen, self._roi_k)
         if rk != self._roi_drawn:                    # the ROI outline changes only with the ROI
             self.map.clear_overlays()
@@ -802,6 +822,8 @@ class MapsPerspective(QWidget):
         parts = [f"{what}: {describe_windows({d: w[d] for d in dets})}" if dets else NO_SDD,
                  "averaged over the valid energies" if ei is None else "at the energy of the slider",
                  f"ROI {len(self._roi) if self._roi is not None else hc.n_pix} px"]
+        if self.per_i0.isChecked() and self._i0_low_text:
+            parts.append(self._i0_low_text)
         if note:
             parts.append(note)
         self.map_hint.setText(" · ".join(parts))
@@ -914,6 +936,7 @@ class MapsPerspective(QWidget):
         if not dets:
             self.status.setText(NO_SDD); return
         ei, per_i0, gen = self._ei(), self.per_i0.isChecked(), self._gen
+        self._el_label = scale_label(per_i0=per_i0)
 
         def work(cb):
             out = []
@@ -939,12 +962,17 @@ class MapsPerspective(QWidget):
         except Exception:
             cmap = pg.colormap.get("viridis")
         for i, (lab, g) in enumerate(out):
-            p = self.el_layout.addPlot(row=i // 4, col=i % 4, title=lab)
+            cell = self.el_layout.addLayout(row=i // 4, col=i % 4)            # the map and its own colour scale
+            p = cell.addPlot(row=0, col=0, title=lab)
             p.setAspectLocked(True); p.hideAxis("left"); p.hideAxis("bottom")
             img = pg.ImageItem(g.img, axisOrder="row-major"); img.setLookupTable(cmap.getLookupTable(nPts=256))
             fin = np.isfinite(g.img)
+            levels = (float(np.nanmin(g.img)), float(np.nanmax(g.img)) or 1.0) if fin.any() else (0.0, 1.0)
             if fin.any():
-                img.setLevels((float(np.nanmin(g.img)), float(np.nanmax(g.img)) or 1.0))
+                img.setLevels(levels)
+            bar = colour_bar(levels, cmap)
+            bar.getAxis("left").setLabel(self._el_label)
+            cell.addItem(bar, row=0, col=1)
             img.setRect(pg.QtCore.QRectF(float(g.xs[0]) - g.dx / 2, float(g.ys[0]) - g.dy / 2, len(g.xs) * g.dx, len(g.ys) * g.dy))
             p.addItem(img)
             p.getViewBox().setRange(xRange=(float(g.xs[0]) - g.dx, float(g.xs[-1]) + g.dx), yRange=(float(g.ys[0]) - g.dy, float(g.ys[-1]) + g.dy), padding=0, disableAutoRange=True)
@@ -989,9 +1017,10 @@ class MapsPerspective(QWidget):
                 "window": self.line.currentData() or f"{self.w_lo.value():.1f}-{self.w_hi.value():.1f} eV"}
 
         def work(cb):
-            nv = int(np.count_nonzero(hc.valid))
+            ev = hc.matrix_energies(per_i0)                 # the valid energies, less the low-I0 ones / I0
+            nv = int(ev.size)
             M = hc.pixel_matrix(w, per_i0=per_i0, progress=lambda i, _n, msg="": cb(i, nv + 1, msg))
-            cr = hcmod.pca_kmeans(M, hc.E[hc.valid], n_pc, n_k, seed)
+            cr = hcmod.pca_kmeans(M, hc.E[ev], n_pc, n_k, seed)
             cb(nv + 1, nv + 1, "clusters ready")           # a cancel during k-means ends here: nothing is replaced
             return gen, M, cr, meta
         jobs.of(self).submit("maps:clusters", work, on_done=self._clusters_done, on_end=lambda _s: self.update_actions(),
@@ -1058,6 +1087,21 @@ class MapsPerspective(QWidget):
         self.cluster_map.set_lookup(self._cluster_lut(n_k, set(self.ticked_clusters())))
         self.cluster_map.image.setLevels((0, max(n_k - 1, 1)))      # label k -> LUT entry k
 
+    def _cluster_hover(self, x: float, y: float) -> None:
+        """The cluster under the mouse in words under the map ('cluster 3 · 340 px · ticked'): the colour is not the only
+        cue for telling twenty clusters apart."""
+        cr, hc = self._cluster, self.hc
+        if cr is None or hc is None:
+            return
+        px, py = hc.pitch
+        hit = np.where((np.abs(hc.x - x) <= px / 2) & (np.abs(hc.y - y) <= py / 2))[0]
+        k = int(cr.labels[hit[np.argmin((hc.x[hit] - x) ** 2 + (hc.y[hit] - y) ** 2)]]) if hit.size else -1
+        if k < 0:
+            self.cluster_at.setText("no cluster here" if hit.size else "")
+            return
+        n = int((cr.labels == k).sum())
+        self.cluster_at.setText(f"cluster {k + 1} · {n} px · " + ("ticked" if k in self.ticked_clusters() else "not ticked"))
+
     def _cluster_ticks_changed(self) -> None:
         self._show_cluster_map()
         self._draw_clusters()
@@ -1111,17 +1155,28 @@ class MapsPerspective(QWidget):
         scan = self.session.project.find(self.hc.name) if self.session.project is not None and self.hc else None
         return self.session.stack_id(scan) if scan is not None else (self.hc.name if self.hc else "")
 
+    def _cluster_holder(self) -> str | None:
+        """The key of the holder whose stack the cube is (None when no holder has it)."""
+        return self.session.holder_of_stack(self._cluster_sid())
+
     def _cluster_label(self) -> str:
-        holder = self.session.holder()
         sid = self._cluster_sid()
+        holder = self.session.holder(self._cluster_holder() or self.session.current_holder)
         return f"clusters {self._cluster_names()} · {holder.name + ' ' if holder else ''}{short_time(sid) or self.hc.name}"
 
     def make_zone_from_clusters(self):
         """A new zone of the holder whose painted squares are exactly the ticked clusters' pixels (one square of the
-        pixel pitch on each pixel), so members() returns those pixels and zones_all.json keeps its format."""
+        pixel pitch on each pixel), so members() returns those pixels and zones_all.json keeps its format. Only in the
+        holder the cube's stack belongs to: never another holder's zone made of these pixels."""
         cr, hc = self._cluster, self.hc
         ticked = self.ticked_clusters()
         if cr is None or hc is None or not ticked:
+            return None
+        owner = self._cluster_holder()
+        if owner is not None and owner != self.session.current_holder:
+            h = self.session.holder(owner)
+            self.status.setText(f"no zone made: the clusters are of a stack of holder {h.name if h else owner}; "
+                                f"pick that holder first")
             return None
         pix = np.where(np.isin(cr.labels, ticked))[0]
         squares = paint_squares(hc.x, hc.y, hc.pitch, pix)

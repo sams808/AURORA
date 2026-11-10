@@ -56,3 +56,67 @@ def test_pymca_exports(fake_project, tmp_path):
         assert h["entry/full_4d_measurement/sdd_sum_4d"].shape == (3, 4, 5, N_CH)
         assert h["entry/xrf_measurement/sdd_xrf_stack_3d"].shape == (3, 4, N_CH)
         assert h["entry/xanes_measurement/sdd1"].shape == (3, 4, 5) and h["energy"].shape == (5,)
+
+
+def _beam_loss_cube():
+    """21 energies over a step edge at 690 eV, 12 pixels, I0 at 5 % of its median at 695 eV (beam loss); the counts
+    follow I0, so / I0 is flat except where the monitor collapses."""
+    rng = np.random.default_rng(0)
+    E = np.arange(680.0, 701.0, 1.0)
+    nE, npx = E.size, 12
+    step = 1 + (E >= 690)
+    i0 = np.full((nE, npx), 2.5)
+    i0[15] *= 0.05
+    cubes = []
+    for _d in range(4):
+        c = np.zeros((nE, npx, N_CH), np.uint16)
+        for e in range(nE):
+            lam = 200 * step[e] * (i0[e, 0] / 2.5) * np.exp(-0.5 * ((np.arange(N_CH) - 65) / 3.0) ** 2) + 2
+            c[e] = rng.poisson(lam, size=(npx, N_CH))
+        cubes.append(c)
+    return Hypercube(name="t", E=E, x=np.arange(npx) * 0.1, y=np.zeros(npx), cubes=cubes, i0=i0, tey=i0 * 0.2,
+                     valid=np.ones(nE, bool)), cubes, i0
+
+
+def test_maps_leave_out_the_low_i0_energies_like_the_reduce_traces(tmp_path):
+    """HANDOFF 5.2 / MANUAL 4.5: an energy whose I0 is below 20 % of its median is left out of every / I0 trace. The Maps
+    XANES, the pixel matrix of the clusters and both PyMca exports follow the rule of the Reduce traces (build_traces on
+    the same pixels) and of sgm_report (I0 mean over the map below 0.2 x its median: masked)."""
+    import h5py
+    from aurora.core.io.config import ScanSettings
+    from aurora.core.spectra import build_traces
+    from aurora.core.zones import ZoneSums
+    hc, cubes, i0 = _beam_loss_cube()
+    i0m = np.nanmean(i0, axis=1)                                                    # sgm_report v2.5, _finish_reduce
+    legacy = (i0m > 0) & (i0m < 0.2 * np.nanmedian(i0m))
+    assert np.array_equal(hc.i0_low(), legacy) and np.where(legacy)[0].tolist() == [15]
+    w = {d: (60, 71) for d in range(4)}
+    det = np.column_stack([cubes[d][:, :, 60:71].sum(axis=(1, 2)) for d in range(4)]).astype(float)
+    t = build_traces(ZoneSums(E=hc.E, n_pix=hc.n_pix, i0=i0.sum(axis=1), tey=i0.sum(axis=1) * 0.2, det={"F Kα": det},
+                              main="F Kα"), ScanSettings(line="F Kα", fluo_norm="i0", despike=False))
+    x = hc.xanes(w, per_i0=True)
+    assert np.array_equal(np.isnan(x), t.masked["i0_low"])                         # the same energy as Reduce
+    assert np.allclose(x / np.nanmedian(x[hc.E >= 690]), t.sum / np.nanmedian(t.sum[hc.E >= 690]), equal_nan=True)
+    assert np.isnan(hc.xanes(w, pix=[0, 3, 7], per_i0=True)[15])                 # a ROI: judged on its own I0
+    assert np.isfinite(hc.xanes(w, per_i0=False)).all()                           # raw counts keep every energy
+    assert hc.pixel_matrix(w, per_i0=True).shape == (12, 20) and hc.matrix_energies(True).tolist() == [
+        e for e in range(21) if e != 15]
+    assert hc.pixel_matrix(w, per_i0=False).shape == (12, 21)
+    p = export_pymca_xanes(hc, tmp_path / "x_PCA-CA.h5", w, per_i0=True)
+    with h5py.File(p) as h:
+        assert 695.0 not in h["entry/measurement/energy"][()] and h["entry/measurement/sum"].shape[2] == 20
+        assert h["entry/measurement"].attrs["i0_low_ev"].tolist() == [695.0]
+    for per_i0, n in ((True, 20), (False, 21)):
+        q = export_pymca_4d(hc, tmp_path / f"x{per_i0}_Elemental_PyMca.h5", per_i0)
+        with h5py.File(q) as h:
+            assert h["energy"].shape == (n,) and (695.0 in h["energy"][()]) is not per_i0
+    # the Reduce stack map / I0 (a mean of the per-energy maps) leaves the beam-loss energy out too
+    rpd = np.stack([cubes[d][:, :, 60:71].sum(axis=2) for d in range(4)], axis=-1)[:, :, None, :].astype(np.float32)
+    sd = StackData(id="d_t", name="t", day="d", E=hc.E, x=hc.x, y=hc.y, i0=i0, tey=i0 * 0.2, roi_pix_det=rpd,
+                   valid=np.ones(21, bool), labels=["F Kα"], main="F Kα", edge_ev=690.0)
+    a = rpd[:, :, 0, :].sum(axis=2) / i0
+    keep = (hc.E >= 690) & ~legacy
+    assert np.allclose(sd.map_values("F Kα", mode="above", per_i0=True), a[keep].mean(axis=0))
+    assert (a[hc.E >= 690].mean(axis=0) / a[keep].mean(axis=0) - 1).mean() > 0.01     # the dark counts / 5 % I0
+    raw = rpd[:, :, 0, :].sum(axis=2)
+    assert np.allclose(sd.map_values("F Kα", mode="above", per_i0=False), raw[hc.E >= 690].mean(axis=0))

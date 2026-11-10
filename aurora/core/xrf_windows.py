@@ -38,6 +38,7 @@ log = logging.getLogger("aurora.xrf_windows")
 SIGMA_CH_TYPICAL = 3.5
 TOTAL_LABEL = "total XRF"
 TOTAL_BOUNDS = (5, 200)                 # aurora.core.stack.TOTAL_BOUNDS (channels 5:200)
+JOHN_DEFAULT = (60, 83)                 # John Bussey's GUI, step 2: every detector 60:83 (channels 60 to 82)
 WINDOW_LABEL = "XRF window"             # the line name of a window map (StackData view)
 EMISSION_FILE = "_emission_cache.npz"
 WINDOWS_DIR = "_xrf_windows"
@@ -148,8 +149,9 @@ class EdgeLine:
 
 
 def edge_line_windows(edge, calibration, roi_bins=None, nominal: bool = False) -> EdgeLine | None:
-    """The preset 'line of the edge': the resonant emission line of the edge (xraydb), centre ± n_sigma σ converted to
-    channels with Calibration.bounds, the rule of sgm_report's fixed bins. σ is the line's own fitted width in
+    """The preset 'line of the edge': the resonant emission line of the edge (xraydb) at each detector's calibrated
+    channel c, floor(c - n_sigma σ) to ceil(c + n_sigma σ) in that detector's channels: the rule of sgm_report's
+    fixed bins (RoiBins.ensure), so a line of roi_bins.json gets its own bins back. σ is the line's own fitted width in
     roi_bins.json when it has one, else the median width of the other fitted lines, else sgm_report's typical 3.5
     channels; n_sigma is roi_bins' (1.5). None without a calibration (the channels would be nominal) or an edge;
     nominal=True gives it anyway, on the calibration's nominal gains (UNCALIBRATED_EV_PER_CH per channel for every
@@ -167,22 +169,46 @@ def edge_line_windows(edge, calibration, roi_bins=None, nominal: bool = False) -
     ev = emission_line_ev(label)
     if ev is None:
         return None
-    data = getattr(roi_bins, "data", {}) or {}
-    n_sigma = float(data.get("_meta", {}).get("n_sigma", N_SIGMA))
-    own = data.get(label, {}).get("sigma_ch") if isinstance(data.get(label), dict) else None
-    others = [float(v["sigma_ch"]) for k, v in data.items() if not k.startswith("_") and isinstance(v, dict)
-              and v.get("sigma_ch") is not None]
+    # the fitted widths of the file as it was read (RoiBins.raw): a line kept out for its bins still has its width
+    data = getattr(roi_bins, "raw", None) or getattr(roi_bins, "data", {}) or {}
+
+    def width(v):
+        w = v.get("sigma_ch") if isinstance(v, dict) else None
+        return float(w) if isinstance(w, (int, float)) and not isinstance(w, bool) and np.isfinite(w) and w > 0 \
+            else None
+    meta = data.get("_meta") if isinstance(data.get("_meta"), dict) else {}
+    ns = meta.get("n_sigma")
+    n_sigma = float(ns) if isinstance(ns, (int, float)) and not isinstance(ns, bool) and np.isfinite(ns) and ns > 0 \
+        else N_SIGMA
+    own = width(data.get(label))
+    others = [w for k, v in data.items() if not str(k).startswith("_") for w in [width(v)] if w is not None]
     if own is not None:
         sig, src = float(own), f"the fitted width of {label} in roi_bins.json"
     elif others:
         sig, src = float(np.median(others)), "the median fitted width of the lines in roi_bins.json"
     else:
         sig, src = SIGMA_CH_TYPICAL, "sgm_report's typical width (3.5 channels)"
-    gain = float(np.mean([calibration.data[d]["gain"] for d in DETS]))
-    half = n_sigma * sig * gain
-    windows = {d: [int(a), int(b)] for d in DETS for a, b in [calibration.bounds(d, ev - half, ev + half)]}
+    windows = {}
+    for d in DETS:
+        c = float(calibration.ch(d, ev))
+        windows[d] = [int(max(0, np.floor(c - n_sigma * sig))), int(min(N_CH, np.ceil(c + n_sigma * sig)))]
     return EdgeLine(label=label, line_ev=ev, windows=normalise_windows(windows), sigma_ch=sig, n_sigma=n_sigma,
                     sigma_source=src, nominal=not calibrated)
+
+
+def john_default_windows(edge) -> tuple[str, dict[str, list[int]]] | None:
+    """John Bussey's default step-2 window, JOHN_DEFAULT on every detector, and the resonant line of the edge it holds
+    at the nominal 10 eV per channel (F K: F Kα, 676.8 eV, channel 67.7): (line label, windows). None when the window
+    does not hold that line (O Kα, 524.9 eV, is channel 52)."""
+    if edge is None:
+        return None
+    from aurora.core.constants import UNCALIBRATED_EV_PER_CH
+    from aurora.core.lines import resonant_line
+    label = resonant_line(*edge)
+    ev = emission_line_ev(label)
+    if ev is None or not JOHN_DEFAULT[0] * UNCALIBRATED_EV_PER_CH <= ev < JOHN_DEFAULT[1] * UNCALIBRATED_EV_PER_CH:
+        return None
+    return label, {d: list(JOHN_DEFAULT) for d in DETS}
 
 
 def channel_ev(calibration, det: str, ch: float) -> float:

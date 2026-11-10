@@ -27,8 +27,10 @@ Extension points, so several perspectives share this state without editing this 
   notifies, records one undo step (repeats of the same description within 1.5 s merge), marks the session dirty and
   schedules the autosave. Pass holder=ALL_HOLDERS when an edit changes several holders;
 - ui_value / set_ui_value: view memory saved with the session ('ui' block);
-- check_queue, queue_for_check and check_queue_changed: the Easy 'Spectra to check' queue;
-- add_flag_source(fn(scan) -> [Flag]) and flags_of(scan): scan flags beyond the sgm_report summary;
+- check_queue, queue_for_check and check_queue_changed: the Easy 'Spectra to check' queue (saved with the session,
+  kept by Reload);
+- add_flag_source(fn(scan) -> [Flag]) and flags_of(scan): scan flags beyond the sgm_report summary; a source with
+  new results calls follow_new_flags(before), which moves the flag-driven defaults of existing settings;
 - add_settings_default(fn(scan, ScanSettings)): defaults applied to every new zone x scan settings;
 - flush(), save_state(str) and read_only for the save indicator; undo_stack, undo(), redo();
 - confirm_leave(action), release_lock() and the `warned` signal (a non-modal message: read-only, a foreign change);
@@ -89,6 +91,8 @@ _STAMP_FMT = "%Y%m%d-%H%M%S"
 IMPORT_POLICIES = ("merge", "replace", "skip")
 SAMPLE_SHEET_KEY = "sample_sheet"       # ui value: the sample sheet chosen with File > Choose sample sheet… (relative)
 UNDOABLE_UI = (SAMPLE_SHEET_KEY,)       # ui values an edit records for undo (the others are view memory)
+DEFAULT_LABEL = re.compile(r"^zone \d+$")      # the label new_zone gives a zone without one ('zone 3')
+QUEUE_KEY = "check_queue"               # ui block: the Easy check queue, [[holder key, zone id, sid], ...]
 
 
 @dataclass(frozen=True)
@@ -225,6 +229,7 @@ class Session(QObject):
     warned = Signal(str, str)               # (title, text): opened read-only, the lock taken over, a foreign change
     sheet_changed = Signal()                # the sample sheet was chosen, written or read again (sheet_rows changed)
     config_changed = Signal()               # AURORA wrote a configuration file (a fixed line, a calibration)
+    flags_changed = Signal(list)            # sids whose flags a flag source may have changed (follow_new_flags)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -316,7 +321,7 @@ class Session(QObject):
         self.current_holder = next(iter(self.holder_keys), None)
         self.current_zone = None
         self.current_stack = None
-        self._clear_queue()
+        self.check_queue = self.ui_items(QUEUE_KEY)
         self._build_coords()
         self._attach_all()
         self._known_sig = self._signature()
@@ -332,6 +337,7 @@ class Session(QObject):
     def _reload(self, project: Project) -> None:
         keep_holder, keep_zone, keep_stack = self.current_holder, self.current_zone, self.current_stack
         old_keys = dict(self.holder_keys)
+        old_flags = {self.stack_id(s): self.flags_of(s) for k in old_keys for s in self.stacks_of(k)}
         self.project = project
         self.holder_keys = self._keys_for(project, {**self._file_preferences(),
                                                     **{(day, h.name): k for k, (day, h) in old_keys.items()}})
@@ -363,7 +369,6 @@ class Session(QObject):
         same = self.current_holder == keep_holder
         self.current_zone = keep_zone if same and keep_zone is not None and self.zone(keep_zone) is not None else None
         self.current_stack = keep_stack if keep_stack in self._stacks and self.current_holder == keep_holder else None
-        self._clear_queue()
         self._coords.clear(); self._fresh.clear()
         self._build_coords()
         self._attach_all()
@@ -380,6 +385,7 @@ class Session(QObject):
             self.select_stack(stack)
         self.zone_selected.emit(self.zone() if self.current_zone is not None else None)
         self.reloaded.emit(stack or "")
+        self.follow_new_flags(old_flags)            # an sgm_report summary written since flags the scans
         self.save_state.emit(self._idle_state())
         if notice:
             self.status.emit(notice)
@@ -445,10 +451,21 @@ class Session(QObject):
         self.status.emit(f"sample sheet: {name}, {len(self.sheet_rows)} samples")
         return True
 
-    def _clear_queue(self) -> None:
-        if self.check_queue:
-            self.check_queue = []
-            self.check_queue_changed.emit()
+    def ui_items(self, key: str) -> list[CheckItem]:
+        """CheckItems saved in the ui block as [[holder key, zone id, sid], ...] (the check queue under 'check_queue');
+        malformed entries are skipped."""
+        out: list[CheckItem] = []
+        for row in self.zones.ui.get(key) or []:
+            try:
+                it = CheckItem(str(row[0]), int(row[1]), str(row[2]))
+            except (TypeError, ValueError, IndexError, KeyError):
+                continue
+            if it not in out:
+                out.append(it)
+        return out
+
+    def _store_queue(self) -> None:
+        self.set_ui_value(QUEUE_KEY, [[it.holder, it.zone_id, it.sid] for it in self.check_queue])
 
     @staticmethod
     def _keys_for(project: Project, prefer: dict[tuple[str, str], str]) -> dict[str, tuple[str, Holder]]:
@@ -1249,6 +1266,7 @@ class Session(QObject):
                 self.check_queue.append(it)
                 added += 1
         if added:
+            self._store_queue()
             self.check_queue_changed.emit()
         return added
 
@@ -1259,6 +1277,7 @@ class Session(QObject):
         self.check_queue = [it for it in self.check_queue if it not in gone]
         n = before - len(self.check_queue)
         if n:
+            self._store_queue()
             self.check_queue_changed.emit()
         return n
 
@@ -1283,6 +1302,52 @@ class Session(QObject):
                 if f not in out:
                     out.append(f)
         return out
+
+    def follow_new_flags(self, before: dict) -> int:
+        """A flag source has new results (AURORA's check of a beamtime without an sgm_report summary, usually after
+        the zones were drawn). `before`: sid -> the scan's flags before them. The fields of the defaults that follow
+        the flags (mode.flag_defaults: saturated SDDs off, the good-I0 mean for an invalid I0) move with them in every
+        zone x scan settings of those stacks whose field is not pinned and still holds the default of the old flags.
+        One edit (one undo step) and a status line; flags_changed is emitted in every case. Returns the number of
+        fields changed."""
+        from aurora.app.mode import flag_defaults
+        from aurora.app.vocab import plural
+        from aurora.core.names import short_time
+        changes, words = [], []
+        for sid, old in before.items():
+            scan = self.scan_of(sid)
+            if scan is None:
+                continue
+            a, b = flag_defaults(old), flag_defaults(self.flags_of(scan))
+            if a == b:
+                continue
+            for hz in self.zones.holders.values():
+                for z in hz.zones:
+                    st = z.settings.get(sid)
+                    if st is None:
+                        continue
+                    for attr, pin in (("sdd", "sdd"), ("i0_source", "i0src")):
+                        cur = list(st.sdd) if attr == "sdd" else st.i0_source
+                        if a[attr] == b[attr] or pin in st.pinned or cur != a[attr]:
+                            continue
+                        changes.append((st, attr, b[attr]))
+                        if attr == "sdd":
+                            out = [f"SDD{i + 1}" for i, (x, y) in enumerate(zip(a["sdd"], b["sdd"])) if x and not y]
+                            back = [f"SDD{i + 1}" for i, (x, y) in enumerate(zip(a["sdd"], b["sdd"])) if y and not x]
+                            w = "; ".join(([f"{', '.join(out)} off (flagged saturated)"] if out else [])
+                                          + ([f"{', '.join(back)} back in the sum"] if back else []))
+                        else:
+                            w = "good-I0 mean (I0 flagged invalid)" if b[attr] == "good" else "own I0 again"
+                        words.append(f"{z.label} on {short_time(sid) or split_stack_id(sid)[1]}: {w}")
+        if changes:
+            with self.edit(f"follow the new scan flags ({plural(len(changes), 'field')})", holder=ALL_HOLDERS):
+                for st, attr, value in changes:
+                    setattr(st, attr, list(value) if attr == "sdd" else value)
+            text = "; ".join(words) if len(words) <= 3 else \
+                f"{plural(len(changes), 'setting')} follow the new scan flags (saturated SDDs, I0 invalid)"
+            self.status.emit(native_text(f"{text} · Ctrl+Z to undo"))
+        self.flags_changed.emit(sorted(before))
+        return len(changes)
 
     def add_settings_default(self, fn) -> None:
         """Register fn(scan, ScanSettings) -> None, applied in order to every new zone x scan settings."""
