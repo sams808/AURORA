@@ -185,6 +185,22 @@ def test_line_of_the_edge_needs_a_calibration():
     assert typical.sigma_ch == xw.SIGMA_CH_TYPICAL and "typical" in typical.sigma_source
 
 
+def test_line_of_the_edge_is_sgm_reports_rule_per_detector():
+    """sgm_report's RoiBins.ensure puts each detector's window at its own calibrated channel c, floor(c - 1.5 sigma) to
+    ceil(c + 1.5 sigma) in that detector's channels. With the 2026 beamtime's calibration and fitted widths the preset
+    gives exactly the bins sgm_report wrote into config/roi_bins.json (it was one channel off on SDD1 / SDD4 when the
+    width went through the mean gain)."""
+    from aurora.core.io.config import Calibration, RoiBins
+    cal = Calibration(data={"sdd1": {"gain": 10.0581, "offset": 3.8575}, "sdd2": {"gain": 9.3976, "offset": -3.6391},
+                            "sdd3": {"gain": 9.8516, "offset": -1.2982}, "sdd4": {"gain": 10.09, "offset": 7.854}})
+    bins = RoiBins(data={"_meta": {"n_sigma": 1.5}, "F Kα": {"sigma_ch": 4.5}, "O Kα": {"sigma_ch": 3.52}})
+    written = {"F Kα": {"sdd1": [60, 74], "sdd2": [65, 80], "sdd3": [62, 76], "sdd4": [59, 74]},       # roi_bins.json
+               "O Kα": {"sdd1": [46, 58], "sdd2": [50, 62], "sdd3": [48, 59], "sdd4": [45, 57]}}
+    for edge, line in ((("F", "K"), "F Kα"), (("O", "K"), "O Kα")):
+        el = xw.edge_line_windows(edge, cal, bins)
+        assert el.label == line and el.windows == written[line], (line, el.windows)
+
+
 @pytest.mark.skipif(JOHN is None, reason="John Bussey's GUI folder (legacy/CLS_GUI_JohnBussey) is not available")
 def test_john_windows_and_polygon_reproduce_his_full_reduced_csv():
     from aurora.core.io.h5 import xy

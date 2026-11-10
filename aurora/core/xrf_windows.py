@@ -148,8 +148,9 @@ class EdgeLine:
 
 
 def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
-    """The preset 'line of the edge': the resonant emission line of the edge (xraydb), centre ± n_sigma σ converted to
-    channels with Calibration.bounds, the rule of sgm_report's fixed bins. σ is the line's own fitted width in
+    """The preset 'line of the edge': the resonant emission line of the edge (xraydb) at each detector's calibrated
+    channel c, floor(c - n_sigma σ) to ceil(c + n_sigma σ) in that detector's channels: the rule of sgm_report's
+    fixed bins (RoiBins.ensure), so a line of roi_bins.json gets its own bins back. σ is the line's own fitted width in
     roi_bins.json when it has one, else the median width of the other fitted lines, else sgm_report's typical 3.5
     channels; n_sigma is roi_bins' (1.5). None without a calibration (the channels would be nominal) or an edge."""
     if edge is None or calibration is None or not getattr(calibration, "calibrated", False):
@@ -170,9 +171,10 @@ def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
         sig, src = float(np.median(others)), "the median fitted width of the lines in roi_bins.json"
     else:
         sig, src = SIGMA_CH_TYPICAL, "sgm_report's typical width (3.5 channels)"
-    gain = float(np.mean([calibration.data[d]["gain"] for d in DETS]))
-    half = n_sigma * sig * gain
-    windows = {d: [int(a), int(b)] for d in DETS for a, b in [calibration.bounds(d, ev - half, ev + half)]}
+    windows = {}
+    for d in DETS:
+        c = float(calibration.ch(d, ev))
+        windows[d] = [int(max(0, np.floor(c - n_sigma * sig))), int(min(N_CH, np.ceil(c + n_sigma * sig)))]
     return EdgeLine(label=label, line_ev=ev, windows=normalise_windows(windows), sigma_ch=sig, n_sigma=n_sigma,
                     sigma_source=src)
 
