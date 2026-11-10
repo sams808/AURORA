@@ -19,10 +19,10 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPen, QPolygonF
-from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem
+from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen, QPolygonF
+from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsPolygonItem, QGraphicsRectItem
 
-from aurora.app.theme import MAP_OVERLAY, TOKENS, style_plot, with_alpha
+from aurora.app.theme import MAP_OVERLAY, TOKENS, map_casing, style_plot, with_alpha
 from aurora.core.grid import Grid
 from aurora.core.io.config import Zone
 
@@ -419,9 +419,30 @@ class MapView(pg.GraphicsLayoutWidget):
         self._zones.clear()
         self.selected_zone = None
 
+    def add_casing(self, path: QPainterPath, colour: str, width: float, z: float = 10) -> None:
+        """The casing of an outline in `colour`, `width` px wide, along `path` (mm), just below it: a dark stroke 2 px
+        wider over a rim of its hue 4 px wider (theme.map_casing), so it reads on the dark, mid and bright tones."""
+        if path.isEmpty():
+            return
+        for k, (col, extra) in enumerate(map_casing(colour)):
+            it = QGraphicsPathItem(path)
+            pen = QPen(QColor(col), width + extra)
+            pen.setCosmetic(True)
+            pen.setJoinStyle(Qt.MiterJoin)
+            it.setPen(pen)
+            it.setBrush(QBrush(Qt.NoBrush))
+            it.setZValue(z - 0.5 + 0.1 * k)                # under every outline of its level, the rim lowest
+            self.plot.addItem(it, ignoreBounds=True)
+            self._overlays.append(it)
+
     def add_rect(self, x0: float, x1: float, y0: float, y1: float, colour: str, width: float = 1.5,
-                 dashed: bool = False, fill=None, z: int = 10, style=None) -> QGraphicsRectItem:
-        """An outlined rectangle in mm. `fill` is a QColor (with alpha) or a colour string; `style` a Qt pen style."""
+                 dashed: bool = False, fill=None, z: int = 10, style=None, casing: bool = True) -> QGraphicsRectItem:
+        """An outlined rectangle in mm over its casing. `fill` is a QColor (with alpha) or a colour string; `style` a
+        Qt pen style."""
+        if casing:
+            path = QPainterPath()
+            path.addRect(QRectF(x0, y0, x1 - x0, y1 - y0))
+            self.add_casing(path, colour, width, z)
         it = QGraphicsRectItem(QRectF(x0, y0, x1 - x0, y1 - y0))
         pen = QPen(QColor(colour), width)
         pen.setCosmetic(True)
@@ -436,9 +457,16 @@ class MapView(pg.GraphicsLayoutWidget):
         self._overlays.append(it)
         return it
 
-    def add_polygon(self, pts, colour: str, width: float = 1.5, fill=None, z: int = 10) -> QGraphicsPolygonItem:
-        """An outlined polygon [[x, y], ...] in mm."""
-        it = QGraphicsPolygonItem(QPolygonF([QPointF(float(p[0]), float(p[1])) for p in pts]))
+    def add_polygon(self, pts, colour: str, width: float = 1.5, fill=None, z: int = 10,
+                    casing: bool = True) -> QGraphicsPolygonItem:
+        """An outlined polygon [[x, y], ...] in mm over its casing."""
+        poly = QPolygonF([QPointF(float(p[0]), float(p[1])) for p in pts])
+        if casing:
+            path = QPainterPath()
+            path.addPolygon(poly)
+            path.closeSubpath()
+            self.add_casing(path, colour, width, z)
+        it = QGraphicsPolygonItem(poly)
         pen = QPen(QColor(colour), width)
         pen.setCosmetic(True)
         it.setPen(pen)
@@ -465,18 +493,22 @@ class MapView(pg.GraphicsLayoutWidget):
             self.selected_zone = zone.id
         w = 2.5 if selected else 1.2
         erase = MAP_OVERLAY["erase"]
+        self.add_casing(_union(zone.rects, zone.polys, zone.paint), colour, w)        # one casing round the zone
+        self.add_casing(_union(zone.erects, [], zone.erase), erase, 1.0)
         for r in zone.rects:
-            self.add_rect(r[0], r[1], r[2], r[3], colour, w, fill=with_alpha(colour, 0.19) if selected else None)
+            self.add_rect(r[0], r[1], r[2], r[3], colour, w, fill=with_alpha(colour, 0.19) if selected else None,
+                          casing=False)
         for poly in zone.polys:
             if len(poly) >= 3:
-                self.add_polygon(poly, colour, w, fill=with_alpha(colour, 0.19) if selected else None)
+                self.add_polygon(poly, colour, w, fill=with_alpha(colour, 0.19) if selected else None, casing=False)
         for r in zone.erects:
-            self.add_rect(r[0], r[1], r[2], r[3], erase, 1.0, dashed=True)
+            self.add_rect(r[0], r[1], r[2], r[3], erase, 1.0, dashed=True, casing=False)
         for s in zone.paint:
             self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, colour, w,
-                          fill=with_alpha(colour, 0.31 if selected else 0.15))
+                          fill=with_alpha(colour, 0.31 if selected else 0.15), casing=False)
         for s in zone.erase:
-            self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, erase, 1.0, dashed=True)
+            self.add_rect(s[0] - s[2] / 2, s[0] + s[2] / 2, s[1] - s[3] / 2, s[1] + s[3] / 2, erase, 1.0, dashed=True,
+                          casing=False)
         if label:
             pts = [(r[0], r[3]) for r in zone.rects] + [(s[0] - s[2] / 2, s[1] + s[3] / 2) for s in zone.paint]
             pts += [(min(p[0] for p in poly), max(p[1] for p in poly)) for poly in zone.polys if poly]
@@ -485,13 +517,37 @@ class MapView(pg.GraphicsLayoutWidget):
                 self.add_label(x, y, zone.label, colour)
 
     def draw_pixels(self, x: np.ndarray, y: np.ndarray, pitch: tuple[float, float], colour: str) -> None:
-        """Outline every pixel square (used to show the members of a zone on the stack map)."""
+        """Outline every pixel square (used to show the members of a zone on the stack map); no casing, which would
+        draw a dark grid over the pixels."""
         px, py = pitch
         for xi, yi in zip(x, y):
-            self.add_rect(xi - px / 2, xi + px / 2, yi - py / 2, yi + py / 2, colour, 0.8, z=5)
+            self.add_rect(xi - px / 2, xi + px / 2, yi - py / 2, yi + py / 2, colour, 0.8, z=5, casing=False)
 
     def _moved(self, pos) -> None:
         if self.plot.sceneBoundingRect().contains(pos):
             p = self.vb.mapSceneToView(pos)
             self.vb.hover(float(p.x()), float(p.y()))
             self.hovered.emit(float(p.x()), float(p.y()))
+
+
+def _union(rects, polys, squares) -> QPainterPath:
+    """The outline of a zone's rectangles [x0, x1, y0, y1], polygons and painted squares [cx, cy, w, h] (mm) as one
+    path: its casing follows the zone's edge, not every square inside it. A square counts out to PAINT_TOL of its size
+    (the membership rule), so the small gaps of a jittered grid close."""
+    from aurora.core.zones import PAINT_TOL
+    path = QPainterPath()
+    path.setFillRule(Qt.WindingFill)                 # a place covered twice is inside (the union), not a hole
+    for r in rects:
+        path.addRect(QRectF(r[0], r[2], r[1] - r[0], r[3] - r[2]))
+    for poly in polys:
+        if len(poly) >= 3:
+            a = np.asarray(poly, float)[:, :2]
+            area = float(np.dot(a[:, 0], np.roll(a[:, 1], -1)) - np.dot(a[:, 1], np.roll(a[:, 0], -1)))
+            if area < 0:
+                a = a[::-1]                          # turned like addRect's rectangles, so the windings add up
+            path.addPolygon(QPolygonF([QPointF(float(x), float(y)) for x, y in a]))
+            path.closeSubpath()
+    for s in squares:
+        hx, hy = s[2] * PAINT_TOL, s[3] * PAINT_TOL
+        path.addRect(QRectF(s[0] - hx, s[1] - hy, 2 * hx, 2 * hy))
+    return path.simplified() if path.elementCount() else path

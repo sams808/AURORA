@@ -13,6 +13,7 @@ constants):
     categorical(n)              up to 20 colours for categorical maps (clusters)
     pc(role) / role_pen(role)   semantic plot colours ('ink', 'fit', 'resid', 'i0', 'good', 'tey', 'spike', 'edge', ...)
     readable(colour, bg)        the colour, lightened or darkened until it reads on bg
+    map_casing(colour)          the dark stroke and the rim under a map outline (it reads on any colour map)
     make_plot / style_plot      create or theme a pyqtgraph widget now and on every change
     swatch_icon, status_brush, status_text, status_icon, set_item_tone, refill_tones, set_tone
     on_theme_changed(owner, fn) call fn(scheme) after every theme change while `owner` lives
@@ -76,6 +77,7 @@ MAP_OVERLAY = {
     "erase": "#FF7B7B",          # erase squares, rect- rubber band and erase rectangles
     "roi": "#38E0C2",            # ROI outline
 }
+MAP_CASING_RIM = 10.0            # the rim of a map outline's casing (map_casing): its colour at 10:1 on map_bg
 FOOTPRINTS = {                   # scan footprints on the survey map: colour and its own dash (plus a legend entry)
     "complete": ("#F2A65A", Qt.SolidLine),
     "aborted": ("#FF5555", Qt.DashLine),
@@ -159,6 +161,14 @@ def readable(colour: str | None, bg: str | None = None, min_ratio: float = 3.0) 
         if contrast(out, bg) >= min_ratio:
             return out
     return TOKENS["plot_fg"]
+
+
+def map_casing(colour: str) -> list[tuple[str, float]]:
+    """The strokes under a map outline in `colour` (footprints, zones, the grid preview), outermost first, as (colour,
+    px wider than the line): a rim of the same hue lightened to MAP_CASING_RIM on map_bg, then map_bg. The dark stroke
+    reads on the bright and mid tones of a colour map, the rim on its dark tones, so every overlay colour reaches 3:1
+    on every colour of every map colour map (tests/test_theme.py); one dark or light halo alone leaves the mid tones."""
+    return [(readable(colour, TOKENS["map_bg"], MAP_CASING_RIM), 4.0), (TOKENS["map_bg"], 2.0)]
 
 
 def _srgb_to_lin(v: float) -> float:
