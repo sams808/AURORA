@@ -3,14 +3,21 @@
 The map stays navy in both schemes (theme 'map' kind), so colour maps look the same in light and dark. Overlay
 colours come from theme.MAP_OVERLAY / theme.FOOTPRINTS / theme.CURVES; the colour map follows Settings > map colour map.
 
-Tools: navigate (pan, wheel zoom), rect+ / rect- (drag a rectangle), brush+ / brush- (paint or erase pixels), lasso+
-(freehand polygon, a vertex every ~0.5 pitch, closed on release, Esc cancels) and polygon+ (click the vertices,
-double-click closes, Esc cancels). A zone editor opts in to the zone-aware mouse rules with set_zone_tools(True):
+Tools are a shape and a mode (tool_name / split_tool): navigate (pan, wheel zoom), rect+ / rect- (drag a rectangle),
+brush+ / brush- (paint or erase points along the drag), lasso+ / lasso- (freehand outline, a vertex every ~0.5 pitch,
+closed on release) and polygon+ / polygon- (click the vertices, double-click closes). Every gesture is a stroke
+(aurora.core.zones.Stroke): stroke_started, stroke_changed while it moves, then stroke_finished at release or
+stroke_cancelled (Esc, Ctrl+Z, a stray drag, a tool change). The legacy signals rect_drawn, brush_at and polygon_drawn
+are still emitted for the maps that use them (Maps' ROI, Survey's Grid of zones); while they are emitted by a stroke,
+stroke_emitting() is True, so a zone editor that handles the strokes can tell them from the same signals emitted by
+code (scripts, the self-test). A zone editor opts in to the zone-aware mouse rules with set_zone_tools(True):
 - a plain click inside a zone other than the selected one selects it (the smallest zone wins where zones overlap):
   zone_clicked(id);
-- a plain click outside every zone, or a Shift+click, applies the tool to the pixel under it;
+- a plain click outside every zone, or a Shift+click, applies the tool to the pixel under it (a 'pixel' stroke);
+- a right-drag, or a drag started with Shift held, applies the opposite mode (Draw <-> Erase) with the same shape;
 - a drag shorter than 0.5 pitch is a stray drag and is ignored (set_points gives the pitch);
 - a right-click emits context_requested(x, y, zone id or None) for the caller's menu.
+Esc (and Ctrl+Z) during a stroke cancels it before any window shortcut sees the key.
 Without it (Survey, Maps) the map behaves as it always did; set_context_menus(True) alone gives a map the right-click
 signal (Survey can reuse Reduce's zone menu).
 """
@@ -19,33 +26,64 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsPolygonItem, QGraphicsRectItem
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QPainterPath, QPen, QPolygonF
+from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsPolygonItem, QGraphicsRectItem, QLabel
 
 from aurora.app.theme import MAP_OVERLAY, TOKENS, map_casing, style_plot, with_alpha
 from aurora.core.grid import Grid
 from aurora.core.io.config import Zone
+from aurora.core.zones import Stroke, interpolate_path
 
-TOOLS = ("navigate", "rect+", "rect-", "brush+", "brush-", "lasso+", "polygon+")
-ADD_TOOLS = ("rect+", "brush+", "lasso+", "polygon+")
+TOOLS = ("navigate", "rect+", "rect-", "brush+", "brush-", "lasso+", "polygon+", "lasso-", "polygon-")
+ADD_TOOLS = ("rect+", "brush+", "lasso+", "polygon+")       # the Draw tools (the others erase, or navigate)
+SHAPES = ("navigate", "rect", "brush", "lasso", "polygon")
 STRAY_PITCH = 0.5                 # drags shorter than this many pitches are ignored
 LASSO_STEP_PITCH = 0.5            # a lasso vertex every ~0.5 pitch
 
 
+def tool_name(shape: str, erase: bool = False) -> str:
+    """The tool string of a shape and a mode: ('rect', True) -> 'rect-', ('navigate', any) -> 'navigate'."""
+    if shape == "navigate":
+        return "navigate"
+    if shape not in SHAPES:
+        raise ValueError(f"unknown tool shape {shape!r}")
+    return f"{shape}{'-' if erase else '+'}"
+
+
+def split_tool(tool: str) -> tuple[str, bool]:
+    """(shape, erase) of a tool string: 'lasso-' -> ('lasso', True), 'navigate' -> ('navigate', False)."""
+    if tool == "navigate":
+        return "navigate", False
+    if tool not in TOOLS:
+        raise ValueError(f"unknown tool {tool!r}")
+    return tool[:-1], tool.endswith("-")
+
+
+def _modifiers(ev):
+    """The keyboard modifiers of a pyqtgraph mouse event (Qt.NoModifier for an event without them)."""
+    return getattr(ev, "modifiers", lambda: Qt.NoModifier)()
+
+
 class _ToolViewBox(pg.ViewBox):
-    """ViewBox whose left-button drag draws a rectangle, paints or traces a lasso, depending on the tool; pans
-    otherwise. With zone tools on, clicks follow the zone-aware rules of the module docstring."""
+    """ViewBox whose left-button drag draws a rectangle, paints or traces a lasso, depending on the tool (the right
+    button and Shift invert the mode on a zone map); pans otherwise. With zone tools on, clicks follow the zone-aware
+    rules of the module docstring."""
     rect_drawn = Signal(float, float, float, float)     # x0, x1, y0, y1 (mm)
     brush_at = Signal(float, float, bool)               # x, y, add (True) / erase (False)
     clicked = Signal(float, float)
     polygon_drawn = Signal(object)                      # [[x, y], ...] mm, closed
     zone_clicked = Signal(int)                          # a click selects this zone
     context_requested = Signal(float, float, object)    # x, y, zone id or None
+    stroke_started = Signal(object)                     # Stroke
+    stroke_changed = Signal(object)                     # Stroke (the same object, grown)
+    stroke_finished = Signal(object)                    # Stroke (finished=True)
+    stroke_cancelled = Signal()
 
     def __init__(self):
         super().__init__(enableMenu=False)
         self.tool = "navigate"
         self.owner = None                               # the MapView (zone hit tests, pitch)
+        self.brush_n = 1                                # the brush covers brush_n x brush_n points
         self._rubber = QGraphicsRectItem()
         self._rubber.setPen(QPen(QColor(MAP_OVERLAY["rect_add"]), 0, Qt.DashLine))
         self._rubber.setZValue(50)
@@ -55,9 +93,11 @@ class _ToolViewBox(pg.ViewBox):
         self._trace.setZValue(55)
         self.addItem(self._trace, ignoreBounds=True)
         self.path: list[list[float]] = []               # lasso / polygon vertices in progress
-        self._drawing = ""                              # '' | 'lasso' | 'polygon'
-        self._cancelled = False
+        self._stroke: Stroke | None = None              # the stroke in progress
+        self._serial = 0
+        self._cancelled = False                         # the rest of this drag is ignored (Esc)
         self._drag_far = False
+        self._emitting = False                          # a legacy signal is being emitted by a stroke
 
     # ------------------------------------------------------------------ helpers
     def _pitch(self):
@@ -74,11 +114,29 @@ class _ToolViewBox(pg.ViewBox):
         return bool(getattr(self.owner, "zone_tools", False))
 
     def drawing(self) -> str:
-        return self._drawing
+        """The shape of the stroke in progress ('rect', 'brush', 'lasso', 'polygon'), '' when none."""
+        return self._stroke.shape if self._stroke is not None else ""
+
+    def stroke(self) -> Stroke | None:
+        return self._stroke
+
+    def emitting(self) -> bool:
+        return self._emitting
+
+    def _legacy(self, signal, *args) -> None:
+        """Emit a legacy signal on behalf of a stroke (stroke_emitting() is True meanwhile)."""
+        self._emitting = True
+        try:
+            signal.emit(*args)
+        finally:
+            self._emitting = False
+
+    def _colour(self, erase: bool) -> tuple[str, Qt.PenStyle]:
+        return (MAP_OVERLAY["erase"], Qt.DashLine) if erase else (MAP_OVERLAY["rect_add"], Qt.DashLine)
 
     def _show_trace(self, extra=None) -> None:
         pts = self.path + ([extra] if extra is not None else [])
-        if self._drawing == "lasso" and len(pts) > 2:
+        if self.drawing() == "lasso" and len(pts) > 2:
             pts = pts + [pts[0]]
         if pts:
             a = np.asarray(pts, float)
@@ -86,96 +144,172 @@ class _ToolViewBox(pg.ViewBox):
         else:
             self._trace.setData([], [])
 
-    def cancel_path(self) -> bool:
-        """Esc: drop the lasso or polygon in progress. True when there was one."""
-        had = bool(self._drawing)
+    def _begin(self, shape: str, erase: bool, x: float, y: float) -> Stroke:
+        self._serial += 1
+        st = Stroke(shape=shape, erase=bool(erase), start=(float(x), float(y)), brush_n=int(self.brush_n),
+                    serial=self._serial)
+        if shape == "rect":
+            st.rect = (round(x, 3), round(x, 3), round(y, 3), round(y, 3))
+        elif shape in ("brush", "lasso", "polygon"):
+            st.path = [[float(x), float(y)]]
+        if shape in ("lasso", "polygon"):
+            self.path = st.path
+        colour, style = self._colour(st.erase)
+        self._rubber.setPen(QPen(QColor(colour), 0, style))
+        self._trace.setPen(pg.mkPen(colour, width=1.5, style=style))
+        self._stroke = st
+        if self.owner is not None and self._zone_mode():
+            self.owner.setFocus(Qt.MouseFocusReason)     # Esc and Ctrl+Z reach the map during the stroke
+        self.stroke_started.emit(st)
+        return st
+
+    def _end(self) -> Stroke | None:
+        """Finish the stroke in progress: drop it from the view (the caller emits)."""
+        st, self._stroke = self._stroke, None
         self.path = []
-        if self._drawing == "lasso":
-            self._cancelled = True                      # the rest of this drag is ignored
-        self._drawing = ""
         self._show_trace()
         self._rubber.hide()
-        return had
+        if st is not None:
+            st.finished = True
+        return st
+
+    def cancel_stroke(self) -> bool:
+        """Esc (Ctrl+Z, a tool change): drop the stroke in progress, whatever its shape; the rest of its drag is
+        ignored and nothing is written. True when there was one."""
+        st = self._stroke
+        self._stroke = None
+        self.path = []
+        self._show_trace()
+        self._rubber.hide()
+        if st is None:
+            return False
+        if st.shape != "polygon":
+            self._cancelled = True                      # a drag in progress: ignore its remaining events
+        self.stroke_cancelled.emit()
+        return True
+
+    def cancel_path(self) -> bool:
+        """The name of earlier versions (Esc on a lasso or polygon): cancel_stroke."""
+        return self.cancel_stroke()
 
     def _close_polygon(self) -> None:
-        pts = self.path
-        self.path, self._drawing = [], ""
-        self._show_trace()
-        if len(pts) >= 3:
-            self.polygon_drawn.emit([[round(float(x), 4), round(float(y), 4)] for x, y in pts])
+        pts = list(self.path)
+        st = self._end()
+        if st is None:
+            return
+        if len(pts) < 3:
+            self.stroke_cancelled.emit()
+            return
+        st.path = [[round(float(x), 4), round(float(y), 4)] for x, y in pts]
+        self.stroke_finished.emit(st)
+        if not st.erase:
+            self._legacy(self.polygon_drawn, list(st.path))
 
     def hover(self, x: float, y: float) -> None:
-        if self._drawing == "polygon":
+        if self.drawing() == "polygon":
             self._show_trace([x, y])
 
     # ------------------------------------------------------------------ drags
     def mouseDragEvent(self, ev, axis=None):
-        if ev.button() != Qt.LeftButton or self.tool == "navigate":
+        button = ev.button()
+        zone = self._zone_mode()
+        if self.tool == "navigate" or button not in (Qt.LeftButton, Qt.RightButton) or \
+                (button == Qt.RightButton and not zone):
             return super().mouseDragEvent(ev, axis)
         ev.accept()
         p = self.mapToView(ev.pos())
         p0 = self.mapToView(ev.buttonDownPos())
-        zone = self._zone_mode()
         if ev.isStart():
             self._cancelled = False
             self._drag_far = False
+            shape, erase = split_tool(self.tool)
+            if shape == "polygon":
+                return                                  # vertices are clicked, not dragged
+            if zone and ((button == Qt.RightButton) != bool(_modifiers(ev) & Qt.ShiftModifier)):
+                erase = not erase                       # right button or Shift: the other mode
+            self._begin(shape, erase, float(p0.x()), float(p0.y()))
         if self._cancelled:
             if ev.isFinish():
                 self._cancelled = False
             return
-        far = self._extent(p0, p) >= STRAY_PITCH if zone else True
-        self._drag_far = self._drag_far or far
-        if self.tool.startswith("brush"):
-            if not self._drag_far:
-                return                                  # a stray drag: nothing painted
-            if zone and far and not getattr(self, "_brush_started", False):
-                self.brush_at.emit(float(p0.x()), float(p0.y()), self.tool == "brush+")
-                self._brush_started = True
-            self.brush_at.emit(float(p.x()), float(p.y()), self.tool == "brush+")
-            if ev.isFinish():
-                self._brush_started = False
+        st = self._stroke
+        if st is None or st.shape == "polygon":
             return
-        if self.tool == "lasso+":
+        far = self._extent(p0, p) >= STRAY_PITCH if zone else True
+        first_far = far and not self._drag_far
+        self._drag_far = self._drag_far or far
+        x, y = float(p.x()), float(p.y())
+        if ev.isFinish():
+            st.force_add = bool(_modifiers(ev) & Qt.ControlModifier)
+        if st.shape == "brush":
+            if self._drag_far:
+                if first_far and zone:
+                    self._legacy(self.brush_at, st.start[0], st.start[1], not st.erase)
+                st.path.extend(interpolate_path(st.path[-1], (x, y), self._pitch()))
+                self._legacy(self.brush_at, x, y, not st.erase)
+                self.stroke_changed.emit(st)
+            if ev.isFinish():
+                self._finish_drag(st)
+            return
+        if st.shape == "lasso":
             pitch = self._pitch()
             step = (LASSO_STEP_PITCH * min(pitch)) if pitch else 0.0
-            if ev.isStart() or self._drawing != "lasso":
-                self._drawing = "lasso"
-                self.path = [[float(p0.x()), float(p0.y())]]
             last = self.path[-1]
-            if np.hypot(p.x() - last[0], p.y() - last[1]) >= step:
-                self.path.append([float(p.x()), float(p.y())])
+            if np.hypot(x - last[0], y - last[1]) >= step:
+                self.path.append([x, y])
+                if self._drag_far:
+                    self.stroke_changed.emit(st)
             self._show_trace()
             if ev.isFinish():
                 if not self._drag_far or len(self.path) < 3:
-                    self.cancel_path()
+                    self.cancel_stroke()
                     self._cancelled = False
                     return
                 self._close_polygon()
             return
-        if self.tool == "polygon+":
-            return                                      # vertices are clicked, not dragged
-        r = QRectF(QPointF(min(p0.x(), p.x()), min(p0.y(), p.y())), QPointF(max(p0.x(), p.x()), max(p0.y(), p.y())))
-        colour = MAP_OVERLAY["rect_add"] if self.tool == "rect+" else MAP_OVERLAY["erase"]
-        self._rubber.setPen(QPen(QColor(colour), 0, Qt.DashLine))
+        # rectangle
+        x0, y0 = st.start
+        r = QRectF(QPointF(min(x0, x), min(y0, y)), QPointF(max(x0, x), max(y0, y)))
         self._rubber.setRect(r)
         self._rubber.show()
+        st.rect = (round(r.left(), 3), round(r.right(), 3), round(r.top(), 3), round(r.bottom(), 3))
+        if self._drag_far and not ev.isFinish():
+            self.stroke_changed.emit(st)
         if ev.isFinish():
-            self._rubber.hide()
-            if not self._drag_far:
-                return                                  # a stray drag (< 0.5 pitch): ignored
-            self.rect_drawn.emit(round(r.left(), 3), round(r.right(), 3), round(r.top(), 3), round(r.bottom(), 3))
+            self._finish_drag(st)
+
+    def _finish_drag(self, st: Stroke) -> None:
+        """Release of a rectangle or brush drag: a stray drag (< 0.5 pitch) is cancelled, any other one finished."""
+        if not self._drag_far:
+            self.cancel_stroke()
+            self._cancelled = False
+            return
+        self._end()
+        self.stroke_finished.emit(st)
+        if st.shape == "rect":
+            self._legacy(self.rect_drawn, *st.rect)
 
     # ------------------------------------------------------------------ clicks
-    def _pixel_action(self, x: float, y: float) -> None:
-        """The tool on the pixel under the click (a point rectangle, a brush square, or a polygon's first vertex)."""
-        if self.tool.startswith("brush"):
-            self.brush_at.emit(x, y, self.tool == "brush+")
-        elif self.tool == "polygon+":
-            self._drawing = "polygon"
-            self.path = [[x, y]]
+    def _pixel_action(self, x: float, y: float, mods=Qt.NoModifier) -> None:
+        """The tool on the pixel under the click (a point rectangle, a brush square, or a polygon's first vertex): a
+        'pixel' stroke, finished at once."""
+        shape, erase = split_tool(self.tool)
+        if shape == "polygon":
+            self._begin("polygon", erase, x, y)
             self._show_trace()
-        elif self.tool in ("rect+", "rect-", "lasso+"):
-            self.rect_drawn.emit(round(x, 3), round(x, 3), round(y, 3), round(y, 3))
+            return
+        i = self.owner._pixel_at(x, y) if self.owner is not None and shape != "brush" else None
+        if i is not None:                               # the pixel under the click, even on the line between two
+            x, y = float(self.owner._px[i]), float(self.owner._py[i])
+        self._serial += 1
+        st = Stroke(shape="pixel", via=shape, erase=erase, start=(x, y), rect=(round(x, 3), round(x, 3), round(y, 3),
+                    round(y, 3)), path=[[x, y]], brush_n=int(self.brush_n), finished=True, serial=self._serial,
+                    force_add=bool(mods & Qt.ControlModifier))
+        self.stroke_finished.emit(st)
+        if shape == "brush":
+            self._legacy(self.brush_at, x, y, not erase)
+        else:
+            self._legacy(self.rect_drawn, *st.rect)
 
     def mouseClickEvent(self, ev):
         p = self.mapToView(ev.pos())
@@ -187,7 +321,7 @@ class _ToolViewBox(pg.ViewBox):
             self.context_requested.emit(x, y, zid)
             return
         if ev.button() == Qt.LeftButton:
-            if self.tool == "polygon+" and self._drawing == "polygon":
+            if self.tool.startswith("polygon") and self.drawing() == "polygon":
                 ev.accept()
                 last = self.path[-1]
                 pitch = self._pitch()
@@ -198,10 +332,13 @@ class _ToolViewBox(pg.ViewBox):
                     self._close_polygon()
                 else:
                     self._show_trace()
+                    if not near and self._stroke is not None:
+                        self.stroke_changed.emit(self._stroke)
                 return
             if zone:
                 ev.accept()
-                shift = bool(ev.modifiers() & Qt.ShiftModifier)
+                mods = ev.modifiers()
+                shift = bool(mods & Qt.ShiftModifier)
                 if self.tool == "navigate":
                     zid = self.owner.zone_at(x, y) if self.owner is not None else None
                     if zid is not None and zid != self.owner.selected_zone:
@@ -210,7 +347,7 @@ class _ToolViewBox(pg.ViewBox):
                         self.clicked.emit(x, y)
                     return
                 if shift:
-                    self._pixel_action(x, y)
+                    self._pixel_action(x, y, mods)
                     return
                 zid = self.owner.zone_at(x, y) if self.owner is not None else None
                 if zid is not None and zid != self.owner.selected_zone:
@@ -219,9 +356,9 @@ class _ToolViewBox(pg.ViewBox):
                 inside_selected = zid is not None
                 if self.tool in ADD_TOOLS:
                     if not inside_selected or self.tool == "polygon+":
-                        self._pixel_action(x, y)        # outside every zone: add the pixel (or start a polygon)
-                elif inside_selected:
-                    self._pixel_action(x, y)            # an erase tool on the selected zone: erase the pixel
+                        self._pixel_action(x, y, mods)  # outside every zone: add the pixel (or start a polygon)
+                elif inside_selected or self.tool == "polygon-":
+                    self._pixel_action(x, y, mods)      # an erase tool on the selected zone: erase the pixel
                 return
             if self.tool.startswith("brush"):
                 ev.accept()
@@ -243,6 +380,10 @@ class MapView(pg.GraphicsLayoutWidget):
     polygon_drawn = Signal(object)
     zone_clicked = Signal(int)
     context_requested = Signal(float, float, object)
+    stroke_started = Signal(object)         # aurora.core.zones.Stroke
+    stroke_changed = Signal(object)
+    stroke_finished = Signal(object)
+    stroke_cancelled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -282,7 +423,16 @@ class MapView(pg.GraphicsLayoutWidget):
         self.vb.polygon_drawn.connect(self.polygon_drawn)
         self.vb.zone_clicked.connect(self.zone_clicked)
         self.vb.context_requested.connect(self.context_requested)
+        self.vb.stroke_started.connect(self.stroke_started)
+        self.vb.stroke_changed.connect(self.stroke_changed)
+        self.vb.stroke_finished.connect(self.stroke_finished)
+        self.vb.stroke_cancelled.connect(self.stroke_cancelled)
         self.scene().sigMouseMoved.connect(self._moved)
+        self._hint = QLabel(self)                                # the map hint, over the top-left of the map
+        self._hint.setObjectName("maphint")
+        self._hint.setWordWrap(True)
+        self._hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._hint.hide()
 
     # ------------------------------------------------------------------ tools
     def set_tool(self, tool: str) -> None:
@@ -309,21 +459,70 @@ class MapView(pg.GraphicsLayoutWidget):
         self._px, self._py = np.asarray(x, float), np.asarray(y, float)
         self.pitch = (float(pitch[0]), float(pitch[1]))
 
+    def set_brush_size(self, n: int) -> None:
+        """The brush covers n x n points (a stroke takes the size at its start)."""
+        self.vb.brush_n = max(1, int(n))
+
     def cancel_drawing(self) -> bool:
-        return self.vb.cancel_path()
+        """Cancel the stroke in progress (rectangle, brush, lasso or polygon); True when there was one."""
+        return self.vb.cancel_stroke()
+
+    def stroke_emitting(self) -> bool:
+        """True while rect_drawn / brush_at / polygon_drawn are emitted on behalf of a stroke (a zone editor that
+        handles stroke_finished ignores them then)."""
+        return self.vb.emitting()
+
+    @staticmethod
+    def _cancels(ev) -> bool:
+        return ev.key() == Qt.Key_Escape or ev.matches(QKeySequence.Undo)
 
     def event(self, ev):
-        # Esc ends a lasso or polygon in progress before any window shortcut (Cancel the running task) sees it
-        if ev.type() == QEvent.ShortcutOverride and ev.key() == Qt.Key_Escape and self.vb.drawing():
+        # Esc (or Ctrl+Z) during a stroke cancels it before any window shortcut (Cancel the running task, Undo) sees it
+        if ev.type() == QEvent.ShortcutOverride and self.vb.drawing() and self._cancels(ev):
             ev.accept()
             return True
         return super().event(ev)
 
     def keyPressEvent(self, ev) -> None:
-        if ev.key() == Qt.Key_Escape and self.vb.cancel_path():
+        if self.vb.drawing() and self._cancels(ev) and self.vb.cancel_stroke():
             ev.accept()
             return
         super().keyPressEvent(ev)
+
+    # ------------------------------------------------------------------ hint
+    def set_hint(self, text: str) -> None:
+        """A short sentence over the top-left of the map (what a stroke will do, why it wrote nothing); hidden when
+        empty. Screen readers get it as the map's accessible description."""
+        text = text or ""
+        if text == self._hint.text() and self._hint.isVisible() == bool(text):
+            return
+        self._hint.setText(text)
+        self.setAccessibleDescription(text)
+        if not text:
+            self._hint.hide()
+            return
+        bg = with_alpha(TOKENS["map_bg"], 0.8)
+        self._hint.setStyleSheet(f"QLabel#maphint {{ background: rgba({bg.red()}, {bg.green()}, {bg.blue()}, "
+                                 f"{bg.alpha()}); color: {TOKENS['map_fg']}; padding: 3px 6px; border-radius: 4px; }}")
+        self._place_hint()
+        self._hint.show()
+        self._hint.raise_()
+
+    def hint_text(self) -> str:
+        return self._hint.text()
+
+    def _place_hint(self) -> None:
+        w = max(120, int(0.6 * self.width()), min(self.width() - 16, 280))     # a narrow map: fewer lines
+        self._hint.setMaximumWidth(w)
+        self._hint.adjustSize()
+        vp = self.viewport().geometry()
+        self._hint.move(vp.left() + 8, vp.top() + 8)
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        hint = getattr(self, "_hint", None)              # pyqtgraph resizes the view inside its own __init__
+        if hint is not None and hint.isVisible():
+            self._place_hint()
 
     # ------------------------------------------------------------------ zones under a point
     def _pixel_at(self, x: float, y: float) -> int | None:
