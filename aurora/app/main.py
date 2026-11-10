@@ -706,9 +706,11 @@ class AuroraApplication(QApplication):
 
 
 def open_sent_path(win: MainWindow, path: Path) -> None:
-    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown."""
+    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown.
+    The discovery runs under 'discover:<n>' (home.open_path), so the one in progress is found by its prefix."""
     win.show_perspective("home")
-    job = win.jobs.job("discover")
+    reading = [k for k in win.jobs.running() if k.startswith("discover:")]
+    job = win.jobs.job(reading[-1]) if reading else None
     if job is not None:
         job.add_callbacks(on_end=lambda _state: win.home.open_path(path))
     else:

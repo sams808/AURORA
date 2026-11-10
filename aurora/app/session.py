@@ -1318,7 +1318,11 @@ class Session(QObject):
                     failed[sid] = f"{type(err).__name__}: {err}"
             return failed
 
+        gen = self._generation
+
         def done(failed: dict[str, str]) -> None:
+            if gen != self._generation:                # another project opened meanwhile: its own read follows
+                failed = {}
             for sid, why in failed.items():
                 log.warning("good-I0 stack %s left out: %s", sid, why)
             self._good_unreadable.update(failed)
