@@ -34,8 +34,8 @@ from aurora.app.session import CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, set_enabled,
-                                set_plot_hint)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, notify_saved, overlay_host, page_scroll,
+                                set_enabled, set_plot_hint)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
 from aurora.core.lines import default_signal
@@ -250,11 +250,7 @@ class CheckPerspective(QWidget):
         split.setSizes([400, 300, 420])
         # Advanced at 1200 x 760 needs more height than the window has: the page scrolls vertically instead of
         # squeezing the cards below their minimum (never sideways)
-        self.page_scroll = QScrollArea()
-        self.page_scroll.setWidget(split)
-        self.page_scroll.setWidgetResizable(True)
-        self.page_scroll.setFrameShape(QFrame.NoFrame)
-        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.page_scroll = page_scroll(split)
         self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState("No project open: the quality checks of each holder's scans appear here.",
@@ -590,8 +586,10 @@ class CheckPerspective(QWidget):
         self.i0_list.clear()
         for c in self._cands:
             tone = "ok" if c.looks_good else "warn"
-            it = QListWidgetItem(f"{c.label}   level {c.level:.3g} · step {100 * c.max_step:.1f} % · rough {100 * c.rough:.1f} % · "
-                                 f"≤0: {c.nonpos}   {status_text(tone)[0]} {'looks good' if c.looks_good else 'check'}")
+            # two lines: the scan and the verdict, then the numbers behind it (one line elided them in the middle)
+            it = QListWidgetItem(f"{c.label}   {status_text(tone)[0]} {'looks good' if c.looks_good else 'check'}\n"
+                                 f"level {c.level:.3g} · step {100 * c.max_step:.1f} % · rough {100 * c.rough:.1f} % · "
+                                 f"≤0: {c.nonpos}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if self.session.zones.good_i0.get(c.sid) else Qt.Unchecked)
             it.setData(Qt.UserRole, c.sid)

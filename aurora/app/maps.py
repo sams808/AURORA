@@ -31,11 +31,13 @@ from aurora.app import jobs, nav
 from aurora.app.help_text import explain, explain_all, labelled
 from aurora.app.mapview import MapView
 from aurora.app.session import Session
-from aurora.app.theme import (MAP_OVERLAY, TOKENS, categorical, composite, curve, dash, make_plot, on_theme_changed,
-                              pc, restyle_plot, role_pen, set_tone, style_plot, swatch_icon, with_alpha)
+from aurora.app.theme import (MAP_OVERLAY, TOKENS, categorical, composite, curve, dash, make_plot, min_height,
+                              on_theme_changed, pc, restyle_plot, role_pen, set_tone, style_plot, swatch_icon,
+                              with_alpha)
 from aurora.app.vocab import DET_LABELS, plural, unit_suffix
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_path, guarded_write,
-                                notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
+                                notify_saved, overlay_host, page_scroll, pair, remember_dir, set_enabled,
+                                set_plot_hint, size_to_current_tab)
 from aurora.core import hypercube as hcmod
 from aurora.core.compare import Spectrum
 from aurora.core.constants import DETS
@@ -204,7 +206,11 @@ class MapsPerspective(QWidget):
         self.tabs.addTab(self._elements_tab(), "Elemental maps")
         self.tabs.addTab(self._rgb_tab(), "RGB")
         self.tabs.addTab(self._cluster_tab(), "Clusters")
-        self.body = overlay_host(self.tabs)
+        # at 1200 x 760 or a larger Text size the cards need more height than the window has: the page scrolls
+        # vertically instead of squeezing the plots below their minimum
+        size_to_current_tab(self.tabs)
+        self.page_scroll = page_scroll(self.tabs)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.empty_state = EmptyState("No project open: the hypercube of any stack opens here.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
@@ -359,6 +365,7 @@ class MapsPerspective(QWidget):
         self.band.sigRegionChangeFinished.connect(self._band_moved)
         self.spec.addItem(self.band, ignoreBounds=True)
         sc.body.addWidget(self.spec, 1)
+        min_height(self.spec, 150)
         right.addWidget(sc)
         xc = Card("XANES of the ROI in the window", help_anchor="81-explore")
         self.xanes = make_plot(x="incident energy (eV)", y="window counts / I0", legend="inside")
@@ -367,6 +374,7 @@ class MapsPerspective(QWidget):
         self._e_marker = pg.InfiniteLine(angle=90, movable=False, pen=role_pen("edge", 1.0))
         self.xanes.addItem(self._e_marker, ignoreBounds=True)
         xc.body.addWidget(self.xanes, 1)
+        min_height(self.xanes, 150)
         right.addWidget(xc)
         w.addWidget(right)
         w.setSizes([700, 760])
@@ -451,6 +459,8 @@ class MapsPerspective(QWidget):
         self.merged_plot = make_plot(x="incident energy (eV)", y="ticked sum", legend="inside")
         self.merged_plot.getViewBox().disableAutoRange()
         plots.addWidget(self.merged_plot)
+        for p in (self.cluster_plot, self.merged_plot):
+            min_height(p, 150)
         plots.setSizes([320, 240])
         right.body.addWidget(plots, 1)
         w.addWidget(right)

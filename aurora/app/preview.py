@@ -1,13 +1,53 @@
 """Preview of a zone's traces: fluorescence (four SDDs + sum), TEY, I0 in three linked panels, spikes marked."""
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QVBoxLayout, QWidget
 
-from aurora.app.theme import DASH, PAL, curve, dash, on_theme_changed, pc, role_pen, style_plot, with_alpha  # noqa: F401  PAL / DASH re-exported
+from aurora.app.theme import (DASH, PAL, curve, dash, min_height, on_theme_changed, pc, role_pen,  # noqa: F401
+                              style_plot, with_alpha)                     # PAL / DASH re-exported
 from aurora.core.spectra import ZoneTraces
+
+
+class SparseAxis(pg.AxisItem):
+    """A y axis whose tick labels never print over each other on a short panel, and show at least two values where
+    they can. pyqtgraph keeps at least 2.25 major intervals whatever the height (a 56 px panel printed five labels into
+    56 px), and its step can leave a single label once the labels at the ends are dropped. Here the step moves along
+    1, 2, 2.5, 5, 10 ...: up while the labels are closer than 1.25 lines (never down to fewer than two labels), down
+    while one label only is shown (never closer than a line)."""
+
+    @staticmethod
+    def _mantissa(step: float) -> float:
+        return round(step / 10 ** math.floor(math.log10(step)), 2)
+
+    def tickSpacing(self, minVal, maxVal, size):
+        levels = super().tickSpacing(minVal, maxVal, size)
+        lo, hi = min(minVal, maxVal), max(minVal, maxVal)
+        if not levels or hi <= lo or size <= 0:
+            return levels
+        line = QFontMetricsF(self.style.get("tickFont") or QFont()).height()
+        edge = 0.5 * line * (hi - lo) / size                        # pyqtgraph drops a label this close to an end
+        count = lambda s: math.floor((hi - edge) / s) - math.ceil((lo + edge) / s) + 1      # noqa: E731  labels shown
+        pitch = lambda s: size * s / (hi - lo)                                              # noqa: E731  px apart
+        step = first = levels[0][0]
+        while pitch(step) < 1.25 * line:                            # too close: a larger step
+            nxt = step * (1.25 if self._mantissa(step) == 2 else 2.0)
+            if count(nxt) < 2:
+                break
+            step = nxt
+        while count(step) < 2:                                      # a single label: a smaller step
+            nxt = step / (1.25 if self._mantissa(step) == 2.5 else 2.0)
+            if pitch(nxt) < line:
+                break
+            step = nxt
+        if step == first:
+            return levels
+        return [(step, 0), (step / (4 if self._mantissa(step) == 2 else 5), 0)]
 
 
 class PreviewPlot(QWidget):
@@ -36,9 +76,9 @@ class PreviewPlot(QWidget):
         opts.addWidget(self.readout, 1)
         lay.addLayout(opts)
         self.gl = pg.GraphicsLayoutWidget()
-        self.top = self.gl.addPlot(row=0, col=0)
-        self.mid = self.gl.addPlot(row=1, col=0)
-        self.low = self.gl.addPlot(row=2, col=0)
+        self.top = self.gl.addPlot(row=0, col=0, axisItems={"left": SparseAxis("left")})
+        self.mid = self.gl.addPlot(row=1, col=0, axisItems={"left": SparseAxis("left")})
+        self.low = self.gl.addPlot(row=2, col=0, axisItems={"left": SparseAxis("left")})
         self.mid.setXLink(self.top)
         self.low.setXLink(self.top)
         self.top.setLabel("left", "fluorescence")
@@ -48,11 +88,14 @@ class PreviewPlot(QWidget):
         for p in (self.top, self.mid, self.low):
             p.showGrid(x=True, y=True, alpha=0.15)
             p.vb.disableAutoRange()
+        for p in (self.top, self.mid):                  # linked x: one row of energies, under the lowest panel
+            p.getAxis("bottom").setStyle(showValues=False)
         self.top.addLegend(offset=(10, 10))
         self.gl.ci.layout.setRowStretchFactor(0, 4)
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
+        min_height(self.gl, 300)                        # three panels with readable ticks (the page scrolls if needed)
         style_plot(self.gl)
         on_theme_changed(self, lambda _s: self.redraw())
         self._traces: list[tuple[str, ZoneTraces, dict]] = []

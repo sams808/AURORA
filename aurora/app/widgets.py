@@ -6,6 +6,8 @@
 - TaskBar: the progress strip of a perspective (bar, message, elapsed time, Cancel; Esc cancels).
 - EmptyState: a small card centred over a panel that says what to do next, with one or two buttons.
 - FlowLayout: a row of controls that wraps instead of clipping. ElidedLabel: a one-line label that elides.
+- page_scroll(widget): a page that scrolls vertically instead of squeezing its cards; fit_height(panel): a panel
+  never lower than its word-wrapped rows need at its width; size_to_current_tab(tabs); fit_screen(dialog, w, h).
 - set_enabled(widget, on, reason): disabled actions say why in their tooltip.
 - default_dir / remember_dir / notify_saved / guarded_write: file dialogs that start in a sensible folder, exports that
   say what they wrote, and write errors shown as one calm dialog.
@@ -21,8 +23,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, QThread, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLayout, QMainWindow, QMessageBox, QProgressBar,
-                               QPushButton, QSizePolicy, QStyle, QStyleOption, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractScrollArea, QFrame, QHBoxLayout, QLabel, QLayout, QMainWindow, QMessageBox,
+                               QProgressBar, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOption, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from aurora.core.cancel import CancelToken, Cancelled, cancellable
 
@@ -295,6 +298,13 @@ class TaskBar(QFrame):
 
 
 # ----------------------------------------------------------------------------- empty states
+# the HELP entry of an empty-state action: its tooltip says what the button does, as on the Home page (the panel's
+# sentence is already on the card)
+EMPTY_HELP = {"Open project…": "home.open", "Open the demo beamtime": "home.demo", "Read the tutorials": "home.tutorials",
+              "Retry": "home.retry", "Add saved spectra…": "compare.add_folder", "References…": "compare.references",
+              "Propose zones": "reduce.propose", "Load hypercube": "maps.load"}
+
+
 class EmptyState(QFrame):
     """A small card centred over its parent panel: an icon, one sentence and one or two buttons (the next step).
 
@@ -350,7 +360,12 @@ class EmptyState(QFrame):
             b = QPushButton(label, self)
             if k == 0:
                 b.setObjectName("primary")
-            b.setToolTip(text)
+            key = EMPTY_HELP.get(label) or ("check.run" if label.startswith("Run the checks on") else "")
+            if key:
+                from aurora.app.help_text import explain
+                explain(b, key)
+            elif label.startswith("Go to "):
+                b.setToolTip(f"Open the {label[len('Go to '):]} perspective")
             b.setAccessibleName(label.rstrip("…").strip())
             b.clicked.connect(lambda _=False, f=fn: f())
             self.row.addWidget(b)
@@ -383,15 +398,31 @@ class EmptyState(QFrame):
             self.raise_()
         else:
             self.hide()
+        self._cover_hints()
+
+    def _cover_hints(self) -> None:
+        """The plot hints under the card would peek out around it ('...rget and components, then Run LCF'): hidden
+        while the card is shown, back when it goes."""
+        p = self.parentWidget()
+        if p is None:
+            return
+        import pyqtgraph as pg
+        for plot in p.findChildren(pg.PlotWidget):
+            hint = getattr(plot.getPlotItem(), "_aurora_hint", None)
+            if hint is not None:
+                hint.setVisible(not covered(plot))
 
     def _place(self) -> None:
         p = self.parentWidget()
         if p is None:
             return
-        w = min(max(320, self.sizeHint().width()), max(200, p.width() - 24))
+        # over a table or a list: below its header row (the card hid the column titles), inside the viewport
+        area = p.viewport().geometry() if isinstance(p, QAbstractScrollArea) else p.rect()
+        w = min(max(320, self.sizeHint().width()), max(200, area.width() - 24))
         h = self.heightForWidth(w) if self.hasHeightForWidth() else self.sizeHint().height()
         h = max(h, self.sizeHint().height())
-        self.setGeometry(max(0, (p.width() - w) // 2), max(0, min((p.height() - h) // 3, 160)), w, h)
+        self.setGeometry(area.x() + max(0, (area.width() - w) // 2),
+                         area.y() + max(0, min((area.height() - h) // 3, 160)), w, h)
 
     def eventFilter(self, obj, ev) -> bool:
         if obj is self.parentWidget() and ev.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
@@ -512,6 +543,106 @@ def overlay_host(widget: QWidget) -> QWidget:
     lay.setContentsMargins(0, 0, 0, 0)
     lay.addWidget(widget)
     return host
+
+
+class PageScroll(QScrollArea):
+    """A frameless scroll area that scrolls vertically only. It is never narrower than its page's minimum width (a
+    plain QScrollArea would let a splitter cut the page on the right) and passes that minimum on when it changes."""
+
+    def __init__(self, widget: QWidget, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWidget(widget)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._min_w = -1
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        w = self.widget()
+        if w is None:
+            return hint
+        need = w.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width() + 2 * self.frameWidth()
+        return QSize(max(hint.width(), need), hint.height())
+
+    def event(self, ev) -> bool:
+        out = super().event(ev)
+        if ev.type() == QEvent.LayoutRequest and self.widget() is not None:
+            w = self.widget().minimumSizeHint().width()
+            if w != self._min_w:                    # the page's minimum width changed: tell the layout around it
+                self._min_w = w
+                self.updateGeometry()
+        return out
+
+
+def page_scroll(widget: QWidget) -> QScrollArea:
+    """`widget` in a frameless vertical scroll area: at the smallest window or the largest Text size the page scrolls
+    instead of squeezing its cards below their minimum (DESIGN.md: panels scroll, never clip; never sideways)."""
+    return PageScroll(widget)
+
+
+def fit_screen(widget: QWidget, width: int, height: int) -> None:
+    """widget.resize(width, height), but never larger than the free area of its screen (task bar and title bar
+    excluded): a dialog's buttons stay on screen at the smallest display and the largest Text size."""
+    from PySide6.QtGui import QGuiApplication
+    scr = widget.screen() or QGuiApplication.primaryScreen()
+    if scr is not None:
+        g = scr.availableGeometry()
+        width, height = min(width, g.width() - 16), min(height, g.height() - 48)
+    widget.resize(max(200, width), max(200, height))
+
+
+def size_to_current_tab(tabs) -> None:
+    """A QTabWidget as tall as its current tab needs (Qt takes the tallest of all tabs, hidden ones included), so a
+    scrolling page around it scrolls only for the tab on screen."""
+    own: dict[int, QSizePolicy.Policy] = {}
+
+    def follow(_i: int = 0) -> None:
+        for k in range(tabs.count()):
+            page = tabs.widget(k)
+            sp = page.sizePolicy()
+            own.setdefault(id(page), sp.verticalPolicy())
+            sp.setVerticalPolicy(own[id(page)] if page is tabs.currentWidget() else QSizePolicy.Ignored)
+            page.setSizePolicy(sp)
+        tabs.updateGeometry()
+    tabs.currentChanged.connect(follow)
+    follow()
+
+
+class _FitHeight(QObject):
+    """Keeps a panel's minimum height at what its layout needs at the panel's width (see fit_height)."""
+
+    def __init__(self, panel: QWidget):
+        super().__init__(panel)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(0)
+        self._timer.timeout.connect(self.refit)
+        panel.installEventFilter(self)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if obj is self.parent() and ev.type() in (QEvent.Resize, QEvent.LayoutRequest, QEvent.Show):
+            self._timer.start()                     # deferred: never re-enter the layout pass that sent the event
+        return False
+
+    def refit(self) -> None:
+        panel = self.parent()
+        lay = panel.layout() if panel is not None else None
+        if lay is None or panel.width() <= 0:
+            return
+        w = panel.width()
+        need = lay.totalMinimumHeightForWidth(w) if lay.hasHeightForWidth() else lay.totalMinimumSize().height()
+        if need > 0 and need != panel.minimumHeight():
+            panel.setMinimumHeight(need)
+
+
+def fit_height(panel: QWidget) -> QWidget:
+    """Keep `panel`'s minimum height at the height its rows need at its current width, word-wrapped labels and
+    wrapping rows included: Qt counts one line per wrapped label, so a splitter would cut the lines (or print the
+    next control over them). Returns the panel."""
+    keeper = next((ch for ch in panel.children() if isinstance(ch, _FitHeight)), None) or _FitHeight(panel)
+    keeper.refit()                                  # installed once; a later call refits at once
+    return panel
 
 
 def flow_row(*widgets: QWidget, spacing: int = 6) -> QWidget:
@@ -687,6 +818,16 @@ def guarded_write(widget: QWidget | None, label: str):
         QMessageBox.warning(widget, "Could not write", text)
 
 
+def covered(widget: QWidget) -> bool:
+    """Whether a shown EmptyState lies over `widget` (it is a child of one of the widget's ancestors)."""
+    p = widget.parentWidget()
+    while p is not None:
+        if any(isinstance(e, EmptyState) and not e.isHidden() for e in p.children()):
+            return True
+        p = p.parentWidget()
+    return False
+
+
 def set_plot_hint(plot, text: str | None) -> None:
     """An empty plot shows a muted, centred sentence instead of bare 0..1 axes; None removes it (after drawing)."""
     import pyqtgraph as pg
@@ -707,6 +848,8 @@ def set_plot_hint(plot, text: str | None) -> None:
     hint.setText(text, color=TOKENS["muted"])
     if hint.scene() is None:
         item.addItem(hint, ignoreBounds=True)
+    if isinstance(plot, QWidget):
+        hint.setVisible(not covered(plot))          # an empty-state card over the panel already says what to do
     hint.setPos(0.5, 0.5)
     for ax in ("left", "bottom"):
         item.hideAxis(ax)

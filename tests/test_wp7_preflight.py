@@ -37,8 +37,10 @@ def test_exactly_the_three_findings(tmp_path):
     assert texts["no_included"] == "'3 gamma' (N5) has no included scan, so it is left out."
     assert "covered by no zone" in texts["uncovered_stack"]
     p = plan(proj, zf)
-    assert (p.n_zones, p.n_spectra) == (2, 2) and p.totals() == "2 zones · 2 spectra · 3 warnings"
-    assert p.totals(ignored={found[0].id}) == "2 zones · 2 spectra · 2 warnings"
+    # 'ungrouped' drops no data: a note (the muted dot), counted apart from the two warnings
+    assert (p.n_zones, p.n_spectra) == (2, 2) and p.totals() == "2 zones · 2 spectra · 2 warnings · 1 note"
+    assert found[0].kind == "ungrouped" and p.totals(ignored={found[0].id}) == "2 zones · 2 spectra · 2 warnings"
+    assert p.totals(ignored={found[1].id}) == "2 zones · 2 spectra · 1 warning · 1 note"
     skipped = {z.label: z.skip for z in p.zones}
     assert skipped == {"1 alpha": "", "2 beta": "", "3 gamma": "no included scan"}
     assert list(p.by_group()) == ["Minerals", "Ungrouped"]
@@ -124,7 +126,7 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     rp = win.report
     lst = rp.preflight_list
-    assert lst.topLevelItemCount() == 3 and rp.totals.text() == "2 zones · 2 spectra · 3 warnings"
+    assert lst.topLevelItemCount() == 3 and rp.totals.text() == "2 zones · 2 spectra · 2 warnings · 1 note"
     assert rp.check_tabs.tabText(0) == "Findings (3)" and rp.check_tabs.tabText(1) == "Contents (2)"
     # the Contents tree: group ▸ holder ▸ zone, a skipped zone with the warning icon and the reason
     groups = [rp.contents.topLevelItem(i) for i in range(rp.contents.topLevelItemCount())]
@@ -177,7 +179,7 @@ def test_the_check_runs_again_after_an_edit(qapp, tmp_path, monkeypatch):
     proj = project(tmp_path)
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     rp = win.report
-    assert rp.totals.text().endswith("2 warnings")
+    assert rp.totals.text().endswith("1 warning · 1 note")
     ses = win.session
     with ses.edit("give zone 2 a group"):
         ses.holder_zones("N5").zones[1].group = "Minerals"

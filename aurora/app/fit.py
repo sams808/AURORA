@@ -23,10 +23,11 @@ from aurora.app.help import set_help_anchor
 from aurora.app.help_text import HELP, explain, explain_all, header_tips, labelled
 from aurora.app.library import Library
 from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy
-from aurora.app.theme import curve, dash, make_plot, on_theme_changed, role_pen
+from aurora.app.theme import curve, dash, make_plot, min_height, on_theme_changed, role_pen
 from aurora.app.vocab import plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, default_path,
-                                guarded_write, notify_saved, overlay_host, pair, remember_dir, set_enabled, set_plot_hint)
+                                fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair, remember_dir,
+                                set_enabled, set_plot_hint, size_to_current_tab)
 from aurora.core.fit import (LcfResult, McrResult, PcaResult, common_grid, fit_status, itfa, lcf, mcr_als, pca,
                              prepare_matrix, same_matrix, unit_of)
 
@@ -119,7 +120,11 @@ class FitPerspective(QWidget):
         for page, anchor in ((self.lcf_page, "71-lcf-linear-combination-fit"), (self.mcr_page, "72-pca--mcr-als"),
                              (self.itfa_page, "73-itfa"), (self.peaks_page, "74-peaks")):
             set_help_anchor(page, anchor)
-        self.body = overlay_host(self.tabs)
+        # at 1200 x 760 or a larger Text size the cards need more height than the window has: the page scrolls
+        # vertically instead of squeezing the plots below their minimum
+        size_to_current_tab(self.tabs)
+        self.page_scroll = page_scroll(self.tabs)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
         self.taskbar = TaskBar(self)
         root.addWidget(self.taskbar)
@@ -301,6 +306,7 @@ class FitPerspective(QWidget):
         pc = Card("Target, fit and residual", help_anchor="71-lcf-linear-combination-fit")
         self.lcf_plot = make_plot(x="energy (eV)", legend="inside"); self.lcf_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.lcf_plot, 1)
+        min_height(self.lcf_plot, 150)
         right.addWidget(pc)
         rc = Card("Coefficients", help_anchor="71-lcf-linear-combination-fit")
         self.lcf_chip = _chip()
@@ -319,6 +325,7 @@ class FitPerspective(QWidget):
         explain_all([(self.sum_one, "fit.sum_one"), (self.allow_neg, "fit.allow_neg"), (b, "fit.run_lcf"), (eb, "fit.export_lcf")])
         right.addWidget(rc)
         self.lcf_table.setMinimumHeight(118)          # the header and three coefficients stay in view
+        fit_height(rc)                                 # the chi-square and uncertainty lines are never cut
         right.setStretchFactor(0, 1)
         right.setStretchFactor(1, 1)
         right.setSizes([420, 420])
@@ -530,14 +537,16 @@ class FitPerspective(QWidget):
         self.scree = make_plot(x="PCA component", y="explained variance (%)")
         self.scree.getViewBox().disableAutoRange()
         left.body.addWidget(self.scree, 1)
+        min_height(self.scree, 150)
         self.prop_table = QTableWidget(0, 1); self.prop_table.setAccessibleName("component percentages per sample")
         self.prop_table.setHorizontalHeaderLabels(["comp 1 %"]); _percent_tips(self.prop_table)
         left.body.addWidget(self.prop_table, 1)
         self.mcr_status = QLabel(""); self.mcr_status.setObjectName("muted"); self.mcr_status.setWordWrap(True); left.body.addWidget(self.mcr_status)
-        lay.addWidget(left, 1)
+        lay.addWidget(fit_height(left), 1)
         pc = Card("Component spectra", help_anchor="72-pca--mcr-als")
         self.comp_plot = make_plot(x="energy (eV)", legend="inside"); self.comp_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.comp_plot, 1)
+        min_height(self.comp_plot, 150)
         lay.addWidget(pc, 2)
         return w
 
@@ -688,6 +697,7 @@ class FitPerspective(QWidget):
         pc = Card("ITFA targeted component spectra", help_anchor="73-itfa")
         self.itfa_plot = make_plot(x="energy (eV)", legend="inside"); self.itfa_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.itfa_plot, 1)
+        min_height(self.itfa_plot, 150)
         self.itfa_table = QTableWidget(0, 1); self.itfa_table.setAccessibleName("ITFA component percentages per sample")
         self.itfa_table.setHorizontalHeaderLabels(["comp 1 %"]); _percent_tips(self.itfa_table)
         pc.body.addWidget(self.itfa_table, 1)
@@ -814,16 +824,18 @@ class FitPerspective(QWidget):
         self.pk_table.setAccessibleName("peak parameters")
         header_tips(self.pk_table, {0: "fit.col.parameter", 1: "fit.col.value", 2: "fit.col.error", 3: "fit.col.unit"})
         left.body.addWidget(self.pk_table, 1)
+        min_height(self.pk_table, 150)                # the header and a few parameters stay in view (the page scrolls)
         self.pk_areas = QLabel(""); self.pk_areas.setObjectName("muted"); self.pk_areas.setWordWrap(True); left.body.addWidget(self.pk_areas)
         self.pk_info = QLabel(""); self.pk_info.setObjectName("muted"); self.pk_info.setWordWrap(True); left.body.addWidget(self.pk_info)
         eb = QPushButton("Export…"); eb.clicked.connect(self._export_peaks); left.body.addWidget(eb)
         self.pk_export_btn = eb
         explain_all([(self.pk_n, "fit.pk_n"), (self.pk_step, "fit.pk_step"), (self.pk_hi, "fit.pk_hi"), (b, "fit.run_peaks"),
                      (eb, "fit.export_peaks")])
-        lay.addWidget(left, 1)
+        lay.addWidget(fit_height(left), 1)
         pc = Card("Data, fit, components and residual", help_anchor="74-peaks")
         self.pk_plot = make_plot(x="energy (eV)", legend="inside"); self.pk_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.pk_plot, 1)
+        min_height(self.pk_plot, 150)
         lay.addWidget(pc, 2)
         return w
 

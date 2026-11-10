@@ -24,10 +24,10 @@ from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, ma
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import CheckItem, Session
-from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
+from aurora.app.theme import curve, min_height, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair,
-                                set_enabled)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, fit_height, overlay_host,
+                                page_scroll, pair, set_enabled)
 from aurora.core import rules as rl
 from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
@@ -317,7 +317,7 @@ class ReducePerspective(QWidget):
         self.window_card = XrfWindowCard(session, self.taskbar)
         self.window_card.committed.connect(self._window_committed)
         self.window_card.remember_requested.connect(self.remember_windows)
-        left.addWidget(self.window_card)
+        left.addWidget(fit_height(self.window_card))
         left.setStretchFactor(0, 1); left.setStretchFactor(1, 3)
         left.setSizes([170, 470])
         split.addWidget(left)
@@ -334,13 +334,13 @@ class ReducePerspective(QWidget):
             self.tool_group.addButton(b, TOOLS.index(t)); tools.addWidget(b)
             self.tool_buttons[t] = b
         self.tool_group.idClicked.connect(lambda i: self.set_tool(TOOLS[i]))
-        self.brush_box = QWidget()                      # brush size and 'rect+ starts a new zone': Advanced
-        bl = QHBoxLayout(self.brush_box); bl.setContentsMargins(0, 0, 0, 0)
+        # brush size and 'rect+ starts a new zone' (Advanced): two items of the tool row, so each wraps on its own at a
+        # large Text size (in one box they made the centre column 370 px wide at Larger text)
         self.brush_n = QSpinBox(); self.brush_n.setRange(1, 9); self.brush_n.setValue(1)
         self.brush_n.setSuffix(unit_suffix("pixels"))
-        bl.addWidget(pair(labelled("brush", self.brush_n, "reduce.brush"), self.brush_n))
-        self.target_new = QCheckBox("rect+ starts a new zone"); bl.addWidget(self.target_new)
-        tools.addWidget(self.brush_box)
+        self.brush_box = pair(labelled("brush", self.brush_n, "reduce.brush"), self.brush_n)
+        self.target_new = QCheckBox("rect+ starts a new zone")
+        tools.addWidget(self.brush_box); tools.addWidget(self.target_new)
         self.clear_btn = QPushButton("Clear"); self.clear_btn.clicked.connect(self.clear_zone)
         tools.addWidget(self.clear_btn)
         centre.body.addWidget(tools_box)
@@ -388,6 +388,7 @@ class ReducePerspective(QWidget):
         self.map.context_requested.connect(self._context)
         self.map.hovered.connect(self._hover)
         self.zone_split.addWidget(self.map)
+        min_height(self.map, 200)
         self.zone_split.setStretchFactor(0, 0); self.zone_split.setStretchFactor(1, 1)
         self.zone_split.setSizes([120, 480])
         centre.body.addWidget(self.zone_split, 1)
@@ -446,7 +447,7 @@ class ReducePerspective(QWidget):
         self.z_label.lineEdit().editingFinished.connect(self._zone_edited)
         self.z_group.lineEdit().editingFinished.connect(self._zone_edited)
         self.z_comment.editingFinished.connect(self._zone_edited)
-        right.addWidget(self.zone_card)
+        right.addWidget(fit_height(self.zone_card))
         self.cards_area = QScrollArea(); self.cards_area.setWidgetResizable(True)
         self.cards_area.setAccessibleName("settings of each scan of the zone")
         self.cards_box = QWidget(); self.cards_lay = QVBoxLayout(self.cards_box); self.cards_lay.setContentsMargins(0, 0, 0, 0)
@@ -459,15 +460,18 @@ class ReducePerspective(QWidget):
         self.preview.all_scans.toggled.connect(self.update_preview)
         pc.body.addWidget(self.preview, 1)
         right.addWidget(pc)
-        self.cards_area.setMinimumHeight(120)
-        pc.setMinimumHeight(200)
+        min_height(self.cards_area, 120)                # one scan card row and its line row at every Text size
         right.setStretchFactor(0, 0); right.setStretchFactor(1, 2); right.setStretchFactor(2, 3)
         right.setSizes([190, 230, 420])
         split.addWidget(right)
-        left.setMinimumWidth(250)
+        # no fixed minimum width on the left column: its cards' own minimum (about 260 px, 310 px at Larger text)
+        # keeps 'spectrum of' and its combo box whole; a fixed 250 let the splitter cut them at Larger text
         split.setStretchFactor(0, 0); split.setStretchFactor(1, 3); split.setStretchFactor(2, 2)
         split.setSizes([280, 650, 530])                 # the scan cards need about 420 px; the map is square
-        self.body = overlay_host(split)
+        # at 1200 x 760 or a larger Text size the columns need more height than the window has: the page scrolls
+        # vertically instead of squeezing the preview and the map below their minimum
+        self.page_scroll = page_scroll(split)
+        self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
 
         for w in (self.map_line, self.map_sdd, self.map_mode):
@@ -505,8 +509,8 @@ class ReducePerspective(QWidget):
         self._shortcuts()
         # Easy mode: John Bussey's four steps (scan, XRF window, region, reduce); everything else is Advanced
         mark_advanced(self.load_all_btn, self.tool_buttons["rect-"], self.tool_buttons["polygon+"],
-                      self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.show_row,
-                      self.propose_btn, self.stitch_btn, self.load_poly_btn, self.save_poly_btn, self.group_box,
+                      self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.target_new,
+                      self.show_row, self.propose_btn, self.stitch_btn, self.load_poly_btn, self.save_poly_btn, self.group_box,
                       self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
         mark_easy(self.step4_line, self.add_check_btn, *self._badges)
         on_mode_changed(self, self._mode_changed)
@@ -520,37 +524,15 @@ class ReducePerspective(QWidget):
         card._top.insertWidget(0, lab)
         self._badges.append(lab)
 
-    @staticmethod
-    def _min_height(card: Card) -> int:
-        """The height a card needs at its width: wrapped rows at their wrapped height, the plot at its minimum."""
-        lay = card.layout()
-        m = lay.contentsMargins()
-        w = card.width() - m.left() - m.right()
-        hs = []
-        for i in range(lay.count()):
-            it = lay.itemAt(i)
-            wid = it.widget()
-            if wid is not None and wid.isHidden():
-                continue
-            if wid is not None and wid is getattr(card, "plot", None):
-                hs.append(wid.minimumHeight())
-            elif it.hasHeightForWidth():
-                hs.append(it.heightForWidth(w))
-            else:
-                hs.append(max(it.minimumSize().height(), it.sizeHint().height() if it.layout() is not None else 0))
-        return sum(hs) + lay.spacing() * max(0, len(hs) - 1) + m.top() + m.bottom()
-
     def fit_cards(self) -> None:
-        """The splitters ignore wrapped rows: give the zone card and the XRF window card the height their rows need at
-        their width, so no control is cut at the smallest window."""
+        """The splitters ignore wrapped rows: the zone card and the XRF window card get the height their rows need at
+        their width, so no control is cut at the smallest window. widgets.fit_height keeps it so on every resize of a
+        card and every change of its rows (a Text size change too); this call refits them now."""
         import shiboken6
         for card in (self.zone_card, self.window_card):
             if not shiboken6.isValid(self) or not shiboken6.isValid(card):    # a deferred call after the window died
                 return
-            if card.width() > 0:
-                need = self._min_height(card)
-                if need > 0 and need != card.minimumHeight():
-                    card.setMinimumHeight(need)
+            fit_height(card)
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)

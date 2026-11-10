@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
 
 from aurora.app.help_text import HELP, explain, explain_buttons
 from aurora.app.shortcuts import native_text
+from aurora.app.widgets import fit_screen
 
 POLICY_LABELS = (("merge", "Merge"), ("replace", "Replace"), ("skip", "Skip"))
 
@@ -75,6 +76,14 @@ class ImportDialog(QDialog):
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeToContents)
         hh.setStretchLastSection(True)
+        # rows as tall as the combo boxes in them (a default row cut their bottom border), and up to six rows in view
+        for c in self.combos.values():
+            c.ensurePolished()                          # the style sheet's height, not Fusion's
+        row_h = max((c.sizeHint().height() for c in self.combos.values()), default=0) + 4
+        for r in range(self.table.rowCount()):
+            self.table.setRowHeight(r, max(self.table.rowHeight(r), row_h))
+        shown = sum(self.table.rowHeight(r) for r in range(min(6, self.table.rowCount())))
+        self.table.setMinimumHeight(hh.sizeHint().height() + shown + 2 * self.table.frameWidth() + 2)
         lay.addWidget(self.table, 1)
         note = QLabel(native_text("Merge adds the file's zones with new numbers and skips the ones with the same "
                                   "area. Replace puts the file's zones in place of this holder's. Skip leaves the "
@@ -91,7 +100,7 @@ class ImportDialog(QDialog):
         explain_buttons(buttons)
         buttons.button(QDialogButtonBox.Ok).setToolTip("Import the zones with the choices above")
         lay.addWidget(buttons)
-        self.resize(620, 300)
+        fit_screen(self, 620, max(300, self.sizeHint().height()))
 
     def set_policy(self, key: str, policy: str) -> None:
         c = self.combos[key]

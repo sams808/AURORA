@@ -202,11 +202,13 @@ class HomePerspective(QWidget):
         self.tree.setAccessibleName("days, holders and scans of the project")
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.tree.header().resizeSection(0, 360)
-        for i in range(1, len(COLS) - 1):
+        # every column in view at 1200 px: the Scan column takes the width the others leave and elides long names
+        # in the middle (the full name is its tooltip); a fixed 360 px pushed Energies, Points and Flags off-screen
+        self.tree.setTextElideMode(Qt.ElideMiddle)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        for i in range(1, len(COLS)):
             self.tree.header().setSectionResizeMode(i, QHeaderView.ResizeToContents)
-        self.tree.header().setStretchLastSection(True)
         self.tree.currentItemChanged.connect(self._on_select)
         self.tree.itemDoubleClicked.connect(self._activated)
         left.body.addWidget(self.tree, 1)
@@ -242,6 +244,13 @@ class HomePerspective(QWidget):
         self.fill_recent_menu()
         self.update_actions()
         QTimer.singleShot(0, self, self.refresh_recent)          # once the window is up: which recent ones exist
+
+    def tab_after(self, first: QWidget) -> None:
+        """The welcome card's buttons and the recent list right after `first` in the Tab order: with no project open
+        the first Tab lands on Open project…, not after eight other stops. Hidden (a project open), they are skipped."""
+        chain = [first, *self.empty_state.buttons, self.recent_list]
+        for a, b in zip(chain, chain[1:]):
+            QWidget.setTabOrder(a, b)
 
     def update_actions(self) -> None:
         busy = jobs.of(self).job("discover") is not None
@@ -525,6 +534,7 @@ class HomePerspective(QWidget):
         it = QTreeWidgetItem([s.name, when, s.kind, s.edge_text, s.status.replace("_", " "), s.energy_text,
                               str(s.n_points) if s.n_points else "", ", ".join(s.flags) + (f"  {s.error}" if s.error else "")])
         it.setData(0, Qt.UserRole, s)
+        it.setToolTip(0, s.name)
         set_item_tone(it, tone_of(s.status), STATUS_COL)          # word plus icon, colour from the tokens
         if s.flags or s.error:
             set_item_tone(it, "warn", FLAGS_COL)

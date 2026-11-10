@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSpinBo
 from aurora.app import jobs
 from aurora.app.help_text import explain_all, labelled
 from aurora.app.mode import mark_advanced
-from aurora.app.theme import curve, dash, make_plot, mk_pen, on_theme_changed, with_alpha
+from aurora.app.theme import curve, dash, make_plot, min_height, mk_pen, on_theme_changed, with_alpha
 from aurora.app.vocab import DET_LABELS, unit_suffix
 from aurora.app.widgets import Card, FlowLayout, pair, set_plot_hint
 from aurora.core import xrf_windows as xw
@@ -53,7 +53,7 @@ class XrfWindowCard(Card):
         self.body.addWidget(pair(labelled("preset", self.preset, "reduce.window.preset"), self.preset))
         # the spectrum
         self.plot = make_plot(x="channel", y="counts")
-        self.plot.setMinimumHeight(100)
+        min_height(self.plot, 120)
         self.plot.getViewBox().disableAutoRange()
         self.plot.setLogMode(x=False, y=True)
         self.plot.setAccessibleName("emission spectrum with the four detector windows")
