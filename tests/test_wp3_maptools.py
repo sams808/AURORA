@@ -67,11 +67,19 @@ def test_a_click_selects_and_never_adds(qapp, win):
     click(rd.map, cx, cy, modifiers=Qt.ShiftModifier)
     pump(qapp)
     assert len(z2.rects) == 2 and z2.rects[-1][0] == z2.rects[-1][1] and len(z1.rects) == 1
-    # a click outside every zone adds a pixel to the selected zone
+    # a click outside the scan writes nothing (no measured point there) and says why
     ses.select_zone(z1.id)
     x0, x1, y0, y1 = sd.bbox
+    n = ses.undo_stack.count()
     click(rd.map, x1 + 0.6, y1 + 0.6)
-    assert len(z1.rects) == 2
+    assert len(z1.rects) == 1 and ses.undo_stack.count() == n and "outside scan" in rd.status_label.text()
+    # a click on a pixel outside every zone, next to the selected zone, adds that pixel to it
+    with ses.edit("zone 2 keeps its last column"):
+        z2.rects[0][0] = x1 - 0.01
+    taken = set(members(z1, sd.x, sd.y, sd.pitch).tolist()) | set(members(z2, sd.x, sd.y, sd.pitch).tolist())
+    free = next(i for i in range(sd.n_pix) if i not in taken)
+    click(rd.map, float(sd.x[free]), float(sd.y[free]))
+    assert len(z1.rects) == 2 and free in members(z1, sd.x, sd.y, sd.pitch)
     # with rect-, a plain click inside the selected zone erases that pixel
     rd.set_tool("rect-")
     click(rd.map, float(sd.x[0]), float(sd.y[0]))

@@ -19,12 +19,13 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
 
 from aurora.app import jobs, nav, shortcuts
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import TOOLS, MapView, scale_label
+from aurora.app.mapview import TOOLS, MapView, scale_label, split_tool
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import CheckItem, Session
 from aurora.app.theme import curve, on_theme_changed, refill_tones, set_item_tone
+from aurora.app.zone_tools import ZoneEditor
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, overlay_host, pair,
                                 set_enabled)
@@ -34,7 +35,7 @@ from aurora.core.io.config import ScanSettings, Zone
 from aurora.core.model import ScanInfo
 from aurora.core.names import pretty_edge, short_time, split_stack_id
 from aurora.core.spectra import NORM_MODES
-from aurora.core.zones import geometry, members, set_geometry, shape_text, zone_bbox, zone_traces
+from aurora.core.zones import Stroke, geometry, members, set_geometry, shape_text, zone_bbox, zone_traces
 
 NO_PROJECT = "open a project first"
 GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy geometry'
@@ -381,6 +382,13 @@ class ReducePerspective(QWidget):
         self.map.setAccessibleName("stack map")
         self.map.set_zone_tools(True)
         self.map.set_tool("rect+")
+        # every drag or click on the map is a stroke, written by the zone editor in one edit (one undo step); the
+        # legacy signals below edit the zone only when code emits them (scripts, the self-test), never twice
+        self.editor = ZoneEditor(session, self.map, self._map_points, "Reduce", self)
+        self.editor.new_each = self.target_new.isChecked
+        self.editor.message.connect(self.status_label.setText)
+        self.map.set_brush_size(self.brush_n.value())
+        self.brush_n.valueChanged.connect(self.map.set_brush_size)
         self.map.rect_drawn.connect(self._rect)
         self.map.brush_at.connect(self._brush)
         self.map.polygon_drawn.connect(self._polygon)
@@ -604,6 +612,8 @@ class ReducePerspective(QWidget):
         """Switch the map tool and its button (shortcuts and the tool buttons)."""
         if tool not in TOOLS:
             return
+        if tool != self.map.vb.tool:
+            self.editor.idle()
         self.map.set_tool(tool)
         b = self.tool_buttons.get(tool)
         if b is not None and not b.isChecked():
@@ -771,6 +781,7 @@ class ReducePerspective(QWidget):
             self.map.set_points(sd.x, sd.y, sd.pitch)
         else:
             self.map.set_points(None, None, None)
+        self.editor.idle()
         self.map_line.blockSignals(False)
         self.map_energy.blockSignals(False)
         self._show_window_step()
@@ -1002,73 +1013,42 @@ class ReducePerspective(QWidget):
                 txt += f" · px {hit[0]}"
         self.status_label.setText(txt)
 
+    def _map_points(self):
+        """(x, y, pitch, name) of the stack shown, for the zone editor; None without one. The name is the one of the
+        scan list ('09:27 alpha_beta'), short enough for the map's hint."""
+        sd = self.current_stack()
+        if sd is None:
+            return None
+        scan = self.session.scan_of(sd.id)
+        name = f"{scan.time} {scan.label}".strip() if scan is not None and (scan.time or scan.label) else sd.name
+        return sd.x, sd.y, sd.pitch, name
+
     def _makes_new_zone(self, add: bool) -> bool:
-        """Whether an adding tool starts a new zone: no zone selected, or 'rect+ starts a new zone' ticked."""
+        """Whether an adding tool starts a new zone: no zone selected, or 'rect+ starts a new zone' ticked (the rule
+        of the legacy signals; strokes follow ZoneEditor.target_for)."""
         return add and (self.session.zone() is None or self.target_new.isChecked())
 
+    def _legacy(self, stroke: Stroke) -> None:
+        """A legacy map signal emitted by code: one edit through the zone editor, as before (a stroke of the mouse
+        is written by the editor itself and emits these signals with map.stroke_emitting() True)."""
+        if not self.map.stroke_emitting():
+            self.editor.commit(stroke, legacy=True)
+
     def _rect(self, x0: float, x1: float, y0: float, y1: float) -> None:
-        tool = self.map.vb.tool
-        if self.session.holder() is None:
-            self.status_label.setText(NO_PROJECT)
+        shape, erase = split_tool(self.map.vb.tool)
+        if self.map.stroke_emitting() or shape in ("navigate", "brush"):
             return
-        if tool in ("rect+", "lasso+", "polygon+"):
-            new = self._makes_new_zone(True)
-            z = self.session.zone()
-            with self.session.edit("add a rectangle to a new zone" if new else f"add a rectangle to zone {z.id}"):
-                if new:
-                    z = self.session.new_zone()
-                if z is not None:
-                    z.rects.append([x0, x1, y0, y1])
-        elif tool == "rect-":
-            z = self.session.zone()
-            if z is None:
-                self.status_label.setText("select a zone first")
-                return
-            with self.session.edit(f"remove a rectangle from zone {z.id}"):
-                z.erects.append([x0, x1, y0, y1])
+        self._legacy(Stroke(shape="rect", erase=erase, start=(x0, y0), rect=(x0, x1, y0, y1)))
 
     def _polygon(self, pts) -> None:
         """A lasso or polygon closed on the map: added to the current zone (a new zone when none is selected)."""
-        if self.session.holder() is None:
-            self.status_label.setText(NO_PROJECT)
-            return
         if len(pts) < 3:
             return
-        new = self._makes_new_zone(True)
-        z = self.session.zone()
-        with self.session.edit("add a polygon to a new zone" if new else f"add a polygon to zone {z.id}"):
-            if new:
-                z = self.session.new_zone()
-            if z is not None:
-                z.polys.append([[float(p[0]), float(p[1])] for p in pts])
+        self._legacy(Stroke(shape="polygon", path=[[float(p[0]), float(p[1])] for p in pts],
+                            start=(float(pts[0][0]), float(pts[0][1]))))
 
     def _brush(self, x: float, y: float, add: bool) -> None:
-        sd = self.current_stack()
-        if sd is None:
-            return
-        new = self._makes_new_zone(add)
-        z = self.session.zone()
-        if z is None and not new:
-            self.status_label.setText("select a zone first")
-            return
-        best = int(np.argmin((sd.x - x) ** 2 + (sd.y - y) ** 2))
-        cx, cy = float(sd.x[best]), float(sd.y[best])
-        px, py = sd.pitch
-        n = self.brush_n.value()
-        verb = "paint" if add else "erase"
-        with self.session.edit(f"{verb} pixels in a new zone" if new else f"{verb} pixels in zone {z.id}"):
-            if new:
-                z = self.session.new_zone()
-                if z is None:
-                    return
-            key = z.paint if add else z.erase
-            for i in range(-((n - 1) // 2), n // 2 + 1):
-                for j in range(-((n - 1) // 2), n // 2 + 1):
-                    sx, sy = round(cx + i * px, 3), round(cy + j * py, 3)
-                    if not any(abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6 for s in key):
-                        key.append([sx, sy, px, py])
-                    if add:
-                        z.erase = [s for s in z.erase if not (abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6)]
+        self._legacy(Stroke(shape="brush", erase=not add, start=(x, y), path=[[x, y]], brush_n=self.brush_n.value()))
 
     def _zone_clicked(self, zid: int) -> None:
         if zid != self.session.current_zone:

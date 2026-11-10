@@ -3,8 +3,10 @@
 Every `with session.edit(description):` records the JSON of the holders it touched, of the good-I0 choices and of the
 settings rules, before and after (zones are small, so a snapshot is simpler and safer than an inverse per operation). Undo puts the 'before'
 snapshot back, redo the 'after' one. Edits with the same description that follow each other within MERGE_WINDOW_S
-merge into one step, so a brush stroke (many 'paint pixels in zone 3' events) or a run of card edits undo at once.
-Attaching scans and loading stacks are not edits and are never recorded.
+merge into one step, so a run of card edits undoes at once. A stroke on a zone map is already one edit
+(session.edit(..., merge=False), aurora.app.zone_tools.ZoneEditor): it never merges with the stroke before or after
+it, so two quick strokes are two steps; only 'new zone N' (the New sample button) takes the first stroke into its own
+step. Attaching scans and loading stacks are not edits and are never recorded.
 """
 from __future__ import annotations
 
@@ -37,12 +39,13 @@ class SnapshotCommand(QUndoCommand):
     """One undo step: the snapshots before and after an edit, plus where the user was (holder and zone)."""
 
     def __init__(self, session, text: str, before: Snapshot, after: Snapshot, place_before: tuple, place_after: tuple,
-                 when: float):
+                 when: float, merge: bool = True):
         super().__init__(text)
         self.session = session
         self.before, self.after = before, after
         self.place_before, self.place_after = place_before, place_after       # (holder key, zone id)
         self.when = when
+        self.merge = bool(merge)        # False: a step of its own (a stroke), never merged by time or description
         self._pushed = False            # QUndoStack.push calls redo() once: the edit is already in place then
 
     def id(self) -> int:                # noqa: A003 (Qt's name)
@@ -63,13 +66,14 @@ class SnapshotCommand(QUndoCommand):
         to zone 3'): one step, whatever the time between them, so Ctrl+Z removes the new zone with its area."""
         zid = self.place_after[1] if self.place_after else None
         return zid is not None and self.text() == f"new zone {zid}" and \
-            other.text() in (f"add a rectangle to zone {zid}", f"paint pixels in zone {zid}")
+            other.text() in (f"add a rectangle to zone {zid}", f"paint pixels in zone {zid}",
+                             f"add a polygon to zone {zid}")
 
     def mergeWith(self, other) -> bool:     # noqa: N802 (Qt's name)
         if not isinstance(other, SnapshotCommand):
             return False
         first = self.completed_by(other)
-        if not first and not self.continues(other):
+        if not first and not (self.merge and other.merge and self.continues(other)):
             return False
         if other.before.keys_touched != self.after.keys_touched:
             return False

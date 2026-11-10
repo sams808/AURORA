@@ -164,6 +164,7 @@ class _EditState:
     place: tuple
     attached: frozenset | None
     before: Snapshot
+    merge: bool = True                  # False: never merged with the edit before it (a stroke on a zone map)
 
 
 def _file_stamp(path: Path) -> tuple[int, int] | None:
@@ -931,7 +932,7 @@ class Session(QObject):
 
     # ------------------------------------------------------------------ editing
     @contextmanager
-    def edit(self, description: str, holder: str | None = None):
+    def edit(self, description: str, holder: str | None = None, merge: bool = True):
         """The one way to change zones, settings or good-I0:
 
             with session.edit("add rectangle to zone 3"):
@@ -941,14 +942,16 @@ class Session(QObject):
         change several). Edits nest: an inner edit is part of the outer one, and touch() calls inside an edit are
         deferred to its end. On exit (also after an exception) the memberships are refreshed, listeners notified,
         and, when something changed, one undo step is recorded (merged with the previous one when it has the same
-        description and came less than 1.5 s before), the session is marked dirty and an autosave scheduled."""
+        description and came less than 1.5 s before, unless merge=False: one stroke on a zone map is one step), the
+        session is marked dirty and an autosave scheduled."""
         key = holder or self.current_holder
         outer = self._edit_depth == 0
         if outer:
             self._edit_info = (str(description), key)
             self._touch_pending = False
             self._edit_state = _EditState(all_=key == ALL_HOLDERS, place=(self.current_holder, self.current_zone),
-                                          attached=self._attached_set(), before=Snapshot(holders={}, good_i0=""))
+                                          attached=self._attached_set(), before=Snapshot(holders={}, good_i0=""),
+                                          merge=bool(merge))
             self._widen_edit(key)
             self._edit_state.before["good_i0"] = dumps(self.zones.good_i0)
             self._edit_state.before["rules"] = dumps(self.zones.rules)
@@ -1015,7 +1018,7 @@ class Session(QObject):
                 self._mark_dirty()
             return
         cmd = SnapshotCommand(self, description, before, after, state.place, (self.current_holder, self.current_zone),
-                              self.undo_clock())
+                              self.undo_clock(), merge=state.merge)
         self.undo_stack.push(cmd)
         self._mark_dirty()
         z = self.zone() if self.current_zone is not None else None
