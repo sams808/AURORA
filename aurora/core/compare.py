@@ -31,7 +31,7 @@ E0_MODE_TEXT = {"deriv": "maximum of the smoothed derivative", "half": "half of 
                 "table": "tabulated edge (xraydb)", "fixed": "fixed value"}
 # DEFAULT, to be confirmed on beamtime data: Savitzky-Golay width of the derivative used for E0. On a 1 eV wide
 # synthetic edge sampled every 0.2 eV with 2 % noise it keeps the E0 scatter below 0.5 eV (the unsmoothed derivative
-# scatters by 4.4 eV); tests/test_wp5_e0.py re-runs that probe.
+# scatters by 0.7 eV, and by 4.4 eV when the data ends may win); tests/test_wp5_e0.py re-runs that probe.
 E0_SMOOTH_EV = 1.5
 # DEFAULT, to be confirmed: half-width of the window around the tabulated edge in which E0 is searched. It equals the
 # start of the default pre-edge window (|DEFAULT_PRE[0]|), so the pre-edge line still lies below the tabulated edge.
@@ -338,8 +338,12 @@ def smoothed_derivative(E: np.ndarray, y: np.ndarray, width_ev: float = E0_SMOOT
 
 def derivative_e0(E: np.ndarray, y: np.ndarray, width_ev: float | None = E0_SMOOTH_EV,
                   window: tuple[float, float] | None = None) -> float:
-    """E0 = the maximum of the derivative, after Savitzky-Golay smoothing `width_ev` wide (0 or None: the plain
-    gradient), inside `window` (eV) when it holds enough points; refined by a parabola through the maximum."""
+    """E0 = the largest local maximum of the derivative, after Savitzky-Golay smoothing `width_ev` wide (0 or None:
+    the plain gradient), inside `window` (eV) when it holds enough points; refined by a parabola through the maximum.
+
+    Points within one smoothing width of the data ends and of the window ends are not candidates: a start-up
+    transient of the first points, or a derivative still rising where the window stops, is not an edge (larch's
+    find_e0 skips the ends too). Without a local maximum inside, the largest value inside is taken."""
     if not width_ev:
         e, v = _finite_sorted(E, y)
         if e.size < 5:
@@ -351,11 +355,18 @@ def derivative_e0(E: np.ndarray, y: np.ndarray, width_ev: float | None = E0_SMOO
         if grid.size == 0:
             return float("nan")
     sel = np.ones(grid.size, bool)
+    lo, hi = grid[0], grid[-1]
     if window is not None:
         w = (grid >= window[0]) & (grid <= window[1])
         if w.sum() >= 3:
             sel = w
-    idx = np.flatnonzero(sel)
+            lo, hi = max(lo, window[0]), min(hi, window[1])
+    margin = float(width_ev or 0.0)
+    inner = sel & (grid > lo + margin) & (grid < hi - margin)
+    inner[[0, -1]] = False                                  # an end point is never a local maximum
+    peaks, _ = find_peaks(d)
+    cand = np.intersect1d(peaks, np.flatnonzero(inner))
+    idx = cand if cand.size else (np.flatnonzero(inner) if inner.any() else np.flatnonzero(sel))
     k = int(idx[int(np.argmax(d[idx]))])
     e0 = float(grid[k])
     if 0 < k < grid.size - 1 and sel[k - 1] and sel[k + 1]:

@@ -639,7 +639,7 @@ raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV a
 | Norm | larch (two lines around E0), legacy (constant pre / post means over absolute windows), tey_line (pre-edge line only), none (a list) |
 | Shift eV | added to the energy axis (calibration offsets) |
 | Pre lo / hi, Post lo / hi | the fitting windows: eV from E0 for larch and tey_line; absolute eV for legacy, where a blank window reads *auto 15 %* / *auto 20 %* (the first 15 % and the last 20 % of the scan, John Bussey's defaults) |
-| E0 | how E0 is found: `deriv` (the maximum of the derivative smoothed over 1.5 eV, searched within 20 eV of the tabulated edge), `half` (the first crossing of half the edge step, iterated twice), `table` (the tabulated edge from xraydb), `fixed` (the E0 eV value), `row:<label [signal]>` (the E0 of another row, so every row of a comparison shares one E0 and the edge shifts become the measured quantity) |
+| E0 | how E0 is found: `deriv` (the largest local maximum of the derivative smoothed over 1.5 eV, searched within 20 eV of the tabulated edge and never within 1.5 eV of the data or search-window ends), `half` (the first crossing of half the edge step, iterated twice), `table` (the tabulated edge from xraydb), `fixed` (the E0 eV value), `row:<label [signal]>` (the E0 of another row, so every row of a comparison shares one E0 and the edge shifts become the measured quantity) |
 | E0 eV | the E0 in force; typing a value fixes it, an empty cell returns to `deriv` |
 | Flatten | post-edge line flattened to 1 |
 | Spacing, Scale | per-row offset (blank = the common spacing) and multiplier in the stacked plot |
