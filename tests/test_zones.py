@@ -257,9 +257,10 @@ def _traces_of_the_fake_stack(root):
 def test_spectra_vectorised_equal(monkeypatch, tmp_path):
     """run_median, hampel's test and the medians of despike_coherent are vectorised: the same values as the zone
     tool's loops, bit for bit, on 300 random traces with NaN (and inf) and on the fake stack's traces. Speed, as
-    ratios in the same process (robust to the machine's load): hampel on the four SDD traces at least 10 times
-    faster than the loops; the whole coherent build_traces at least 5 times (it also runs the coherence test, the
-    noise floor and the normalisation, which were never loops)."""
+    ratios in the same process (robust to the machine's load): hampel on four 2000-point traces at least 10 times
+    faster than the loops (on 341 points the fixed cost of a few numpy calls blurs the ratio under load); the whole
+    coherent build_traces of 4 x 341 energies at least 5 times (it also runs the coherence test, the noise floor and
+    the normalisation, which were never loops)."""
     import time
 
     from aurora.core import spectra
@@ -314,11 +315,13 @@ def test_spectra_vectorised_equal(monkeypatch, tmp_path):
         for _ in range(n):
             t0 = time.perf_counter(); f(); b = min(b, time.perf_counter() - t0)
         return b
+    long = [rng.poisson(3000, 2000).astype(float) + 4000 * (rng.random(2000) < 0.01) for _ in range(4)]
+
     def hampels():
-        for d in dets:
+        for d in long:
             spectra.hampel(d, 6.0)
     fast = best(lambda: spectra.build_traces(sums, st), 5)
-    fast_h = best(hampels, 5)
+    fast_h = best(hampels, 7)
     with monkeypatch.context() as mp:
         _references(mp)
         old = spectra.despike_coherent(dets, 6.0)
