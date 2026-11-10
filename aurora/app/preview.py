@@ -49,6 +49,12 @@ class SparseAxis(pg.AxisItem):
             return levels
         return [(step, 0), (step / (4 if self._mantissa(step) == 2 else 5), 0)]
 
+    def tickStrings(self, values, scale, spacing):
+        # pyqtgraph gives a step of 0.25 one decimal ('0.2', '0.5', '0.8' at 0.25, 0.5, 0.75): one more for 2.5 steps
+        if spacing and self._mantissa(spacing * scale) == 2.5:
+            spacing = spacing / 10
+        return super().tickStrings(values, scale, spacing)
+
 
 class PreviewPlot(QWidget):
     def __init__(self, parent=None):

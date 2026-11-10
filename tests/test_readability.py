@@ -174,6 +174,8 @@ def test_the_preview_ticks_never_touch(qapp):
             shown = [k * step for k in range(math.ceil((lo + edge) / step), math.floor((hi - edge) / step) + 1)]
             assert len(shown) >= 2, (px, lo, hi, size, step, shown)
             assert size * step / (hi - lo) >= digits, (px, lo, hi, size, step)
+            texts = ax.tickStrings(shown, 1.0, step)        # each label reads its own value (0.25, not '0.2')
+            assert all(abs(float(t) - v) < 1e-9 for t, v in zip(texts, shown)), (step, texts, shown)
 
 
 @pytest.mark.parametrize("text", ["normal", "larger"])
