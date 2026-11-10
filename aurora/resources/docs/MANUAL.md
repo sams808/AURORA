@@ -102,7 +102,7 @@ program, no permission) gives one calm dialog that names it.
 
 ### 1.3 Menus and keyboard shortcuts
 
-- **File**: **Open project…** (**Ctrl+O**: a beamtime folder, a loose folder of scans or one .h5 file), **Reload**
+- **File**: **Open project…** (**Ctrl+O**: a beamtime folder, a loose folder of scans or a scan folder), **Reload**
   (**F5**), **Restore zones from a backup…** (Advanced), **Open recent** (the last ten projects, then **Clear list**),
   **Re-reduce the stack with the project ROI bins** (Advanced; enabled when the current stack comes from an sgm_report
   cache reduced with other windows, see 4.2), **Settings…**, **Quit**. A folder or an .h5 file dropped on the window
@@ -175,13 +175,17 @@ Vocabulary used throughout:
 ## 2. Home
 
 Open a beamtime with **File > Open project…**, the **Open project…** button, **File > Open recent**, by dropping a
-folder or an `.h5` file on the window, or from the command line (`aurora <folder>`). Four kinds of path open:
+folder or an `.h5` file on the window, or from the command line (`aurora <folder>`). Five kinds of path open:
 
-- the beamtime folder that holds `raw/<day>/<scan>` (the usual choice), or one of its day or scan folders;
+- the beamtime folder that holds `raw/<day>/<scan>` (the usual choice), or the same day folders without `raw/` (a copy
+  that left that level out);
+- one day or scan folder of a beamtime: that day opens alone. The path line says so (*2026-11-03 only (1 of 4 days)*)
+  and **Show every day**, next to **Reload**, opens the whole beamtime;
 - a loose folder of scan folders, the way John Bussey's GUI kept them (`CLS GUI/<scan folders>`). It is a project of
   its own: its `.aurora/` folder is written inside it. Each scan's day is the date its `.h5` file was written (the
   `file_creation_timestamp_iso` attribute, else the date in the file name, else the folder name);
-- one scan's `.h5` file: the project of its scan folder opens.
+- one scan's `.h5` file, dropped on the window or given on the command line (the folder dialog of **Open project…**
+  lists folders only): the project of its scan folder opens, that day alone.
 
 The folder is read in the background: a share that does not answer never blocks the window. The tree lists days,
 holders and scans:
@@ -227,12 +231,14 @@ Right-click an entry for **Open** or **Forget**. **File > Open recent** lists th
 list** at the bottom (the folders themselves are never touched).
 
 When a folder cannot be opened, Home says *Could not open the project*, names the folder and the reason (the folder
-does not exist or its share is not reachable; access denied; not a beamtime), and offers **Retry** and **Choose
+does not exist or its share is not reachable; access denied; not a beamtime; a file that is not a scan's `.h5`, such as
+a detector `.bin`, a `.zip` to extract first or any other file), and offers **Retry** (not for a file) and **Choose
 another…**. When another project was already open, **Keep the open project** closes the note and keeps it. In Advanced
 mode the panel on the right also shows the full error.
 
 At start, AURORA reopens the last project when *open the last project at start* is on (Settings); if that fails, the
-path line says so calmly (*the last project could not be opened …*) and the welcome page stays.
+path line says so in one sentence (*the last project, my_beamtime, could not be opened: the folder does not exist, or
+the share that holds it is not reachable now. Pick another one below.*) and the welcome page stays.
 
 ### 2.2 Project and scan summaries
 
@@ -995,7 +1001,7 @@ dialog, the figure options of 6.4 and the time of the last update check.
 aurora                          the application (opens the last project when enabled in Settings)
 aurora <project folder>         the application on that project (also: aurora <file>.h5, aurora gui <project>)
 aurora project <project>        list days, holders, scans, status and flags (no Qt)
-aurora scan <scan folder>       one scan's metadata and first energy (no Qt)
+aurora scan <scan folder>       one scan's metadata and first energy (no Qt; also a scan's .h5 file)
 aurora report <project> [--zones zones_all.json] [--out folder] [--title T] [--groups A B]
                                 [--holders N5 N6] [--days 2026-11-05] [--preset final|draft]
                                 [--author NAME] [--no-appendix] [--no-maps] [--dpi 600]
@@ -1020,7 +1026,9 @@ self-test…** runs the same command.
 
 From an installed copy, replace `aurora` by `aurora-cli.exe` on Windows (the console twin of `AURORA.exe`, in the same
 folder) or by `AURORA.app/Contents/MacOS/AURORA` on macOS. Every command writes to the log file (INSTALL §5); a failing
-command prints its traceback, logs it and returns exit code 1. Output is UTF-8 in any console or pipe.
+command returns exit code 1 and logs its traceback. A wrong path or file (no beamtime, no scan folder, no zones yet,
+a malformed zones file) prints one line that says so and where the log is; any other failure also prints its
+traceback. Output is UTF-8 in any console or pipe.
 
 ## 12. Files AURORA reads and writes
 

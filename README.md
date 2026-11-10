@@ -73,7 +73,7 @@ the PySide6 interface.
   macos-15-intel, macos-26 and ubuntu-24.04 (Python 3.12);
 - **build-windows** (windows-latest): the frozen app and `aurora-cli.exe`, their self-tests, a frozen report, the
   per-user installer installed, upgraded and uninstalled, the portable zip;
-- **test-windows**: the installer on windows-2022 and windows-11-arm;
+- **test-windows**: the installer and the portable zip (unpacked, self-tested) on windows-2022 and windows-11-arm;
 - **build-macos**: the app and its disk image on macos-15 (arm64) and macos-15-intel (x86_64), with the measured
   minimum macOS (`packaging/min_macos.txt`);
 - **test-macos**: each disk image on macos-15 and macos-26 (arm64) and macos-15-intel (x86_64).

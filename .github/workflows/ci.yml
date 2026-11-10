@@ -6,15 +6,17 @@ name: ci
 #                  headless CLI and a frozen report; per-user installer: silent install, installed self-test, Start-menu
 #                  and desktop shortcuts, folder verb, upgrade (the old runtime is wiped), uninstall (settings and logs
 #                  kept); portable zip
-#   test-windows   the installer on Windows Server 2022 and Windows 11 on ARM (x64 emulation)
+#   test-windows   the installer and the portable zip (unpacked into a new folder, its self-tests) on Windows Server
+#                  2022 and Windows 11 on ARM (x64 emulation)
 #   build-macos    AURORA.app for arm64 (macos-15) and x86_64 (macos-15-intel): signature, architecture, measured
 #                  minimum macOS (packaging/min_macos.txt), self-test direct and through `open` (the way Finder starts
 #                  it), a frozen report, disk image
 #   test-macos     each disk image on macOS 15, macOS 26 and macOS 15 Intel: mounted read-only, self-test from the
 #                  image directly and the Finder way, architecture and minimum macOS, copy to Applications, the
 #                  quarantine workaround of the first-launch note
-# Every job stops after 30 minutes and every step that runs the frozen app after 5: a frozen app that waits on a window
-# fails the run instead of holding a runner for hours.
+# Every job stops after 30 minutes (the test suite after 45: it takes 25 min on macos-15-intel) and every step that runs
+# the frozen app after 5: a frozen app that waits on a window fails the run instead of holding a runner for hours.
+# A bash step runs with -e: a check is a command of its own (test -f a && test -f b stops nothing when a is missing).
 
 on:
   push:
@@ -41,7 +43,7 @@ jobs:
           - {os: macos-15, python: "3.11"}
           - {os: macos-15, python: "3.13"}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45                  # the suite takes 25 min on macos-15-intel, 20 on windows-latest
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -272,6 +274,28 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "installed self-test failed on ${{ matrix.os }}" }
           $p = Start-Process -FilePath "$app\AURORA.exe" -ArgumentList "--selftest --platform native --out `"$PWD\selftest-${{ matrix.os }}-native.json`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "native self-test failed on ${{ matrix.os }}" }
+      - name: Portable zip (unpacked into a new folder, entries, self-tests from there)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $zip = (Get-Item pkg\AURORA-*-windows-x64.zip).FullName
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          $n = $z.Entries.Count
+          $bad = @($z.Entries | Where-Object { $_.FullName -like '*\*' }).Count
+          $z.Dispose()
+          if ($bad) { throw "$bad of $n zip entries use '\' as the separator" }
+          $dir = "$env:RUNNER_TEMP\AURORA portable"
+          Expand-Archive -Path $zip -DestinationPath $dir
+          $app = "$dir\AURORA"
+          foreach ($f in "AURORA.exe", "aurora-cli.exe", "LICENSE", "CREDITS.md", "THIRD_PARTY_LICENSES.txt") {
+            if (-not (Test-Path "$app\$f")) { throw "$f is missing from the portable zip" }
+          }
+          & "$app\aurora-cli.exe" --selftest --out "$PWD\selftest-${{ matrix.os }}-zip.json"
+          if ($LASTEXITCODE -ne 0) { throw "self-test from the portable zip failed on ${{ matrix.os }}" }
+          $p = Start-Process -FilePath "$app\AURORA.exe" -ArgumentList "--selftest --platform native --out `"$PWD\selftest-${{ matrix.os }}-zip-native.json`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "native self-test from the portable zip failed on ${{ matrix.os }}" }
+          "portable zip: $n entries, self-tests ok"
       - name: Uninstall
         timeout-minutes: 5
         shell: pwsh
@@ -391,10 +415,12 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$(ls pkg/*.dmg)"
           ls -la "$MNT"
           test -L "$MNT/Applications"
-          test -f "$MNT/If macOS blocks AURORA.txt" && grep -q "Open Anyway" "$MNT/If macOS blocks AURORA.txt"
+          for f in "If macOS blocks AURORA.txt" LICENSE CREDITS.md THIRD_PARTY_LICENSES.txt; do
+            test -f "$MNT/$f" || { echo "$f is missing from the disk image"; exit 1; }
+          done
+          grep -q "Open Anyway" "$MNT/If macOS blocks AURORA.txt"
           grep -q "xattr -dr com.apple.quarantine" "$MNT/If macOS blocks AURORA.txt"
           grep -q "macOS $(tr -d '[:space:]' < packaging/min_macos.txt) or later" "$MNT/If macOS blocks AURORA.txt"
-          test -f "$MNT/LICENSE" && test -f "$MNT/CREDITS.md" && test -f "$MNT/THIRD_PARTY_LICENSES.txt"
           codesign --verify --deep --strict --verbose=2 "$MNT/AURORA.app"
           python3 packaging/macos_minos.py "$MNT/AURORA.app" --check packaging/min_macos.txt --arch ${{ matrix.arch }}
       - name: Self-test from the read-only image, directly

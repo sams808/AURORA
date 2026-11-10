@@ -163,8 +163,38 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
             if getattr(h, "_aurora", False):
                 logging.getLogger().removeHandler(h)
                 h.close()
-        shutil.rmtree(base, ignore_errors=True)
+        ctx.clear()
+        _remove(base)
     return min(r.failed, 255)
+
+
+def _remove(base: Path) -> bool:
+    """Remove the temporary folder. Windows cannot delete a file that is still memory-mapped (the hypercubes of the
+    Maps checks): the in-memory caches are dropped and every hypercube still alive under the folder lets go of its
+    arrays first (the closed window's Maps perspective stays in memory, held from Qt's side by its signal
+    connections), then the cycles are collected and the removal retried after a pause. A folder that stays is named,
+    never hidden. True when it is gone."""
+    import gc
+    try:
+        from aurora.core import xrf_windows
+        from aurora.core.hypercube import Hypercube
+        xrf_windows.clear_memory()
+        xrf_windows.forget_projects()
+        for hc in [o for o in gc.get_objects() if isinstance(o, Hypercube)]:
+            if hc.cache_dir is not None and str(Path(hc.cache_dir).resolve()).startswith(str(base)):
+                hc.cubes, hc.xrf_total, hc.spec_all = [], None, None
+                hc._set_bins([], [], None)
+    except ImportError:
+        pass
+    for attempt in range(3):
+        gc.collect()
+        shutil.rmtree(base, ignore_errors=True)
+        if not base.exists():
+            return True
+        time.sleep(0.5 * (attempt + 1))
+    left = sum(1 for f in base.rglob("*") if f.is_file())
+    _say(f"WARNING: the temporary folder {base} could not be removed ({left} files still in use): delete it by hand")
+    return False
 
 
 def _system_font_dir() -> str | None:
@@ -847,13 +877,13 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
             rc = cli.main(["report", str(base / "no such beamtime")])
         assert rc == 1, rc
-        assert "Traceback" in err.getvalue(), err.getvalue()[:300]
+        assert err.getvalue().startswith("aurora report: ") and "Traceback" not in err.getvalue(), err.getvalue()[:300]
         text = Path(log_file()).read_text(encoding="utf-8", errors="replace")
-        assert "aurora report failed" in text, "the failure did not reach the log"
+        assert "aurora report failed" in text and "Traceback" in text, "the failure did not reach the log"
         with contextlib.redirect_stdout(io.StringIO()) as o:
             assert cli.main(["project", str(ctx["proj"].root)]) == 0
         assert "F Kα" in o.getvalue()
-        return "a failing command returns 1 with its traceback in the log; 'aurora project' prints F Kα"
+        return "a wrong path returns 1 in one line, its traceback in the log; 'aurora project' prints F Kα"
     r.check("command line: exit codes and the log", command_line)
 
 

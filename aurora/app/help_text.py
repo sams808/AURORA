@@ -42,8 +42,11 @@ HELP: dict[str, tuple[str, str, str]] = {
                       "pixels and polygons as a zone here. Replace: the file's zones replace this holder's. Skip: keep "
                       "this holder as it is.", "what to do with this holder", "3-survey"),
     # ------------------------------------------------------------------ home
-    "home.open": ("Open a beamtime folder (the one that holds raw/), a day or scan folder, or one .h5 file (Ctrl+O).",
-                  "Open project", "2-home"),
+    "home.open": ("Choose a folder: a beamtime folder (the one that holds raw/), a day or scan folder, or a loose "
+                  "folder of scans (Ctrl+O). A scan's .h5 file opens when dropped on the window.", "Open project",
+                  "2-home"),
+    "home.all_days": ("A day or scan folder opened that day only: open the whole beamtime, every day of its raw "
+                      "folder.", "Show every day", "2-home"),
     "home.reload": ("Read the project folder again: scans that arrived since the last read appear (F5).", "Reload",
                     "2-home"),
     "home.col.scan": ("The scan folder name without its time prefix.", "Scan", "2-home"),

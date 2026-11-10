@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QKeySequence
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QMenu, QPushButton, QStackedWidget,
                                QToolButton, QVBoxLayout, QWhatsThis, QWidget)
@@ -274,7 +274,7 @@ class MainWindow(QMainWindow):
         file = m.addMenu("&File")
         self.menus["file"] = file
         self._action(file, "&Open project…", self.home.choose_project, QKeySequence.Open, "File",
-                     "a beamtime folder, a loose folder of scans or one .h5 file")
+                     "a beamtime folder, a loose folder of scans or a scan folder")
         self._action(file, "&Reload", lambda: self.home.reload_btn.click(), QKeySequence.Refresh, "File",
                      "read the project folder again")
         self.menu_anchors = {"file": file.addSeparator()}      # shortcuts.add(menu='file') inserts above Settings
@@ -636,11 +636,50 @@ def fix_working_dir() -> Path | None:
     return None
 
 
+class AuroraApplication(QApplication):
+    """The application object. On macOS a folder sent with Finder's Open With, or dropped on the Dock icon, arrives as
+    a QFileOpenEvent (an Apple Event, not in argv, which cli._as_gui_path reads): it opens like `AURORA <folder>`. One
+    that arrives before the window is up waits in `pending` for open_at_start."""
+
+    def __init__(self, argv: list[str]):
+        super().__init__(argv)
+        self.pending: list[Path] = []
+        self.sent = 0                                   # folders sent so far (the last project yields to one)
+
+    def event(self, e) -> bool:
+        if e.type() == QEvent.FileOpen:
+            path = e.file() or e.url().toLocalFile()
+            if path:
+                self.open_sent(Path(path))
+            return True
+        return super().event(e)
+
+    def open_sent(self, path: Path) -> None:
+        from aurora.app.nav import top_level_widgets
+        self.sent += 1
+        wins = [w for w in top_level_widgets() if isinstance(w, MainWindow) and w.isVisible()]
+        win = self.activeWindow() if self.activeWindow() in wins else (wins[-1] if wins else None)
+        if win is None:
+            self.pending.append(path)
+        else:
+            open_sent_path(win, path)
+
+
+def open_sent_path(win: MainWindow, path: Path) -> None:
+    """Open a folder the system sent: at once, or when the project being read now (the last one, at start) is shown."""
+    win.show_perspective("home")
+    job = win.jobs.job("discover")
+    if job is not None:
+        job.add_callbacks(on_end=lambda _state: win.home.open_path(path))
+    else:
+        win.home.open_path(path)
+
+
 def create_app(argv: list[str] | None = None) -> QApplication:
     # the GUI thread gets the GIL back within 1 ms (not 5) while a job computes in pure Python: every Qt call it makes
     # releases the GIL, and waiting 5 ms each time froze the window for most of a second on slower machines (MCR-ALS)
     sys.setswitchinterval(min(sys.getswitchinterval(), 0.001))
-    app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
+    app = QApplication.instance() or AuroraApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG_NAME)
     app.setApplicationVersion(__version__)
@@ -680,16 +719,24 @@ def shutdown_app(app: QApplication, *windows: QWidget) -> None:
 
 
 def open_at_start(win: MainWindow, project: Path | None = None) -> None:
-    """The project to open once the window is up: the command-line folder, else the last project when Settings asks
-    for it. Both go through home.open_path, which looks at the path only in its worker, so an unreachable share
-    never blocks the start; the last project is opened from the event loop and fails quietly."""
+    """The project to open once the window is up: the command-line folder, else a folder macOS sent before the window
+    was up, else the last project when Settings asks for it (unless a sent folder came first). All go through
+    home.open_path, which looks at the path only in its worker, so an unreachable share never blocks the start; the
+    last project is opened from the event loop and fails quietly."""
+    app = QApplication.instance()
+    pending = app.pending if isinstance(app, AuroraApplication) else []
+    sent = getattr(app, "sent", 0)
     if project is not None:                     # aurora <folder>, aurora gui <folder>
         win.home.open_path(Path(project))
+    elif pending:                               # Finder's Open With, the Dock icon (the last one sent)
+        open_sent_path(win, pending[-1])
     elif setting("open_last_project"):
         rec = recent_projects()
         if rec:
             last = Path(rec[0])
-            QTimer.singleShot(0, win, lambda: win.home.open_path(last, quiet=True))
+            QTimer.singleShot(0, win, lambda: None if getattr(app, "sent", 0) != sent
+                              else win.home.open_path(last, quiet=True))
+    pending.clear()
 
 
 def run(project: Path | None = None) -> int:
