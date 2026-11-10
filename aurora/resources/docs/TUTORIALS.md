@@ -14,7 +14,7 @@ aurora demo C:\Users\<you>\Desktop\aurora_demo
 ```
 
 It contains one day (2026-11-05) with one holder, N5: the survey `010013_holderA_survey`, one complete F K stack
-`092758_alpha_beta_f_k_stack` (5 energies × 12 points), one aborted stack, one photodiode test, fixed ROI bins for
+`092758_alpha_beta_f_k_stack` (41 energies × 12 points), one aborted stack, one photodiode test, fixed ROI bins for
 F Kα and O Kα and a two-row sample sheet (`1 alpha` in Minerals, `2 beta` in Simple Glass). It also holds five reduced
 spectra in John Bussey's layout in `processed/reduced/` (NaF, CaF2, BaY2F8 and two mixtures of them) and three
 reference spectra in `references/`. Every number in it is synthetic and says so in its headers. From an installed copy
@@ -29,8 +29,8 @@ use `aurora-cli.exe demo …` on Windows or `AURORA.app/Contents/MacOS/AURORA de
 2. Home shows one day, one holder (`N5`, named after the survey) and four scans. Read the Status column: `complete`
    for the stack, `aborted` for the short one, `test` for the photodiode test; the survey is the first row.
 3. Select the stack `092758_alpha_beta_f_k_stack` and read its scan analysis summary on the right: *6 s per map*,
-   *5 maps × 6 s = 30 s*, *4 × 3 points, pitch 0.250 × 0.250 mm*, energy regions *680–692 eV in 3 eV steps*, *5 found
-   of 5 planned; every map complete*. Select the aborted stack: *3 found of 5 planned; missing 689.00, 692.00 eV*.
+   *41 maps × 6 s = 4.1 min*, *4 × 3 points, pitch 0.250 × 0.250 mm*, energy regions *660–740 eV in 2 eV steps*, *41 found
+   of 41 planned; every map complete*. Select the aborted stack: *3 found of 5 planned; missing 689.00, 692.00 eV*.
 4. Run the same listing headless to see what the GUI saw:
 
    ```
@@ -110,8 +110,8 @@ This tutorial uses the demo's `processed/reduced/` folder: NaF, CaF2 and BaY2F8,
 `mixture 1` (0.5 NaF + 0.3 CaF2 + 0.2 BaY2F8) and mixture 2 (0.2 + 0.5 + 0.3), plus the two spectra saved in
 Tutorial 4. Any folder of reduced CSVs works the same way.
 
-1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a sdd-scaled and a TEY row. Untick **Show**
-   on the TEY rows (or **Hide all**, then tick the sdd-scaled ones). In Easy mode only John-format files are read;
+1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a sdd-scaled and a TEY row; the TEY rows
+   start with **Show** unticked, as in John Bussey's GUI, so the plot holds the seven sdd-scaled traces, the two zones of Tutorial 4 included. In Easy mode only John-format files are read;
    Advanced mode also reads AURORA zone CSVs and sgm_report `_xanes.csv`.
 2. *Advanced*: select every sdd-scaled row, set **pre** and **post** to −20, −5 and 15, 35 in the windows row under the
    table and **Apply**. Norm stays `larch`. In the **E0** column choose `row:NaF [sdd-scaled]` on the other rows: they

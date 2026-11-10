@@ -75,13 +75,31 @@ def test_normalisations_and_peaks():
     assert derivative_e0(E, np.full(len(E), np.nan)) != derivative_e0(E, y)
 
 
+def test_negative_edge_step_is_kept_as_measured():
+    """A falling signal is never shown as a rising edge: every normalisation divides by |step| (larch's pre_edge does
+    edge_step = abs(...)) and says so. Reference, larch 2026 pre_edge(e0=690, pre -20..-5, norm 15..35, nnorm=1) on
+    these arrays (py -3.11): flat at 730 eV = -1.0000 (falling) and +1.0000 (rising), edge_step +0.99788 for both."""
+    E = np.linspace(660, 740, 321)
+    fall = 2.0 - 1.0 / (1 + np.exp(-(E - 690) / 1.0)) + 0.002 * (E - 660)
+    i730 = int(np.argmin(np.abs(E - 730)))
+    r = normalise_larch(E, fall, e0=690.0)
+    assert r.step < 0 and np.isclose(r.y[i730], -1.0, atol=2e-3) and "edge step negative" in r.note
+    rise = normalise_larch(E, 4.0 - fall + 0.004 * (E - 660), e0=690.0)
+    assert rise.step > 0 and np.isclose(rise.y[i730], 1.0, atol=2e-3) and rise.note == ""
+    assert np.isclose(abs(r.step), 0.99788, atol=1e-3)            # larch's |edge_step|, within its window rounding
+    l = normalise_legacy(E, fall, (660, 675), (720, 740))
+    assert np.mean(l.y[E >= 720]) < 0 and "edge step negative" in l.note
+    t = normalise_tey_line(E, fall, e0=690.0)
+    assert np.mean(t.y[(E >= 705) & (E <= 725)]) < 0 and "edge step negative" in t.note
+
+
 def test_requests_offsets_config_export(tmp_path):
     E = np.linspace(680, 730, 51)
     from aurora.core.compare import Spectrum
     sp = Spectrum("a", "fluo", E, _edge(E))
     req = TraceRequest("a", "fluo", shift=0.5, norm="none", scale=2.0)
     r = process(sp, req)
-    assert np.allclose(r.y, 2 * sp.y)
+    assert np.allclose(r.y, sp.y)                               # Scale is a plot multiplier, not part of the data
     reqs = [TraceRequest("a", "x"), TraceRequest("b", "x", spacing_after=0.3), TraceRequest("c", "x")]
     assert np.allclose(stack_offsets(reqs, 0.6), [0.0, 0.6, 0.9])
     cfg = tmp_path / "compare_config.json"
@@ -128,6 +146,20 @@ def test_pca_mcr_itfa():
     assert props[0].max() > 95 and props[4].max() > 95
     anchored = itfa(M, m, {0: np.array([m.C[0].sum(), 0.0]) if m.C[0, 0] > m.C[0, 1] else np.array([0.0, m.C[0].sum()])})
     assert anchored.rmse < 2e-3 and anchored.C.shape == (6, 2)
+
+
+def test_mcr_tolerance_is_relative():
+    """'tolerance (relative)': the same data x1000 or x0.001 stops at the same iteration with the same error / scale.
+    Before, x0.001 stopped after 2 iterations, 56 % above the converged error, and still read 'converged'."""
+    from aurora.core.testdata import demo_edge
+    E = np.linspace(660, 740, 321)
+    rng = np.random.default_rng(2)
+    D = rng.dirichlet([2, 2, 2], size=12) @ np.vstack([demo_edge(E, 690, 1.0, 0.6), demo_edge(E, 700, 1.6, 0.2),
+                                                        demo_edge(E, 695, 1.2, 0.9)]) + rng.normal(0, 0.01, (12, E.size))
+    runs = [mcr_als(D * s, 3, max_iter=500, tol_err_change=1e-6) for s in (1.0, 1e3, 1e-3)]
+    assert len({r.n_iter for r in runs}) == 1 and all(r.converged for r in runs)
+    assert np.allclose([r.rmse / s for r, s in zip(runs, (1.0, 1e3, 1e-3))], runs[0].rmse, rtol=1e-6)
+    assert not mcr_als(D, 3, max_iter=5, tol_err_change=0.0).converged             # 0 runs every iteration
 
 
 def test_derivative_and_difference():

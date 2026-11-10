@@ -74,7 +74,10 @@ def test_ipfy_traces_on_the_demo_are_i0_over_the_counts(demo):
         assert np.allclose(1 / mean_det, t.sum, rtol=0.25)
         tj = zone_traces(sd, pix, ScanSettings(line=line, fluo_norm="i0jump", signal="ipfy"))
         post = (tj.E >= tj.post[0]) & (tj.E <= tj.post[1])
-        assert np.isclose(np.nanmean(tj.sum[post]), 1.0)              # edge jump = 1 after the pre-divided path
+        # edge jump of size 1 after the pre-divided path; the demo's I0 / S falls at the edge or is flat within its noise
+        # (see below), and a negative jump is kept as measured and said, never flipped into a rising edge
+        jump = np.nanmean(tj.sum[post])
+        assert np.isclose(abs(jump), 1.0) and (jump < 0) == any(n.startswith("IPFY sum: edge step negative") for n in tj.notes)
     pfy = zone_traces(sd, pix, ScanSettings(line="O Kα"))
     assert pfy.signal == "pfy" and pfy.trace_names()["sum"] == "fluo_sum_norm" and not any("IPFY" in n for n in pfy.notes)
 

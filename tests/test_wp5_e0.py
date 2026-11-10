@@ -13,7 +13,8 @@ def _edge(E, e0=696.0, width=1.0):
 
 def test_seeded_noise_probe_deriv():
     """The scratch probe (synthetic edge at 696 eV, 1 eV wide, 0.2 eV step, 2 % noise, 100 draws): the unsmoothed
-    derivative scattered by about 4.4 eV; the smoothed one stays below 0.5 eV, and no normalisation is NaN."""
+    derivative scattered by about 4.4 eV, all of it from 3 draws whose maximum sat at the first or last point; the
+    smoothed one stays below 0.5 eV, and no normalisation is NaN."""
     E = np.linspace(680, 730, 251)
     base = _edge(E)
     e0s, nan_rows = [], 0
@@ -24,7 +25,8 @@ def test_seeded_noise_probe_deriv():
         nan_rows += int(np.isnan(r.y).any())
     assert np.std(e0s) < 0.5 and abs(np.mean(e0s) - 696.0) < 0.3 and nan_rows == 0
     raw = [derivative_e0(E, base + np.random.default_rng(s).normal(0, 0.02, E.size), width_ev=0) for s in range(100)]
-    assert np.std(raw) > 2.0                                       # the old estimate, for the record
+    # the plain gradient, ends excluded (0.7 eV): still twice the scatter of the smoothed one
+    assert np.std(raw) > 1.5 * np.std(e0s) and min(raw) > E[0] and max(raw) < E[-1]
 
 
 def test_half_step_ignores_a_sharp_pre_edge_peak():
@@ -55,6 +57,21 @@ def test_search_window_around_the_tabulated_edge():
     free = process(Spectrum("a", "x", E, y), TraceRequest("a", "x"))
     near = process(Spectrum("a", "x", E, y), TraceRequest("a", "x"), edge_ev=696.7)
     assert abs(free.e0 - 650) < 1 and abs(near.e0 - 696) < 0.5 and 696.7 - E0_SEARCH_EV < near.e0
+
+
+def test_e0_is_never_a_data_or_window_end():
+    """A start-up transient of the first points (the real TEY traces of my_beamtime) and a stronger edge just above
+    the search window both used to give E0 at an end (680.0 / 716.6 eV) and an all-NaN normalisation."""
+    E = np.linspace(680, 730, 251)
+    start = _edge(E, 690.0)
+    start[:2] = (-1.0, -0.5)                                       # the detector settling on the first two points
+    above = _edge(E, 690.0) + 10 * _edge(E, 722.0, 3.0)            # derivative still rising at 696.7 + 20 eV
+    for y in (start, above):
+        e0 = derivative_e0(E, y, 1.5, (696.7 - E0_SEARCH_EV, 696.7 + E0_SEARCH_EV))
+        assert abs(e0 - 690.0) < 0.3, e0
+        r = process(Spectrum("a", "x", E, y), TraceRequest("a", "x"), edge_ev=696.7)
+        assert abs(r.e0 - 690.0) < 0.3 and np.isfinite(r.y).all()
+        assert y is above or not r.note                            # (above: the post line climbs the second edge)
 
 
 def test_far_from_the_tabulated_edge_gives_a_calm_note():

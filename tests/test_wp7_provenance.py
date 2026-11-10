@@ -103,7 +103,7 @@ def test_every_csv_carries_its_provenance_and_reproduces(demo, tmp_path):
         else:
             assert roi == {d: [5, 200] for d in ("sdd1", "sdd2", "sdd3", "sdd4")}
         assert set(h["spikes_eV"]) >= {"i0", "sdd1", "tey"} or not st.despike
-        assert all(e in testdata.ENERGIES for v in h["spikes_eV"].values() for e in v)
+        assert all(e in testdata.DEMO_STACK_ENERGIES for v in h["spikes_eV"].values() for e in v)
         # the numbers, recomputed from the header alone
         pix, t = _recompute(proj, h)
         assert pix.size == h["members"]
@@ -169,13 +169,13 @@ def test_notes_err_and_masked_energies_reach_the_csv(demo, tmp_path, monkeypatch
         t = real(sd, pix, st, good)
         t.notes = ["1 energy with I0 below 0.2 x its median left out (NaN)"]
         t.err = {"fluo_sum": np.full(len(t.E), 0.01)}
-        t.masked = {"fluo_sum": np.array([False, True, False, False, False])}
+        t.masked = {"fluo_sum": np.arange(len(t.E)) == 1}
         return t
     monkeypatch.setattr(core_report, "zone_traces", with_extras)
     res = ReportBuilder(proj, zf, tmp_path / "reports", png_dpi=40, page_png_dpi=0).build()
     h = provenance.read_header(res.csvs[0])
     assert "1 energy with I0 below 0.2 x its median left out (NaN)" in h["notes"]
-    assert h["masked_energies_eV"] == {"fluo_sum": [testdata.ENERGIES[1]]}
+    assert h["masked_energies_eV"] == {"fluo_sum": [testdata.DEMO_STACK_ENERGIES[1]]}
     assert h["columns"].endswith("fluo_sum_err")
     from aurora.core.compare import read_csv_table
     _h, cols, data = read_csv_table(res.csvs[0])

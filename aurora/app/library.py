@@ -238,6 +238,10 @@ class Library(QObject):
             xanes = s.meta.get("layout") == "xanes" if isinstance(s.meta, dict) else False   # sgm_report: PFY / I0, TEY / I0
             if s.signal in show_signals or len(specs) == 1 or xanes:
                 r = self.new_request(s, norm)
+                # John Bussey's rule for his files: only the sdd-scaled row of a file is shown at first (TEY hidden)
+                if isinstance(s.meta, dict) and s.meta.get("layout") == "john" and s.signal != "sdd-scaled" \
+                        and any(o.signal == "sdd-scaled" for o in specs):
+                    r.show = False
                 self.requests.append(r)
                 added.append(r)
         if added:

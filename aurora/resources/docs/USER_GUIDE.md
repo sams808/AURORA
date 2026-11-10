@@ -105,7 +105,7 @@ plots mesh, photodiode, their ratio and TEY of any stack, the photodiode tests i
 
 A library of spectra, saved with the project. Easy mode is John Bussey's Compare: **Add saved spectra…** reads the
 John-format files saved by Check, and the table shows Show, Fit, Label, Signal, Shift eV and Colour; every row is the
-raw signal / I0 normalised the larch way (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened). The
+raw signal / I0 normalised the larch way (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened; AURORA's windows, John Bussey's GUI used −10..−5 and +10..+34 eV, and the Easy line under the plot says so). As in his GUI, a file's TEY row starts hidden. The
 diagnostics panel shows how each row was normalised. Advanced mode adds every column (normalisation, windows, E0
 choice and value, flatten, spacing, scale), other file layouts, references (**References…**, from the folder set in
 Settings) and configs. **Figure size…** sets the exported figure (3.5 × 4.5 in, 600 dpi, PNG + SVG + PDF by default);
@@ -114,7 +114,7 @@ Settings) and configs. **Figure size…** sets the exported figure (3.5 × 4.5 i
 ## 6. Fit
 
 Works on the rows ticked Fit in Compare, with their shifts and normalisation. Easy mode shows the LCF tab with its
-options stated (*coefficients sum to 1 · no negative coefficients · ± from 200 bootstrap draws*).
+options stated (*coefficients sum to 1 · no negative coefficients · ± from 200 bootstrap draws*), AURORA's defaults: John Bussey's GUI left the sum free, allowed negative coefficients and fitted 685–705 eV.
 
 - **LCF**: target and ticked components, fit range (blank: the Compare x range), coefficients ≥ 0 and summing to 1
   (both optional); a weighted fit with χ²ν, the R-factor and uncertainties that hold on correlated residuals

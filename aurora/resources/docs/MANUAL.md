@@ -441,7 +441,7 @@ de-spike k).
 | TEY | include TEY and its normalisation (same choices) |
 | de-spike, k | single-point outliers beyond k MADs of a 5-point running median are interpolated (k = 6 MAD by default). New scans use the coherent rule: a spike in one SDD is looked for against the other three, so a white line that all four detectors show is kept (the earlier rule, still used by files without a mode, could take a one-point white line of a coarse scan for a spike). Spike energies are listed in eV in the traces' notes, and spikes next to the edge give a note *check the preview* |
 | I0 | own, or the good-I0 mean of the scans ticked in Check (scans flagged I0 invalid start with the good-I0 mean). Energies where the I0 used is below 20 % of its median (beam loss) are left out of every / I0 trace and counted in the notes |
-| pre (eV), post (eV) | windows in eV, "680-684" style; blank = first 15 % / last 20 % of the energies |
+| pre (eV), post (eV) | windows in eV, "680-684" style; blank = first 15 % / last 20 % of the energies, the pre window ending at least 5 eV below E0 (the largest local maximum of the smoothed derivative, as in Compare; the browser zone tool kept the 15 %), else the first energy alone; a note in Check and the report says when it was shortened. A negative edge jump (a signal that falls across the edge) is kept as measured, divided by its size, with a note, as larch does |
 
 The header of the card prints the scan's time, label and edge, its flags (saturated SDDs, I0 invalid) or the pixel
 count of the zone.
@@ -632,7 +632,7 @@ The library belongs to the project: it is saved in `<project>/.aurora/library.js
 `library_spectra.npz` (the traces without a file of their own: zone traces from Reduce, differences) a moment after
 every change, and it comes back when the project is opened again. Easy mode is John Bussey's Compare tab: the columns
 Show, Fit, Label, Signal, Shift eV and Colour, and rows that all come from saved John-format files, so every row is the
-raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened).
+raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV and post +15..+35 eV, flattened). These windows are AURORA's defaults, not John Bussey's (a line under the stacked plot says so in Easy mode): his GUI used pre −10..−5 and post +10..+34 eV, without the flattening step (his division by the post − pre line flattens the same way). On his BO3 file the two differ by up to 0.43 near the white line, and agree within 0.008 when given the same windows. Larch's own pre_edge also starts the post window 15 eV above E0 on these scans. As in his GUI, the TEY row of a John-format file starts with **Show** unticked.
 
 ### 6.1 Loading
 
@@ -663,10 +663,10 @@ raw signal / I0 normalised with larch (two lines around E0, pre −20..−5 eV a
 | Norm | larch (two lines around E0), legacy (constant pre / post means over absolute windows), tey_line (pre-edge line only), none (a list) |
 | Shift eV | added to the energy axis (calibration offsets) |
 | Pre lo / hi, Post lo / hi | the fitting windows: eV from E0 for larch and tey_line; absolute eV for legacy, where a blank window reads *auto 15 %* / *auto 20 %* (the first 15 % and the last 20 % of the scan, John Bussey's defaults) |
-| E0 | how E0 is found: `deriv` (the maximum of the derivative smoothed over 1.5 eV, searched within 20 eV of the tabulated edge), `half` (the first crossing of half the edge step, iterated twice), `table` (the tabulated edge from xraydb), `fixed` (the E0 eV value), `row:<label [signal]>` (the E0 of another row, so every row of a comparison shares one E0 and the edge shifts become the measured quantity) |
+| E0 | how E0 is found: `deriv` (the largest local maximum of the derivative smoothed over 1.5 eV, searched within 20 eV of the tabulated edge and never within 1.5 eV of the data or search-window ends), `half` (the first crossing of half the edge step, iterated twice), `table` (the tabulated edge from xraydb), `fixed` (the E0 eV value), `row:<label [signal]>` (the E0 of another row, so every row of a comparison shares one E0 and the edge shifts become the measured quantity) |
 | E0 eV | the E0 in force; typing a value fixes it, an empty cell returns to `deriv` |
 | Flatten | post-edge line flattened to 1 |
-| Spacing, Scale | per-row offset (blank = the common spacing) and multiplier in the stacked plot |
+| Spacing, Scale | per-row offset (blank = the common spacing) and multiplier in the stacked plot and its figure only (John Bussey's *Scale (plot only)*): Fit, **Difference of the two selected rows** and the exported CSV use the trace unscaled |
 | Diag | the row's raw signal and fitted lines are shown in the diagnostics panel |
 | Colour | a button: click to choose the trace's colour; saved with the library and the config |
 
@@ -742,7 +742,7 @@ The card **Linear combination**: **target**, the ticked **components (tick)**, *
 1** and **allow negative coefficients** (Advanced), **bootstrap** draws and **resample** (Advanced), **Run LCF**. When
 the fit range boxes are blank, LCF uses the Compare x range (shown in the boxes as *670 (Compare)*), else the whole
 common range. Easy mode states the options in force in a read-only line, for example *coefficients sum to 1 · no
-negative coefficients · ± from 200 bootstrap draws · fit range: the Compare x range when the boxes are blank*.
+negative coefficients · ± from 200 bootstrap draws · fit range: the Compare x range when the boxes are blank · John Bussey's GUI: sum free, negatives allowed, 685–705 eV*. These are AURORA's defaults: John Bussey's LCF tab left the sum free, allowed negative coefficients and fitted 685–705 eV.
 
 The fit is weighted (1/σ²): σ is the spectrum's own uncertainty when it carries one, otherwise it is estimated from the
 target's point-to-point scatter (second differences), and the result says which. Results (**Coefficients**): the
@@ -764,7 +764,7 @@ formats.
 ![Fit, MCR](img/fit_mcr.png)
 
 **Update PCA scree** shows the explained variance of the ticked rows over the **range (eV)**. Choose the number of
-components, **max** iterations and the **tolerance (relative)** on the error change, optionally **clip negative values
+components, **max** iterations and the **tolerance (relative)** on the error change (the change of the RMSE between two iterations divided by the RMSE, so the scale of the data does not matter; John Bussey's GUI compared the absolute change with 1e-8), optionally **clip negative values
 to 0 before the fit**, then **Run MCR-ALS**: alternating least squares with non-negativity on both spectra and
 concentrations. The **Component spectra** and the per-sample proportions are plotted. MCR-ALS runs in the background
 (**Cancel** stops it); its chip reads *not converged: max iterations reached (200) …* when the tolerance was not
