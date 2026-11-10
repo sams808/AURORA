@@ -145,7 +145,7 @@ def test_textio_read_and_atomic_write(tmp_path, monkeypatch):
 def test_textio_refuses_a_raw_folder(tmp_path):
     from aurora.core.io import textio
     from aurora.core.io.safety import ProtectedPathError
-    day = tmp_path / "raw" / "2026-11-05"
+    day = tmp_path / "raw" / "2025-03-14"
     day.mkdir(parents=True)
     with pytest.raises(ProtectedPathError):
         textio.write_text_atomic(day / "x.json", "{}")
@@ -181,11 +181,11 @@ def test_no_text_io_without_an_encoding():
 
 # ----------------------------------------------------------------------------- stack ids
 @pytest.mark.parametrize("sid,day,scan,hhmm", [
-    ("2026-11-05_092758_alpha_beta_f_k_stack", "2026-11-05", "092758_alpha_beta_f_k_stack", "09:27"),
+    ("2025-03-14_092758_alpha_beta_f_k_stack", "2025-03-14", "092758_alpha_beta_f_k_stack", "09:27"),
     ("_092758_x_stack", "", "092758_x_stack", "09:27"),
-    ("CLS GUI_150255_UF4_u_n45coarse_1_stack", "CLS GUI", "150255_UF4_u_n45coarse_1_stack", "15:02"),
+    ("CLS GUI_150255_sampleB_u_n45coarse_1_stack", "CLS GUI", "150255_sampleB_u_n45coarse_1_stack", "15:02"),
     ("2026_run_b_000512_y_stack", "2026_run_b", "000512_y_stack", "00:05"),
-    ("stitched_2026-11-05_092758_x_stack", "", "stitched_2026-11-05_092758_x_stack", ""),
+    ("stitched_2025-03-14_092758_x_stack", "", "stitched_2025-03-14_092758_x_stack", ""),
     ("plainname", "", "plainname", ""),
 ])
 def test_split_stack_id_and_short_time(sid, day, scan, hhmm):
@@ -207,7 +207,7 @@ def test_stubs_have_their_final_signatures():
     from aurora.core.zones import export_ready
     assert default_signal(None, {}) == "pfy" and default_signal(object(), {"mode": "PFY F Kα"}) == "pfy"
     z = Zone(id=4, label="d", rects=[[0.0, 1.0, 0.0, 1.0]], polys=[[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]])
-    d = export_ready(z, {"2026-11-05_092758_x": (0.25, 0.25)})
+    d = export_ready(z, {"2025-03-14_092758_x": (0.25, 0.25)})
     assert d == z.to_json()
     d["rects"][0][0] = 99.0
     assert z.rects[0][0] == 0.0                                  # a copy: the zone is untouched
@@ -251,19 +251,19 @@ def test_scan_settings_differs_from():
 
 
 def test_zones_file_unknown_keys_ui_rules_and_polygons(tmp_path):
-    d = {"version": 1, "exported": "2026-11-06T20:00:00", "project": "P", "built": "x", "notes": "", "goodI0": {},
+    d = {"version": 1, "exported": "2025-03-15T20:00:00", "project": "P", "built": "x", "notes": "", "goodI0": {},
          "top_future": {"keep": True},
          "ui": {"preflight_ignored": ["a"]}, "rules": [{"scope": "project", "patch": {"tn": "i0pre"}}],
-         "holders": {"N5": {"holder": "N5", "day": "2026-11-05", "survey": "s", "holder_future": 7, "zones": [
+         "holders": {"holderA": {"holder": "holderA", "day": "2025-03-14", "survey": "s", "holder_future": 7, "zones": [
              {"id": 1, "label": "13 alpha_beta", "group": "", "comment": "", "rects": [], "erects": [], "paint": [], "erase": [],
               "polys": [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]], "zone_future": "z",
-              "st": {"2026-11-05_092758_x_stack": _settings_json(set_future=1.5)}, "members": {}}]}}}
+              "st": {"2025-03-14_092758_x_stack": _settings_json(set_future=1.5)}, "members": {}}]}}}
     zf = ZonesFile.from_json(json.loads(json.dumps(d)))
-    hz = zf.holders["N5"]
+    hz = zf.holders["holderA"]
     z = hz.zones[0]
     assert isinstance(hz, HolderZones) and hz.extra == {"holder_future": 7}
     assert z.polys == [[[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]] and z.extra == {"zone_future": "z"}
-    assert z.settings["2026-11-05_092758_x_stack"].extra == {"set_future": 1.5}
+    assert z.settings["2025-03-14_092758_x_stack"].extra == {"set_future": 1.5}
     assert zf.extra == {"top_future": {"keep": True}} and zf.ui == {"preflight_ignored": ["a"]} and len(zf.rules) == 1
     assert zf.to_json() == d
     zf.save(tmp_path / "session.json")
@@ -275,7 +275,7 @@ def test_zones_file_unknown_keys_ui_rules_and_polygons(tmp_path):
     zf.save(tmp_path / "zones_all.json", export=True)
     assert set(json.loads((tmp_path / "zones_all.json").read_text(encoding="utf-8"))) == set(ex)
     # a zones_all.json of the tool (no new keys) writes back without them
-    plain = ZonesFile.from_json({"version": 1, "holders": {"N5": {"holder": "N5", "day": "", "survey": "", "zones": []}}})
+    plain = ZonesFile.from_json({"version": 1, "holders": {"holderA": {"holder": "holderA", "day": "", "survey": "", "zones": []}}})
     assert plain.ui == {} and plain.rules == [] and plain.extra == {}
     assert set(plain.to_json()) == {"version", "exported", "project", "built", "notes", "goodI0", "holders"}
     (tmp_path / "list.json").write_text("[1, 2]", encoding="utf-8")
@@ -287,12 +287,12 @@ def test_zones_file_unknown_keys_ui_rules_and_polygons(tmp_path):
 def test_fake_project_with_two_holders(tmp_path):
     one = Project.discover(testdata.make_fake_project(tmp_path / "one"))
     two = Project.discover(testdata.make_fake_project(tmp_path / "two", n_holders=2))
-    assert [h.name for d in one.days for h in d.holders] == ["N5"]
+    assert [h.name for d in one.days for h in d.holders] == ["holderA"]
     hs = [h for d in two.days for h in d.holders]
-    assert [h.name for h in hs] == ["N5", "N6"]
+    assert [h.name for h in hs] == ["holderA", "holderB"]
     assert [s.name for s in hs[1].stacks] == [testdata.STACK2] and hs[1].survey.name == testdata.SURVEY2
     assert sorted(s.status for s in two.scans) == ["aborted", "complete", "complete", "survey", "survey", "test"]
-    # holder N5 is the same data whatever the variant
+    # holder holderA is the same data whatever the variant
     rel = Path("raw") / testdata.DAY / testdata.STACK / "alpha_beta_f_k_689_00eV" / "sdd2_0.bin"
     assert (tmp_path / "one" / rel).read_bytes() == (tmp_path / "two" / rel).read_bytes()
     with pytest.raises(ValueError):
@@ -310,7 +310,7 @@ def test_fake_project_loose_folder(tmp_path):
 def test_make_fake_zones_takes_a_project_or_its_root(fake_project):
     a = testdata.make_fake_zones(Project.discover(fake_project))
     b = testdata.make_fake_zones(fake_project)
-    assert a.to_json() == b.to_json() and len(b.holders["N5"].zones) == 3
+    assert a.to_json() == b.to_json() and len(b.holders["holderA"].zones) == 3
 
 
 def test_demo_extras_and_cmd_demo(tmp_path, capsys):

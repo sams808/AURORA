@@ -51,7 +51,7 @@ def test_zone_traces_survive_a_restart(qapp, fake_project):
     arrays = {k: (s.E.copy(), s.y.copy()) for k, s in lib.spectra.items()}
     zr = [s.meta.get("zone") for s in lib.spectra.values()]
     assert all(isinstance(z, ZoneRef) and z.sid == sid and z.zone >= 1 for z in zr)
-    assert {z.signal for z in zr} == {"fluo", "TEY"} and all(z.holder == "N5" for z in zr)
+    assert {z.signal for z in zr} == {"fluo", "TEY"} and all(z.holder == "holderA" for z in zr)
     assert "09:27" in lib.requests[0].label and "alpha_beta" in lib.requests[0].label      # HH:MM and the scan's short label
     win.session._save_timer.stop()
     win.close()                                                    # the pending library save is written at close
@@ -155,8 +155,8 @@ def test_relative_path_follows_a_moved_config_and_data(tmp_path):
 
 def test_zone_row_label():
     from aurora.app.library import zone_row_label
-    lab = zone_row_label("1 alpha", "N5", "2026-11-05_092758_alpha_beta_f_k_stack")
-    assert "09:27" in lab and lab.startswith("1 alpha · N5") and "alpha_beta" in lab
+    lab = zone_row_label("1 alpha", "holderA", "2025-03-14_092758_alpha_beta_f_k_stack")
+    assert "09:27" in lab and lab.startswith("1 alpha · holderA") and "alpha_beta" in lab
 
 
 def test_no_library_written_into_a_protected_project(qapp, fake_project, monkeypatch):
@@ -166,7 +166,7 @@ def test_no_library_written_into_a_protected_project(qapp, fake_project, monkeyp
     win = MainWindow()
     win.home.set_project(Project.discover(fake_project))
     E = np.linspace(680, 720, 41)
-    win.library.add_traces("z", E, E * 0 + 1, None, source="zone 1 of 2026-11-05_092758_alpha_beta_f_k_stack")
+    win.library.add_traces("z", E, E * 0 + 1, None, source="zone 1 of 2025-03-14_092758_alpha_beta_f_k_stack")
     assert win.library.flush() is False
     assert not (fake_project / ".aurora" / "library.json").exists()
     win.session._save_timer.stop()

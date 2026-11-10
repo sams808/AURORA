@@ -95,7 +95,7 @@ class Crumb(QWidget):
         return f" {SEP} ".join(parts) if parts else "no project"
 
     def entry(self, key: str) -> str:
-        """'N5 · 2026-11-05 · 1 stack · 2 zones'."""
+        """'holderA · 2025-03-14 · 1 stack · 2 zones'."""
         day, h = self.session.holder_keys[key]
         hz = self.session.zones.holders.get(key)
         n_z = len(hz.zones) if hz else 0
@@ -532,18 +532,17 @@ class MainWindow(QMainWindow):
                          label="self-test")
 
     def open_demo(self) -> None:
-        """Create (once) and open the synthetic demo beamtime in the user's data folder."""
+        """Create (once) and open the synthetic demo beamtime in the user's data folder. A demo written by an earlier
+        version (other names, a stack that stops before the edge) is left as it is: the current one goes next to it."""
         from platformdirs import user_data_dir
         from aurora.cli import cmd_demo
-        root = Path(user_data_dir(APP_NAME, appauthor=False)) / "demo_beamtime"
-        if not (root / "raw").is_dir():
+        from aurora.core.testdata import demo_folder, is_current_demo
+        root = demo_folder(Path(user_data_dir(APP_NAME, appauthor=False)))
+        if not is_current_demo(root):
             if cmd_demo(root):                              # the folder holds something else: never written into
                 self.statusBar().showMessage(f"the demo beamtime needs a new or empty folder: {root} is not empty",
                                              15000)
                 return
-        elif not (root / "references").is_dir():          # a demo written by an earlier version: add its spectra
-            from aurora.core.testdata import write_demo_extras
-            write_demo_extras(root)
         self.home.open_path(root)
         self.show_perspective("home")
 

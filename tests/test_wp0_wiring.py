@@ -66,7 +66,7 @@ def test_edit_nests_and_touches_once(qapp, fake_project):
     changed = []
     ses.zones_changed.connect(lambda: changed.append(1))
     x0, x1, y0, y1 = ses.stack_loaded(sid).bbox
-    with ses.edit("outer edit", holder="N5"):
+    with ses.edit("outer edit", holder="holderA"):
         assert ses.editing == "outer edit"
         z = ses.new_zone()                       # an edit itself: part of the outer one
         z.rects.append([x0, x1, y0, y1])
@@ -123,8 +123,8 @@ def test_ui_values_queue_flags_defaults_flush_and_read_only(qapp, fake_project):
     # the check queue
     seen = []
     ses.check_queue_changed.connect(lambda: seen.append(len(ses.check_queue)))
-    item = CheckItem("N5", z.id, sid)
-    assert ses.queue_for_check([item, ("N5", z.id, sid)]) == 1 and ses.check_queue == [item] and seen == [1]
+    item = CheckItem("holderA", z.id, sid)
+    assert ses.queue_for_check([item, ("holderA", z.id, sid)]) == 1 and ses.check_queue == [item] and seen == [1]
     assert ses.queue_for_check([item]) == 0 and seen == [1]
     assert ses.unqueue_for_check([item]) == 1 and ses.check_queue == [] and seen == [1, 0]
     ses.queue_for_check([item])
@@ -215,7 +215,7 @@ def test_every_zone_edit_goes_through_session_edit(qapp, fake_project, monkeypat
         ses.import_zones(out)
         ses.flush()
         d = json.loads(ses.session_file.read_text(encoding="utf-8"))
-        assert d["holders"]["N5"]["zones"][0]["st"][sid]["sig"] == "ipfy"
+        assert d["holders"]["holderA"]["zones"][0]["st"][sid]["sig"] == "ipfy"
         win.close()
     finally:
         mode.set_advanced(False)
@@ -235,21 +235,21 @@ def test_library_everywhere_navigation_and_edit_menu(qapp, tmp_path):
     assert titles[:3] == ["&File", "&Edit", "&View"] and win.menus["edit"] is not None
     # navigate: holder, zone, stack
     ses = win.session
-    assert list(ses.holder_keys) == ["N5", "N6"]
-    nav.go(win.check, "reduce", holder="N6")
+    assert list(ses.holder_keys) == ["holderA", "holderB"]
+    nav.go(win.check, "reduce", holder="holderB")
     pump(qapp)
-    assert ses.current_holder == "N6" and win.stack.currentWidget() is win.reduce
+    assert ses.current_holder == "holderB" and win.stack.currentWidget() is win.reduce
     sid = ses.stack_id(proj.find(testdata.STACK))
     dlg = QDialog(win.survey)                                     # from a dialog: found through its parent
     nav.go(dlg, "survey", sid=sid)
     pump(qapp)
-    assert ses.current_holder == "N5" and win.stack.currentWidget() is win.survey
+    assert ses.current_holder == "holderA" and win.stack.currentWidget() is win.survey
     assert win.reduce.scan_list.currentItem().data(Qt.UserRole) == sid
     win.jobs.wait_idle(30000); pump(qapp)
     with ses.edit("a zone to jump to"):
         z = ses.new_zone("target")
     ses.select_zone(None)
-    assert win.navigate("reduce", holder="N5", zone=z.id) and ses.current_zone == z.id
+    assert win.navigate("reduce", holder="holderA", zone=z.id) and ses.current_zone == z.id
     assert not mode.is_advanced() and win.navigate("maps") is False
     assert win.stack.currentWidget() is win.reduce and "Advanced mode" in win.statusBar().currentMessage()
     # shortcuts: menu entries from a widget inside the window, and from one added later (adopt)
@@ -378,15 +378,23 @@ def test_settings_defaults_author_and_update_check(qapp):
     assert get("report_author") == "Sami Soudani"
 
 
-def test_demo_action_adds_the_spectra_to_an_older_demo(qapp, tmp_path, monkeypatch):
+def test_demo_action_leaves_an_older_demo_alone(qapp, tmp_path, monkeypatch):
+    """A demo folder written by an earlier version (no README_demo.txt of this version) is neither opened nor changed:
+    the current demo is written next to it and opened; a second click reopens that one."""
     import platformdirs
     from aurora.app.main import MainWindow
     monkeypatch.setattr(platformdirs, "user_data_dir", lambda *a, **k: str(tmp_path / "data"))
-    root = testdata.make_fake_project(tmp_path / "data" / "demo_beamtime")        # as an earlier version wrote it
+    old = testdata.make_fake_project(tmp_path / "data" / "demo_beamtime")        # as an earlier version wrote it
+    before = sorted(p.relative_to(old).as_posix() for p in old.rglob("*"))
     win = MainWindow()
     win.demo_action.trigger()
     wait_home(qapp, win)
-    assert (root / "references" / "NaF_F_K_ref.csv").is_file()
-    assert (root / "processed" / "reduced" / "mixture 2" / "mixture 2_full_reduced.csv").is_file()
-    assert win.session.project is not None and win.session.project.root == root.resolve()
+    new = tmp_path / "data" / f"demo_beamtime_{testdata.DEMO_VERSION}"
+    assert win.session.project is not None and win.session.project.root == new.resolve()
+    assert testdata.is_current_demo(new) and (new / "references" / "NaF_F_K_ref.csv").is_file()
+    assert sorted(p.relative_to(old).as_posix() for p in old.rglob("*")) == before
+    win.demo_action.trigger()
+    wait_home(qapp, win)
+    assert win.session.project.root == new.resolve()
+    win.session._save_timer.stop()
     win.close()

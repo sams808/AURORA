@@ -20,16 +20,16 @@ def loose(tmp_path):
 
 
 def test_timestamps_in_iso_and_ctime_form():
-    assert parse_timestamp("Thu Nov  5 09:27:59 2026").isoformat() == "2026-11-05T09:27:59"
-    assert parse_timestamp(b"Thu Nov  5 09:28:00 2026").date().isoformat() == "2026-11-05"
-    assert parse_timestamp("2026-11-05T09:27:59").hour == 9
-    assert parse_timestamp("2026-11-05 23:59:01.250+00:00").date().isoformat() == "2026-11-05"
-    assert parse_timestamp("2026-11-05T09:27:59Z").tzinfo is not None
-    assert parse_timestamp("Fri Nov 6 00:05:00 2026").date().isoformat() == "2026-11-06"
+    assert parse_timestamp("Fri Mar 14 09:27:59 2025").isoformat() == "2025-03-14T09:27:59"
+    assert parse_timestamp(b"Fri Mar 14 09:28:00 2025").date().isoformat() == "2025-03-14"
+    assert parse_timestamp("2025-03-14T09:27:59").hour == 9
+    assert parse_timestamp("2025-03-14 23:59:01.250+00:00").date().isoformat() == "2025-03-14"
+    assert parse_timestamp("2025-03-14T09:27:59Z").tzinfo is not None
+    assert parse_timestamp("Sat Mar 15 00:05:00 2025").date().isoformat() == "2025-03-15"
     for bad in ("", "not a date", "Thu Foo  5 09:27:59 2026", "Thu Nov 31 09:27:59 2026"):
         assert parse_timestamp(bad) is None, bad
-    assert date_in_text("2026-11-05_092759_stack_data.h5") == "2026-11-05"
-    assert date_in_text("holderA_survey_2026-11-05_010013_695.00eV.h5") == "2026-11-05"
+    assert date_in_text("2025-03-14_092759_stack_data.h5") == "2025-03-14"
+    assert date_in_text("holderA_survey_2025-03-14_010013_695.00eV.h5") == "2025-03-14"
     assert date_in_text("2026-13-45_x.h5") == "" and date_in_text("no date") == ""
 
 
@@ -38,17 +38,17 @@ def test_file_day_attribute_then_name(loose, tmp_path):
     assert file_day(stack_h5) == testdata.DAY                    # root attribute (ctime form)
     survey_h5 = next((loose / testdata.SURVEY).glob("*.h5"))
     assert file_day(survey_h5) == testdata.DAY                   # no attribute: the date in the file name
-    junk = tmp_path / "2026-11-07_000000_broken.h5"
+    junk = tmp_path / "2025-03-16_000000_broken.h5"
     junk.write_bytes(b"not hdf5")
-    assert file_day(junk) == "2026-11-07"                        # unreadable: its name
+    assert file_day(junk) == "2025-03-16"                        # unreadable: its name
 
 
 def test_loose_folder_is_its_own_project(loose, tmp_path):
     proj = Project.discover(loose)
     assert proj.root == (tmp_path / "share" / "CLS GUI").resolve() and proj.raw == proj.root and proj.loose
     assert [d.date for d in proj.days] == [testdata.DAY]
-    assert all(DAY_RE.fullmatch(s.day) and s.day == "2026-11-05" for s in proj.scans), [s.day for s in proj.scans]
-    assert [h.name for d in proj.days for h in d.holders] == ["N5"]
+    assert all(DAY_RE.fullmatch(s.day) and s.day == "2025-03-14" for s in proj.scans), [s.day for s in proj.scans]
+    assert [h.name for d in proj.days for h in d.holders] == ["holderA"]
     assert sorted(s.status for s in proj.scans) == ["aborted", "complete", "survey", "test"]
     # an .h5 path resolves to its scan folder's project; so does the scan folder
     h5 = next((loose / testdata.STACK).glob("*.h5"))
@@ -90,7 +90,7 @@ def test_loose_stack_loads_and_the_session_lives_inside(qapp, loose):
     proj = Project.discover(loose)
     ses = Session()
     ses.set_project(proj)
-    assert list(ses.holder_keys) == ["N5"] and ses.holder_day("N5") == testdata.DAY
+    assert list(ses.holder_keys) == ["holderA"] and ses.holder_day("holderA") == testdata.DAY
     sid = ses.stack_id(proj.find(testdata.STACK))
     assert sid == f"{testdata.DAY}_{testdata.STACK}"
     sd = ses.stack(sid)                                           # no KeyError: the complete stack
@@ -115,7 +115,7 @@ def test_open_path_h5_of_a_loose_folder_then_reduce(qapp, loose):
     win.jobs.wait_idle(30000)
     qapp.processEvents()
     assert win.home.project is not None and win.home.project.root == loose.resolve()
-    assert win.crumb.text() == f"CLS GUI ▸ {testdata.DAY} ▸ N5"
+    assert win.crumb.text() == f"CLS GUI ▸ {testdata.DAY} ▸ holderA"
     ses = win.session
     sid = f"{testdata.DAY}_{testdata.STACK}"
     win.show_perspective("reduce")

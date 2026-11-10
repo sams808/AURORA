@@ -19,11 +19,11 @@ from aurora.core import overview, testdata
 from aurora.core.model import NotAProjectError, Project
 
 ROOT = Path(__file__).resolve().parents[1]
-DAY2 = "2026-11-06"
+DAY2 = "2025-03-15"
 
 
 def two_days(root: Path) -> Path:
-    """The synthetic beamtime with its day copied to a second day: raw/2026-11-05 and raw/2026-11-06."""
+    """The synthetic beamtime with its day copied to a second day: raw/2025-03-14 and raw/2025-03-15."""
     testdata.make_fake_project(root)
     shutil.copytree(root / "raw" / testdata.DAY, root / "raw" / DAY2)
     return root

@@ -141,11 +141,11 @@ def test_a_cache_with_fewer_pixels_recomputes_the_members(qapp, project2):
 def test_a_zone_of_another_holder_attaches_to_its_own_stacks(qapp, tmp_path):
     root = testdata.make_fake_project(tmp_path / "two", n_holders=2)
     ses = session(root)
-    ses.set_holder("N6")
-    z6 = draw_zone(ses, "on N6")
+    ses.set_holder("holderB")
+    z6 = draw_zone(ses, "on holderB")
     sid6 = sid_of(testdata.STACK2)
     assert set(z6.settings) == {sid6}
-    ses.set_holder("N5")
-    z5 = draw_zone(ses, "on N5")
+    ses.set_holder("holderA")
+    z5 = draw_zone(ses, "on holderA")
     assert set(z5.settings) == {SID_A} and set(z6.settings) == {sid6}
     ses._save_timer.stop()

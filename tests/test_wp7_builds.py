@@ -43,19 +43,19 @@ def test_build_rename_build_again(tmp_path):
     before = _tree(r1.folder)
     assert r1.folder.parent == out and r1.folder.name.endswith("_all") and r1.pdf.parent == r1.folder
     assert not list(out.glob(BUILDING_PREFIX + "*"))
-    zf.holders["N5"].zones[0].label = "1 alpha renamed"
+    zf.holders["holderA"].zones[0].label = "1 alpha renamed"
     r2 = _quick(proj, zf, out, title="T").build()
     assert r2.folder != r1.folder and r2.folder.parent == out
-    old_name = next(p.name for p in r1.csvs if p.name.startswith("N5_z1_"))
+    old_name = next(p.name for p in r1.csvs if p.name.startswith("holderA_z1_"))
     names2 = sorted(p.name for p in r2.csvs)
-    assert old_name.startswith("N5_z1_1_alpha_0") and old_name not in names2
-    assert any(n.startswith("N5_z1_1_alpha_renamed_") for n in names2)
+    assert old_name.startswith("holderA_z1_1_alpha_0") and old_name not in names2
+    assert any(n.startswith("holderA_z1_1_alpha_renamed_") for n in names2)
     assert sorted(p.name for p in (r2.folder / "csv").rglob("*.csv")) == names2          # only the new name
     assert _tree(r1.folder) == before                                                    # the first build untouched
     man = json.loads(r2.manifest.read_text(encoding="utf-8"))
     ch = man["changes_since"]
     assert ch["previous"] == r1.folder.name
-    assert ch["zones_renamed"] == ["N5 zone 1: '1 alpha' → '1 alpha renamed'"]
+    assert ch["zones_renamed"] == ["holderA zone 1: '1 alpha' → '1 alpha renamed'"]
     assert not ch["zones_added"] and not ch["zones_removed"] and not ch["settings_changed"]
     assert any("renamed" in ln for ln in ReportBuilder.changes_lines(ch))
     lat = json.loads((out / LATEST).read_text(encoding="utf-8"))
@@ -67,15 +67,15 @@ def test_changes_since_settings_zones_and_scans(tmp_path):
     zf = testdata.make_fake_zones(proj)
     out = tmp_path / "reports"
     _quick(proj, zf, out).build()
-    hz = zf.holders["N5"]
+    hz = zf.holders["holderA"]
     sid = next(iter(hz.zones[0].settings))
     hz.zones[0].settings[sid].fluo_norm = "max"
     hz.zones[2].settings[sid].include = True
     hz.zones.pop(1)
-    hz.zones.append(Zone(id=9, label="new one", group="Minerals", rects=list(hz.zones[0].rects)))
+    hz.zones.append(Zone(id=9, label="new one", group="Group 1", rects=list(hz.zones[0].rects)))
     r = _quick(proj, zf, out).build()
     ch = json.loads(r.manifest.read_text(encoding="utf-8"))["changes_since"]
-    assert ch["zones_added"] == ["N5 · 'new one' (zone 9)"] and ch["zones_removed"] == ["N5 · '2 beta' (zone 2)"]
+    assert ch["zones_added"] == ["holderA · 'new one' (zone 9)"] and ch["zones_removed"] == ["holderA · '2 beta' (zone 2)"]
     assert any("'1 alpha'" in s and "fluo_norm" in s for s in ch["settings_changed"])
     assert any("'3 gamma'" in s and "include" in s for s in ch["settings_changed"])
     assert ch["scans_added"] == []
@@ -86,16 +86,16 @@ def test_holders_scope_on_a_two_holder_project(tmp_path):
     zf = two_holder_zones(proj)
     out = tmp_path / "reports"
     both = _quick(proj, zf, out).build()
-    assert {e["holder"] for e in json.loads(both.manifest.read_text(encoding="utf-8"))["entries"]} == {"N5", "N6"}
-    b = _quick(proj, zf, out, holders=["N5"])
+    assert {e["holder"] for e in json.loads(both.manifest.read_text(encoding="utf-8"))["entries"]} == {"holderA", "holderB"}
+    b = _quick(proj, zf, out, holders=["holderA"])
     entries = b.collect()
-    assert entries and {e.holder for e in entries} == {"N5"}
-    res = _quick(proj, zf, out, holders=["N5"]).build()
+    assert entries and {e.holder for e in entries} == {"holderA"}
+    res = _quick(proj, zf, out, holders=["holderA"]).build()
     man = json.loads(res.manifest.read_text(encoding="utf-8"))
-    assert {e["holder"] for e in man["entries"]} == {"N5"} and man["scope"]["holders"] == ["N5"]
-    assert res.folder.name.endswith("_N5") and all(c.name.startswith("N5_") for c in res.csvs)
-    n6 = _quick(proj, zf, out, holders=["N6"]).collect()
-    assert {e.holder for e in n6} == {"N6"}
+    assert {e["holder"] for e in man["entries"]} == {"holderA"} and man["scope"]["holders"] == ["holderA"]
+    assert res.folder.name.endswith("_holderA") and all(c.name.startswith("holderA_") for c in res.csvs)
+    n6 = _quick(proj, zf, out, holders=["holderB"]).collect()
+    assert {e.holder for e in n6} == {"holderB"}
     assert _quick(proj, zf, out, days=["2026-01-01"]).collect() == []
     assert len(_quick(proj, zf, out, days=[testdata.DAY]).collect()) == len(entries) + len(n6)
 
@@ -127,9 +127,9 @@ def test_labels_that_slug_alike_give_distinct_files(tmp_path):
     proj = project(tmp_path)
     sid, (x0, x1, y0, y1) = bbox(proj, testdata.STACK)
     zf = testdata.make_fake_zones(proj)
-    hz = zf.holders["N5"]
-    a = Zone(id=13, label="13 alpha_beta", group="Minerals", rects=[[x0, (x0 + x1) / 2, y0, y1]])
-    b = Zone(id=14, label="13_alpha_beta", group="Minerals", rects=[[(x0 + x1) / 2, x1, y0, y1]])
+    hz = zf.holders["holderA"]
+    a = Zone(id=13, label="13 alpha_beta", group="Group 1", rects=[[x0, (x0 + x1) / 2, y0, y1]])
+    b = Zone(id=14, label="13_alpha_beta", group="Group 1", rects=[[(x0 + x1) / 2, x1, y0, y1]])
     for z in (a, b):
         z.settings[sid] = ScanSettings(stack=testdata.STACK, line="total XRF", n=6)
     hz.zones = [a, b]
@@ -159,12 +159,12 @@ def test_a_thread_renaming_zones_during_the_build_changes_nothing(tmp_path):
 
     def rename():
         while not stop.is_set():
-            for z in zf.holders["N5"].zones:
+            for z in zf.holders["holderA"].zones:
                 z.label = f"renamed {renames[0]}"
                 z.group = "Elsewhere"
                 for st in z.settings.values():
                     st.fluo_norm = "raw"
-            zf.holders["N5"].zones.append(Zone(id=100 + renames[0], label="intruder"))
+            zf.holders["holderA"].zones.append(Zone(id=100 + renames[0], label="intruder"))
             renames[0] += 1
             time.sleep(0.001)
     t = threading.Thread(target=rename, daemon=True)
@@ -293,25 +293,25 @@ def test_draft_and_current_holder_from_the_perspective(qapp, tmp_path, monkeypat
     mode.set_advanced(True)
     pump(qapp)
     assert rp.selected_holders() is None and rp.check_tabs.isTabVisible(2)
-    win.session.set_holder("N6")
+    win.session.set_holder("holderB")
     rp.current_holder_btn.click()                                  # 'current holder' in one click
-    assert rp.selected_holders() == ["N6"]
+    assert rp.selected_holders() == ["holderB"]
     rp.all_holders_btn.click()
     assert rp.selected_holders() is None
-    win.session.set_holder("N5")
+    win.session.set_holder("holderA")
     rp.preset.setCurrentIndex(rp.preset.findData("draft"))
-    assert rp.selected_holders() == ["N5"] and rp.dpi.value() == 110
+    assert rp.selected_holders() == ["holderA"] and rp.dpi.value() == 110
     assert not rp.appendix.isChecked() and not rp.maps.isChecked()
     rp.build()
     win.jobs.wait_idle(120000)
     pump(qapp)
     res = rp._result
-    assert res is not None and res.folder.name.endswith("_N5_draft")
+    assert res is not None and res.folder.name.endswith("_holderA_draft")
     man = json.loads(res.manifest.read_text(encoding="utf-8"))
-    assert man["options"]["holders"] == ["N5"] and man["options"]["preset"] == "draft"
-    assert {e["holder"] for e in man["entries"]} == {"N5"}
+    assert man["options"]["holders"] == ["holderA"] and man["options"]["preset"] == "draft"
+    assert {e["holder"] for e in man["entries"]} == {"holderA"}
     mode.set_advanced(False)
     pump(qapp)
-    assert not rp.check_tabs.isTabVisible(2) and "1 holder (N5" in rp.scope_line.text()
+    assert not rp.check_tabs.isTabVisible(2) and "1 holder (holderA" in rp.scope_line.text()
     assert "Draft preset" in rp.scope_line.text()
     close(win)

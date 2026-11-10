@@ -30,18 +30,18 @@ def test_exactly_the_three_findings(tmp_path):
     found = preflight(proj, zf)
     sid2 = f"{testdata.DAY}_{testdata.STACK2}"
     assert sorted((f.kind, f.holder, f.zone_id, f.sid) for f in found) == sorted([
-        ("ungrouped", "N5", 2, None), ("no_included", "N5", 3, None), ("uncovered_stack", "N6", None, sid2)])
+        ("ungrouped", "holderA", 2, None), ("no_included", "holderA", 3, None), ("uncovered_stack", "holderB", None, sid2)])
     assert [f.id for f in preflight(proj, zf)] == [f.id for f in found]                  # stable ids
     texts = {f.kind: f.text for f in found}
-    assert texts["ungrouped"] == "'2 beta' (N5) has no group: it goes under 'Ungrouped'."
-    assert texts["no_included"] == "'3 gamma' (N5) has no included scan, so it is left out."
+    assert texts["ungrouped"] == "'2 beta' (holderA) has no group: it goes under 'Ungrouped'."
+    assert texts["no_included"] == "'3 gamma' (holderA) has no included scan, so it is left out."
     assert "covered by no zone" in texts["uncovered_stack"]
     p = plan(proj, zf)
     assert (p.n_zones, p.n_spectra) == (2, 2) and p.totals() == "2 zones · 2 spectra · 3 warnings"
     assert p.totals(ignored={found[0].id}) == "2 zones · 2 spectra · 2 warnings"
     skipped = {z.label: z.skip for z in p.zones}
     assert skipped == {"1 alpha": "", "2 beta": "", "3 gamma": "no included scan"}
-    assert list(p.by_group()) == ["Minerals", "Ungrouped"]
+    assert list(p.by_group()) == ["Group 1", "Ungrouped"]
 
 
 def test_the_groups_follow_the_sample_sheet(tmp_path):
@@ -49,52 +49,52 @@ def test_the_groups_follow_the_sample_sheet(tmp_path):
     group list of one lab in the code."""
     proj = project(tmp_path)
     zf = testdata.make_fake_zones(proj)
-    z1, z2, z3 = zf.holders["N5"].zones
-    z2.group, z3.group = "Zeta glass", "Alpha"                        # z1 stays in Minerals
-    zf.holders["N5"].zones.append(Zone(id=4, label="4 delta", group="", rects=list(z1.rects)))
-    sheet = _sheet(("N5", "Zeta glass", "2 beta"), ("N5", "Minerals", "1 alpha"), ("N5", "Zeta glass", "x"))
-    assert list(plan(proj, zf, sheet).by_group()) == ["Zeta glass", "Minerals", "Alpha", "Ungrouped"]
-    assert list(plan(proj, zf, []).by_group()) == ["Alpha", "Minerals", "Zeta glass", "Ungrouped"]
+    z1, z2, z3 = zf.holders["holderA"].zones
+    z2.group, z3.group = "Zeta glass", "Alpha"                        # z1 stays in Group 1
+    zf.holders["holderA"].zones.append(Zone(id=4, label="4 delta", group="", rects=list(z1.rects)))
+    sheet = _sheet(("holderA", "Zeta glass", "2 beta"), ("holderA", "Group 1", "1 alpha"), ("holderA", "Zeta glass", "x"))
+    assert list(plan(proj, zf, sheet).by_group()) == ["Zeta glass", "Group 1", "Alpha", "Ungrouped"]
+    assert list(plan(proj, zf, []).by_group()) == ["Alpha", "Group 1", "Zeta glass", "Ungrouped"]
 
 
 def test_every_other_kind(tmp_path):
     proj = project(tmp_path, n_holders=2)
-    zf = two_holder_zones(proj)                              # '1 alpha' in Minerals on N5 and on N6
+    zf = two_holder_zones(proj)                              # '1 alpha' in Group 1 on holderA and on holderB
     sid, (x0, x1, y0, y1) = bbox(proj, testdata.STACK)
-    hz = zf.holders["N5"]
+    hz = zf.holders["holderA"]
     z1, z2, z3 = hz.zones
     z1.settings[sid].i0_source = "good"                      # no good-I0 scan ticked
     proj.find(testdata.STACK).summary = {"sdd_saturated": ["sdd2"]}       # flagged; z1 still sums SDD2
     z2.settings.pop(sid)                                     # covers the stack, no settings
-    far = Zone(id=7, label="far away", group="Minerals", rects=[[50.0, 51.0, 50.0, 51.0]])
+    far = Zone(id=7, label="far away", group="Group 1", rects=[[50.0, 51.0, 50.0, 51.0]])
     far.settings[sid] = ScanSettings(stack=testdata.STACK, line="total XRF")
-    gone = Zone(id=8, label="1 alpha", group="Minerals", rects=[[60.0, 61.0, 60.0, 61.0]])     # covers no stack
+    gone = Zone(id=8, label="1 alpha", group="Group 1", rects=[[60.0, 61.0, 60.0, 61.0]])     # covers no stack
     gone.settings[f"{testdata.DAY}_093000_nowhere_f_k_stack"] = ScanSettings(stack="093000_nowhere_f_k_stack")
     hz.zones += [far, gone]
-    sheet = _sheet(("N5", "Minerals", "1 alpha"), ("N5", "Minerals", "2 betta"), ("N5/N7", "Minerals", "delta"),
-                   ("N6", "Minerals", "1 alpha"))
+    sheet = _sheet(("holderA", "Group 1", "1 alpha"), ("holderA", "Group 1", "2 betta"), ("holderA/holderC", "Group 1", "delta"),
+                   ("holderB", "Group 1", "1 alpha"))
     found = preflight(proj, zf, sheet_rows=sheet)
     kinds = {}
     for f in found:
         kinds.setdefault(f.kind, []).append(f)
     by = lambda k: [(f.holder, f.zone_id, f.sid) for f in kinds.get(k, [])]       # noqa: E731
-    assert by("good_i0_empty") == [("N5", 1, None)]
-    assert by("saturated_ticked") == [("N5", 1, sid)] and "SDD2, flagged saturated (sgm_report)" in kinds["saturated_ticked"][0].text
-    assert by("no_settings") == [("N5", 2, sid)]
+    assert by("good_i0_empty") == [("holderA", 1, None)]
+    assert by("saturated_ticked") == [("holderA", 1, sid)] and "SDD2, flagged saturated (sgm_report)" in kinds["saturated_ticked"][0].text
+    assert by("no_settings") == [("holderA", 2, sid)]
     assert "select the scan in Reduce" in kinds["no_settings"][0].text
-    assert ("N5", 2, None) in by("no_included") and "no scan attached yet" in kinds["no_included"][0].text
-    assert by("no_pixels") == [("N5", 7, sid)]
-    assert by("scan_missing") == [("N5", 8, f"{testdata.DAY}_093000_nowhere_f_k_stack")]
+    assert ("holderA", 2, None) in by("no_included") and "no scan attached yet" in kinds["no_included"][0].text
+    assert by("no_pixels") == [("holderA", 7, sid)]
+    assert by("scan_missing") == [("holderA", 8, f"{testdata.DAY}_093000_nowhere_f_k_stack")]
     nis = {f.zone_id: f.text for f in kinds["label_not_in_sheet"]}
     assert "closest: '2 betta'" in nis[2] and 1 not in nis
-    assert {f.text for f in kinds["sheet_row_no_zone"]} >= {"Sample 'delta' of N5 (sample sheet) has no zone.",
-                                                            "Sample '2 betta' of N5 (sample sheet) has no zone."}
+    assert {f.text for f in kinds["sheet_row_no_zone"]} >= {"Sample 'delta' of holderA (sample sheet) has no zone.",
+                                                            "Sample '2 betta' of holderA (sample sheet) has no zone."}
     dup = kinds["duplicate_label"]
-    assert len(dup) == 1 and dup[0].text == "'1 alpha' appears in group Minerals on holders N5 and N6."
+    assert len(dup) == 1 and dup[0].text == "'1 alpha' appears in group Group 1 on holders holderA and holderB."
     assert "uncovered_stack" not in kinds                    # both complete stacks are covered
-    # scope: the N6 findings go when only N5 is built; the group filter keeps zone findings of the groups built
-    only5 = preflight(proj, zf, sheet_rows=sheet, holders=["N5"])
-    assert {f.holder for f in only5} == {"N5"} and not [f for f in only5 if f.kind == "duplicate_label"]
+    # scope: the holderB findings go when only holderA is built; the group filter keeps zone findings of the groups built
+    only5 = preflight(proj, zf, sheet_rows=sheet, holders=["holderA"])
+    assert {f.holder for f in only5} == {"holderA"} and not [f for f in only5 if f.kind == "duplicate_label"]
     assert not [f for f in preflight(proj, zf, sheet_rows=sheet, groups=["Ungrouped"]) if f.zone_id == 7]
 
 
@@ -112,8 +112,8 @@ def test_the_manifest_and_appendix_c_carry_the_scans_without_settings(tmp_path):
     proj = project(tmp_path)
     zf = testdata.make_fake_zones(proj)
     sid = f"{testdata.DAY}_{testdata.STACK}"
-    zf.holders["N5"].zones[1].settings.pop(sid)
-    zf.ui["preflight_ignored"] = [f"ungrouped|N5|2"]
+    zf.holders["holderA"].zones[1].settings.pop(sid)
+    zf.ui["preflight_ignored"] = [f"ungrouped|holderA|2"]
     b = ReportBuilder(proj, zf, tmp_path / "reports", png_dpi=40, page_png_dpi=0)
     res = b.build()
     man = json.loads(res.manifest.read_text(encoding="utf-8"))
@@ -141,9 +141,9 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     assert rp.check_tabs.tabText(0) == "Findings (3)" and rp.check_tabs.tabText(1) == "Contents (2)"
     # the Contents tree: group ▸ holder ▸ zone, a skipped zone with the warning icon and the reason
     groups = [rp.contents.topLevelItem(i) for i in range(rp.contents.topLevelItemCount())]
-    assert [g.text(0) for g in groups] == ["Minerals", "Ungrouped"]
+    assert [g.text(0) for g in groups] == ["Group 1", "Ungrouped"]
     minerals = groups[0].child(0)
-    assert minerals.text(0) == f"N5 · {testdata.DAY}"
+    assert minerals.text(0) == f"holderA · {testdata.DAY}"
     zones = {minerals.child(j).text(0): minerals.child(j) for j in range(minerals.childCount())}
     assert zones["1 alpha"].text(1) == "F K" and zones["1 alpha"].text(2) == "1"
     assert zones["3 gamma"].text(2) == "0" and not zones["3 gamma"].icon(0).isNull()
@@ -151,10 +151,10 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     # jump: the Show button of the ungrouped zone selects its holder and zone and shows Reduce
     item = next(lst.topLevelItem(i) for i in range(lst.topLevelItemCount()) if "has no group" in lst.topLevelItem(i).text(0))
     fid = item.data(0, Qt.UserRole)          # read now: a check run on the way back rebuilds the list's items
-    win.session.set_holder("N6")
+    win.session.set_holder("holderB")
     lst.itemWidget(item, 2).findChild(QToolButton).click()
     pump(qapp)
-    assert win.session.current_holder == "N5" and win.session.current_zone == 2
+    assert win.session.current_holder == "holderA" and win.session.current_zone == 2
     assert win.stack.currentWidget() is win.reduce
     win.show_perspective("report")
     pump(qapp)
@@ -193,7 +193,7 @@ def test_the_check_runs_again_after_an_edit(qapp, tmp_path, monkeypatch):
     assert rp.totals.text().endswith("2 warnings")
     ses = win.session
     with ses.edit("give zone 2 a group"):
-        ses.holder_zones("N5").zones[1].group = "Minerals"
+        ses.holder_zones("holderA").zones[1].group = "Group 1"
     from PySide6.QtTest import QTest
     QTest.qWait(600)
     win.jobs.wait_idle(60000)

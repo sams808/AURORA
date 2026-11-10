@@ -220,7 +220,7 @@ def test_polys_round_trip_through_the_session_file(qapp, win, fake_project):
     ses.flush()
     ses.save()
     d = json.loads(ses.session_file.read_text(encoding="utf-8"))
-    assert d["holders"]["N5"]["zones"][0]["polys"] == [TRIANGLE]
+    assert d["holders"]["holderA"]["zones"][0]["polys"] == [TRIANGLE]
     ses.set_project(Project.discover(fake_project))
     back = ses.holder_zones(create=False).zones[0]
     assert back.polys == [TRIANGLE]
@@ -235,13 +235,13 @@ def test_export_rasterises_polygons_for_the_zone_tool(qapp, fake_project, tmp_pa
     assert want == [0, 2, 6, 7, 8]
     zf = ZonesFile(project="T")
     from aurora.core.io.config import HolderZones
-    zf.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=[z])
+    zf.holders["holderA"] = HolderZones(holder="holderA", day=testdata.DAY, survey=testdata.SURVEY, zones=[z])
     from aurora.core.zones import export_json
     out = export_json(zf, {sd.id: sd})
     assert "ui" not in out and "rules" not in out and out["version"] == 1
     p = tmp_path / "zones_all.json"
     p.write_text(json.dumps(out), encoding="utf-8")
-    back = ZonesFile.load(p).holders["N5"].zones[0]
+    back = ZonesFile.load(p).holders["holderA"].zones[0]
     assert back.polys == [TRIANGLE]                       # kept for AURORA
     tool = Zone(id=1, label="tri", rects=back.rects, erects=back.erects, paint=back.paint, erase=back.erase)
     assert members(tool, sd.x, sd.y, sd.pitch).tolist() == want           # the HTML tool's rule: rects and paint
@@ -338,7 +338,7 @@ def test_survey_export_rasterises_polygon_zones(qapp, win, tmp_path):
     ses.export_zones(out)
     d = json.loads(out.read_text(encoding="utf-8"))
     assert d["version"] == 1 and "rules" not in d and "ui" not in d
-    back = ZonesFile.load(out).holders["N5"].zones[-1]
+    back = ZonesFile.load(out).holders["holderA"].zones[-1]
     assert back.polys == [TRIANGLE] and len(back.paint) == len(TRIANGLE_MEMBERS)
     sd = ses.stack_loaded(win.sid)
     tool = Zone(id=1, label="t", rects=back.rects, erects=back.erects, paint=back.paint, erase=back.erase)

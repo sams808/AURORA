@@ -46,19 +46,19 @@ def test_holder_switcher_in_the_crumb(qapp, two_holders):
     win = two_holders
     ses = win.session
     keys = list(ses.holder_keys)
-    assert keys == ["N5", "N6"] and ses.current_holder == "N5"
-    assert win.crumb.text() == "beamtime ▸ 2026-11-05 ▸ N5"
-    assert win.crumb.holder_btn.text() == "N5 ▾"
+    assert keys == ["holderA", "holderB"] and ses.current_holder == "holderA"
+    assert win.crumb.text() == "beamtime ▸ 2025-03-14 ▸ holderA"
+    assert win.crumb.holder_btn.text() == "holderA ▾"
     win.show_perspective("reduce")
     entries = win.crumb.holder_actions()
-    assert [a.text() for a in entries] == ["N5 · 2026-11-05 · 1 stack · 0 zones", "N6 · 2026-11-05 · 1 stack · 0 zones"]
+    assert [a.text() for a in entries] == ["holderA · 2025-03-14 · 1 stack · 0 zones", "holderB · 2025-03-14 · 1 stack · 0 zones"]
     entries[1].trigger()
     pump(qapp)
-    assert ses.current_holder == "N6" and win.crumb.text() == "beamtime ▸ 2026-11-05 ▸ N6"
+    assert ses.current_holder == "holderB" and win.crumb.text() == "beamtime ▸ 2025-03-14 ▸ holderB"
     sids = [win.reduce.scan_list.item(i).data(Qt.UserRole) for i in range(win.reduce.scan_list.count())]
-    assert sids == [ses.stack_id(s) for s in ses.stacks_of("N6")] and testdata.STACK2 in sids[0]
-    assert win.reduce.scans_card.title.text() == "Scans of holder N6"
-    assert win.check.run_btn.text() == "Run the checks on holder N6"
+    assert sids == [ses.stack_id(s) for s in ses.stacks_of("holderB")] and testdata.STACK2 in sids[0]
+    assert win.reduce.scans_card.title.text() == "Scans of holder holderB"
+    assert win.check.run_btn.text() == "Run the checks on holder holderB"
 
 
 def test_ctrl_pgdown_and_pgup_cycle_through_the_holders(qapp, two_holders):
@@ -70,10 +70,10 @@ def test_ctrl_pgdown_and_pgup_cycle_through_the_holders(qapp, two_holders):
         QTest.keyClick(win, Qt.Key_PageDown, Qt.ControlModifier)
         pump(qapp)
         seen.append(ses.current_holder)
-    assert seen == ["N6", "N5", "N6"]
+    assert seen == ["holderB", "holderA", "holderB"]
     QTest.keyClick(win, Qt.Key_PageUp, Qt.ControlModifier)
     pump(qapp)
-    assert ses.current_holder == "N5"
+    assert ses.current_holder == "holderA"
 
 
 def test_ctrl_number_opens_a_perspective(qapp, two_holders):

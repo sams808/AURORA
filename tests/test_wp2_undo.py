@@ -23,7 +23,7 @@ def qapp():
     return create_app(["aurora-tests"])
 
 
-def _zones_json(ses, key="N5"):
+def _zones_json(ses, key="holderA"):
     hz = ses.zones.holders.get(key)
     return [z.to_json() for z in hz.zones] if hz else []
 
@@ -143,7 +143,7 @@ def test_repeats_merge_only_within_the_window(qapp, fake_project):
 
 def test_a_proposal_of_two_zones_is_one_step(qapp, fake_project):
     from aurora.app import mode
-    summary = {"day": testdata.DAY, "holders": [{"holder": "N5", "survey": testdata.SURVEY, "scans": [
+    summary = {"day": testdata.DAY, "holders": [{"holder": "holderA", "survey": testdata.SURVEY, "scans": [
         {"scan": testdata.STACK, "zones": [{"name": "1 alpha", "x": -0.375, "y": 5.125, "px": 4},
                                            {"name": "2 beta", "x": 0.125, "y": 5.375, "px": 4}]}]}]}
     d = fake_project / "processed" / testdata.DAY
@@ -171,19 +171,19 @@ def test_after_an_undo_the_autosave_writes_the_state_before_the_edit(qapp, fake_
     ses = session(fake_project)
     a = draw_zone(ses, "A")
     ses.flush()
-    before = json.loads(json.dumps(ses.zones.holders["N5"].to_json()))
+    before = json.loads(json.dumps(ses.zones.holders["holderA"].to_json()))
     good_before = dict(ses.zones.good_i0)
     with ses.edit(f"change the settings of 09:27 in zone {a.id}"):
         a.settings[SID_A].fluo_norm = "max"
         a.settings[SID_A].sdd = [True, False, True, True]
         ses.zones.good_i0[SID_A] = True
     ses.flush()
-    assert json.loads(ses.session_file.read_text(encoding="utf-8"))["holders"]["N5"] != before
+    assert json.loads(ses.session_file.read_text(encoding="utf-8"))["holders"]["holderA"] != before
     ses.undo()
     assert ses._save_timer.isActive()
     wait(qapp, 1200)                                        # the autosave
     on_disk = json.loads(ses.session_file.read_text(encoding="utf-8"))
-    assert on_disk["holders"]["N5"] == before and on_disk["goodI0"] == good_before
+    assert on_disk["holders"]["holderA"] == before and on_disk["goodI0"] == good_before
     ses._save_timer.stop()
 
 
@@ -241,7 +241,7 @@ def test_numpy_values_in_an_edit_are_recorded_and_saved(qapp, fake_project, tmp_
         z.paint.append([np.float32(-0.5), np.float32(5.0), np.float64(0.25), np.float64(0.25)])
         z.comment = "np"
     assert ses.save()
-    saved = json.loads(ses.session_file.read_text(encoding="utf-8"))["holders"]["N5"]["zones"][0]
+    saved = json.loads(ses.session_file.read_text(encoding="utf-8"))["holders"]["holderA"]["zones"][0]
     assert saved["paint"] == [[-0.5, 5.0, 0.25, 0.25]]
     ses.export_zones(tmp_path / "zones_all.json")
     ses.undo()

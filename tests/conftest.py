@@ -67,10 +67,10 @@ def error_dialogs(monkeypatch):
     monkeypatch.setattr(crash, "show_error", lambda title, text, details="": calls.append((title, text, details)))
     yield calls
 
-from local_paths import local_path  # noqa: E402  (tests/: AURORA_REAL_PROJECT, else tests/local_paths.json)
+from local_paths import local_path, real_expectations  # noqa: E402  (tests/: AURORA_REAL_PROJECT, else local_paths.json)
 
 # no beamtime on this machine: a folder that does not exist, so the real-data tests skip and the guard below still holds
-REAL_PROJECT = local_path("AURORA_REAL_PROJECT") or Path("/nonexistent/my_beamtime")
+REAL_PROJECT = local_path("AURORA_REAL_PROJECT") or Path("/nonexistent/real_beamtime")
 # the real beamtime is read-only for the whole test session: every AURORA write path refuses it (aurora.core.io.safety)
 os.environ["AURORA_PROTECT_DIRS"] = os.pathsep.join(filter(None, [os.environ.get("AURORA_PROTECT_DIRS", ""), str(REAL_PROJECT)]))
 
@@ -171,3 +171,12 @@ def real_project() -> Path:
     if not (REAL_PROJECT / "raw").is_dir():
         pytest.skip(f"real beamtime folder not available: {REAL_PROJECT}")
     return REAL_PROJECT
+
+
+@pytest.fixture(scope="session")
+def real_expect(real_project) -> dict:
+    """The facts of the real beamtime the tests check (tests/local_paths.py real_expectations); skip without them."""
+    data = real_expectations(real_project)
+    if data is None:
+        pytest.skip("no aurora_expectations.json for the real beamtime (see tests/real_expectations.example.json)")
+    return data

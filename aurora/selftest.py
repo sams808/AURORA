@@ -99,11 +99,11 @@ def _write_john_csv(path: Path, label: str, E, y) -> None:
 
 
 def _add_stack_b(root: Path) -> None:
-    """A second complete stack of holder N5 over the same 4 x 3 grid (written like the synthetic beamtime's own)."""
+    """A second complete stack of holder holderA over the same 4 x 3 grid (written like the synthetic beamtime's own)."""
     from aurora.core import testdata
     x, y = testdata.snake_grid()
     testdata._write_stack(root / "raw" / testdata.DAY / STACK_B, "CaF2_f_k", testdata.ENERGIES,
-                          len(testdata.ENERGIES), x, y, np.random.default_rng(11), created="Thu Nov  5 09:55:00 2026")
+                          len(testdata.ENERGIES), x, y, np.random.default_rng(11), created="Fri Mar 14 09:55:00 2025")
 
 
 def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui: bool = True,
@@ -292,25 +292,25 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         p = Project.discover(root)
         assert p.loose and p.root == root.resolve(), (p.loose, p.root)
         assert all(s.day == testdata.DAY for s in p.scans), sorted({s.day for s in p.scans})
-        assert [h.name for d in p.days for h in d.holders] == ["N5"]
+        assert [h.name for d in p.days for h in d.holders] == ["holderA"]
         h5 = next((root / testdata.STACK).glob("*.h5"))
         assert Project.discover(h5).root == p.root
         # a stack recorded after midnight, before the next survey, stays with its holder
         mid = base / "midnight beamtime"
         rng = np.random.default_rng(11)
         x, y = testdata.snake_grid()
-        testdata._write_survey(mid / "raw" / "2026-11-05" / "233000_holderA_survey", "holderA", "233000", rng)
+        testdata._write_survey(mid / "raw" / "2025-03-14" / "233000_holderA_survey", "holderA", "233000", rng)
         late = "000500_NaF_f_k_stack"
-        testdata._write_stack(mid / "raw" / "2026-11-06" / late, "NaF_f_k", testdata.ENERGIES,
-                              len(testdata.ENERGIES), x, y, rng, created="Fri Nov  6 00:05:00 2026")
+        testdata._write_stack(mid / "raw" / "2025-03-15" / late, "NaF_f_k", testdata.ENERGIES,
+                              len(testdata.ENERGIES), x, y, rng, created="Sat Mar 15 00:05:00 2025")
         (mid / "processed").mkdir(parents=True, exist_ok=True)
         (mid / "config").mkdir(parents=True, exist_ok=True)
         pm = Project.discover(mid)
         hs = [h for d in pm.days for h in d.holders]
         st = pm.find(late)
-        assert [h.name for h in hs] == ["N5"] and late in [s.name for s in hs[0].stacks], [h.name for h in hs]
-        assert st.day == "2026-11-06" and st.holder == "N5" and st.continues == "2026-11-05", (st.day, st.continues)
-        return f"loose folder: {len(p.scans)} scans in {p.root.name}; {late} continues holder N5 of 2026-11-05"
+        assert [h.name for h in hs] == ["holderA"] and late in [s.name for s in hs[0].stacks], [h.name for h in hs]
+        assert st.day == "2025-03-15" and st.holder == "holderA" and st.continues == "2025-03-14", (st.day, st.continues)
+        return f"loose folder: {len(p.scans)} scans in {p.root.name}; {late} continues holder holderA of 2025-03-14"
     r.check("loose scan folders and holders across midnight", loose_and_midnight)
 
     def summaries():
@@ -320,11 +320,12 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         proj = ctx["proj"]
         st = proj.find(testdata.STACK)
         assert file_day(st.h5) == testdata.DAY, file_day(st.h5)
-        assert parse_timestamp("Thu Nov  5 09:27:59 2026").isoformat() == "2026-11-05T09:27:59"
+        assert parse_timestamp("Fri Mar 14 09:27:59 2025").isoformat() == "2025-03-14T09:27:59"
         assert energy_regions([680, 683, 686, 689, 692]) == [(680.0, 692.0, 3.0)]
         rows = dict(overview.scan_rows(st, proj, incomplete=[]))
         assert rows["time per map"] == "6 s per map", rows.get("time per map")
-        assert rows["energy regions"] == "680–692 eV in 3 eV steps", rows.get("energy regions")
+        e = testdata.EDGE_ENERGIES                      # the demo's stack: across the F K edge in 1 eV steps
+        assert rows["energy regions"] == f"{e[0]:.0f}–{e[-1]:.0f} eV in 1 eV steps", rows.get("energy regions")
         assert overview.incomplete_energies(st) == []
         prow = dict(overview.project_rows(proj))
         assert any("holder" in k.lower() for k in prow), list(prow)
@@ -423,7 +424,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         proj, sd = ctx["proj"], ctx["sd"]
         zf = testdata.make_fake_zones(proj)
         ctx["zones"] = zf
-        z = zf.holders["N5"].zones[0]
+        z = zf.holders["holderA"].zones[0]
         sid = next(iter(z.settings))
         pix = members(z, sd.x, sd.y, sd.pitch)
         t = zone_traces(sd, pix, z.settings[sid])
@@ -433,8 +434,8 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         got = members(tri, sd.x, sd.y, sd.pitch).tolist()
         assert got == [0, 1, 2, 6, 7, 8], got
         zp = ZonesFile(project="T")
-        zp.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=[tri])
-        back = export_json(zp, {sd.id: sd})["holders"]["N5"]["zones"][0]
+        zp.holders["holderA"] = HolderZones(holder="holderA", day=testdata.DAY, survey=testdata.SURVEY, zones=[tri])
+        back = export_json(zp, {sd.id: sd})["holders"]["holderA"]["zones"][0]
         tool = Zone.from_json({k: v for k, v in back.items() if k != "polys"})
         assert members(tool, sd.x, sd.y, sd.pitch).tolist() == got
         return f"zone {z.label}: {len(pix)} px, sum {np.nanmin(t.sum):.3g}..{np.nanmax(t.sum):.3g}; triangle {got}"
@@ -477,18 +478,18 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         from aurora.core.io.config import ScanSettings
         proj = ctx["proj"]
         zf = testdata.make_fake_zones(proj)
-        rule = rl.Rule.from_json({"name": "Minerals TEY", "scope": {"kind": "groups", "groups": ["Minerals"]},
+        rule = rl.Rule.from_json({"name": "Group 1 TEY", "scope": {"kind": "groups", "groups": ["Group 1"]},
                                   "patch": {"tn": "i0pre"}})
         rows = rule.dry_run(zf, proj)
-        assert {(r_.holder, r_.zone) for r_ in rows} == {("N5", 1), ("N5", 3)}, rows
+        assert {(r_.holder, r_.zone) for r_ in rows} == {("holderA", 1), ("holderA", 3)}, rows
         rule.apply(zf, proj)
-        z1, z2, z3 = zf.holders["N5"].zones
+        z1, z2, z3 = zf.holders["holderA"].zones
         st1 = next(iter(z1.settings.values()))
         assert st1.tey_norm == "i0pre" and next(iter(z2.settings.values())).tey_norm != "i0pre"
         assert rule.dry_run(zf, proj) == []
         st3 = next(iter(z3.settings.values()))
         st3.tey_norm, st3.pinned = "area", ["tn"]                       # a field set by hand survives the rule
-        other = rl.Rule.from_json({"scope": {"kind": "groups", "groups": ["Minerals"]}, "patch": {"tn": "max"}})
+        other = rl.Rule.from_json({"scope": {"kind": "groups", "groups": ["Group 1"]}, "patch": {"tn": "max"}})
         other.apply(zf, proj)
         assert st3.tey_norm == "area" and st1.tey_norm == "max"
         assert [c.field for c in other.apply(zf, proj, override=True)] == ["tn"] and st3.tey_norm == "max"
@@ -552,7 +553,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
             rpd[:, :, 0, k] = rng.poisson(lam)
         i0 = 2.5 + 0.005 * rng.standard_normal((len(E), 4))
         tey = (mu / mu.max())[:, None] * (1 + 0.002 * rng.standard_normal((len(E), 4)))
-        sd = StackData(id="2026-11-05_120000_coarse_stack", name="120000_coarse_stack", day="2026-11-05", E=E.copy(),
+        sd = StackData(id="2025-03-14_120000_coarse_stack", name="120000_coarse_stack", day="2025-03-14", E=E.copy(),
                        x=np.array([0.0, 0.1, 0.0, 0.1]), y=np.array([0.0, 0.0, 0.1, 0.1]), i0=i0, tey=tey,
                        roi_pix_det=rpd, valid=np.ones(len(E), bool), labels=["F Kα"], main="F Kα", edge=("F", "K"),
                        edge_ev=696.7, pitch=(0.1, 0.1))
@@ -580,7 +581,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         from aurora.core.compare import load_spectra
         from aurora.core.export import write_john
         proj, sd, zf = ctx["proj"], ctx["sd"], ctx["zones"]
-        z = zf.holders["N5"].zones[0]
+        z = zf.holders["holderA"].zones[0]
         sid = next(iter(z.settings))
         scan = proj.find(testdata.STACK)
         paths = write_john(z, sid, sd, z.settings[sid], base / "john" / "1 alpha", label="1 alpha", project=proj,
@@ -674,7 +675,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         from aurora.core.compare import Spectrum, TraceRequest, load_config, read_spectra_arrays, save_config, sidecar_path
         sp = spectra_set()
         A = sp["A"]
-        zone_spec = Spectrum(label="zone 1 · N5", signal="fluo", E=A.E.copy(), y=A.y.copy(), source="zone:1:N5")
+        zone_spec = Spectrum(label="zone 1 · holderA", signal="fluo", E=A.E.copy(), y=A.y.copy(), source="zone:1:holderA")
         reqs = [TraceRequest(A.label, A.signal), TraceRequest(zone_spec.label, zone_spec.signal, e0_mode="table")]
         path = base / "compare config" / "config.json"
         written = save_config(path, reqs, {A.label: str(ctx["ref_folder"] / "A_full_reduced.csv")}, spectra=[zone_spec])
@@ -842,7 +843,7 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         v = ReportBuilder(ctx["proj"], ctx["zones"], out).verify(res.manifest)
         assert v.ok and v.checked == len(res.csvs), v.text()
         changed = copy_zones(ctx["zones"])
-        next(iter(changed.holders["N5"].zones[0].settings.values())).fluo_norm = "max"
+        next(iter(changed.holders["holderA"].zones[0].settings.values())).fluo_norm = "max"
         v2 = ReportBuilder(ctx["proj"], changed, out).verify(res.manifest)
         assert not v2.ok and len(v2.differences) == 1 and "1 alpha" in v2.differences[0], v2.differences
         return (f"{res.pages} pages, {len(chk['pngs'])} PNG each with its SVG, {len(res.csvs)} CSV with provenance; "
@@ -863,10 +864,10 @@ def _core_checks(r: _Runner, ctx: dict, base: Path) -> None:
         draft = ReportBuilder(proj, zf, out, preset="draft")
         assert draft.png_dpi == 110 and not draft.appendix and not draft.maps
         assert ReportBuilder(proj, zf, out).png_dpi == 600
-        assert ReportBuilder(proj, zf, out, holders=["N5"]).scope_keys() == ["N5"]
+        assert ReportBuilder(proj, zf, out, holders=["holderA"]).scope_keys() == ["holderA"]
         assert AUTHOR == "" and resolve_author("X Y") == ("X Y", "Settings")
         assert isinstance(os_full_name(), str)
-        return f"{len(found)} findings ({', '.join(kinds)}), '{p.totals()}', Draft 110 dpi, holders scope N5"
+        return f"{len(found)} findings ({', '.join(kinds)}), '{p.totals()}', Draft 110 dpi, holders scope holderA"
     r.check("report pre-flight, presets, scope and author", report_plan)
 
     # ------------------------------------------------------------------ command line (WP8a)
@@ -1184,7 +1185,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
             ses.flush()
             bak = ses.session_file.with_name("session.json.bak")
             assert bak.exists(), "no session.json.bak after the second save"
-            labels_bak = [q["label"] for q in json.loads(bak.read_text(encoding="utf-8"))["holders"]["N5"]["zones"]]
+            labels_bak = [q["label"] for q in json.loads(bak.read_text(encoding="utf-8"))["holders"]["holderA"]["zones"]]
             data = ses.session_file.read_bytes()
             ses.session_file.write_bytes(data[: len(data) // 2])            # a damaged session.json
         finally:
@@ -1198,7 +1199,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
             assert got == labels_bak, (got, labels_bak)
             corrupt = list(ses2.session_file.parent.glob("session.corrupt-*.json"))
             assert len(corrupt) == 1 and told and "was damaged" in told[0], (corrupt, told)
-            assert ZonesFile.load(ses2.session_file).holders["N5"].zones, "session.json was not rewritten"
+            assert ZonesFile.load(ses2.session_file).holders["holderA"].zones, "session.json was not rewritten"
             n = len(ses2.holder_zones().zones)
             added = ses2.import_zones(ctx["session_export"], policy="merge")
             li = ses2.last_import
@@ -1397,7 +1398,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         names = [fit.target.itemText(i) for i in range(fit.target.count())]
         target = next(t for t in names if t.startswith("mixture 1") and "sdd-scaled" in t)
         fit.target.setCurrentText(target)
-        comps = {"NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "BaY2F8 [sdd-scaled]"}
+        comps = {"NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "LiF [sdd-scaled]"}
         for i in range(fit.components.count()):
             it = fit.components.item(i)
             it.setCheckState(Qt.Checked if it.text() in comps else Qt.Unchecked)
@@ -1407,7 +1408,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         res = fit.lcf_result
         assert res is not None and fit.lcf_chip.text().startswith("converged"), (fit.lcf_chip.text(), fit.lcf_info.text())
         coef = dict(zip(fit._lcf_names[1], res.coefficients))
-        want = {"NaF [sdd-scaled]": 0.5, "CaF2 [sdd-scaled]": 0.3, "BaY2F8 [sdd-scaled]": 0.2}
+        want = {"NaF [sdd-scaled]": 0.5, "CaF2 [sdd-scaled]": 0.3, "LiF [sdd-scaled]": 0.2}
         assert all(abs(coef[k] - v) < 0.03 for k, v in want.items()), coef
         fit.run_pca()
         fit.n_comp.setValue(2)

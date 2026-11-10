@@ -57,7 +57,7 @@ def test_a_fresh_window(qapp, fake_project):
     assert win.check.queue_state.isVisible() and win.check.queue_state.buttons[0].text() == "Go to Reduce"
     mode.set_advanced(True)
     pump(qapp)
-    assert win.check.run_state.isVisible() and "holder N5" in win.check.run_state.buttons[0].text()
+    assert win.check.run_state.isVisible() and "holder holderA" in win.check.run_state.buttons[0].text()
     mode.set_advanced(False)
     pump(qapp)
     win.show_perspective("report")

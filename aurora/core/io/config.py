@@ -93,7 +93,7 @@ class Calibration:
 class RoiBins:
     """`roi_bins.json`: line label -> {sdd: [first channel, last channel + 1]}, identical for every scan and day.
 
-    Read-only here: the windows are defined once and never refitted silently .
+    Read-only here: the windows are defined once and never refitted silently.
     """
 
     def __init__(self, path: Path | None = None, data: dict | None = None):
@@ -135,11 +135,11 @@ def load_sample_elements(path: Path) -> dict[str, list[str]]:
     return {k: list(v) for k, v in d.items() if not k.startswith("_") and isinstance(v, list)}
 
 
-# ----------------------------------------------------------------------------- the sample sheet (cp1252 csv)
+# ----------------------------------------------------------------------------- the sample sheet (a csv)
 @dataclass
 class SheetRow:
-    plate: str                      # 'Final plate#' (N7, R2 ...)
-    group: str                      # 'Sample group'
+    plate: str                      # the holder: column 'Holder' or 'Final plate#' (holderA, ...)
+    group: str                      # column 'Group' or 'Sample group'
     sample_id: str                  # 'Sample ID'
     composition: str
     f_k_edge: str
@@ -148,8 +148,22 @@ class SheetRow:
     raw: dict = field(default_factory=dict)
 
 
+def _sheet_key(header: str) -> str:
+    """A header compared without case, spaces or punctuation: 'Final plate#' -> 'finalplate'."""
+    return "".join(c for c in header.lower() if c.isalnum())
+
+
+# column -> the header names that mean it (compared through _sheet_key), the first present wins
+_SHEET_COLUMNS = {"plate": ("finalplate", "holder", "plate"), "group": ("samplegroup", "group"),
+                  "composition": ("composition", "formula"), "f_k_edge": ("fkedge",),
+                  "other_edges": ("otheredges", "edges", "edge")}
+
+
 def read_sample_sheet(path: Path) -> list[SheetRow]:
-    """The sample sheet: cp1252, a junk first line, the header on line 2, one row per sample."""
+    """A lab sample sheet exported from a spreadsheet: cp1252 (ASCII and UTF-8 without special characters read the
+    same), title lines allowed above the header, which is the first of the first five lines with a 'Sample ID'
+    column, one row per sample. Holder, group and edge columns go by several names (Holder or Final plate#, Group or
+    Sample group, Edges, ...)."""
     path = Path(path)
     with open(path, encoding="cp1252", newline="") as f:
         rows = list(csv.reader(f))
@@ -159,9 +173,17 @@ def read_sample_sheet(path: Path) -> list[SheetRow]:
     hi = next((i for i, r in enumerate(rows[:5]) if any("Sample ID" in c for c in r)), 1)
     header = [c.strip() for c in rows[hi]]
     idx = {h: i for i, h in enumerate(header)}
+    by_key = {}
+    for i, h in enumerate(header):
+        by_key.setdefault(_sheet_key(h), i)
+    cols = {name: next((by_key[k] for k in keys if k in by_key), None) for name, keys in _SHEET_COLUMNS.items()}
 
     def get(r, key):
         i = idx.get(key)
+        return r[i].strip() if i is not None and i < len(r) else ""
+
+    def col(r, name):
+        i = cols[name]
         return r[i].strip() if i is not None and i < len(r) else ""
 
     out = []
@@ -171,10 +193,10 @@ def read_sample_sheet(path: Path) -> list[SheetRow]:
         sid = get(r, "Sample ID")
         if not sid:
             continue
-        notes_key = next((h for h in header if h.startswith("Notes")), "")
-        out.append(SheetRow(plate=get(r, "Final plate#"), group=get(r, "Sample group"), sample_id=sid,
-                            composition=get(r, "Composition"), f_k_edge=get(r, "F K edge"),
-                            other_edges=get(r, "Other edges?"), notes=get(r, notes_key) if notes_key else "",
+        notes_key = next((h for h in header if h.lower().startswith("note")), "")
+        out.append(SheetRow(plate=col(r, "plate"), group=col(r, "group"), sample_id=sid,
+                            composition=col(r, "composition"), f_k_edge=col(r, "f_k_edge"),
+                            other_edges=col(r, "other_edges"), notes=get(r, notes_key) if notes_key else "",
                             raw={h: (r[i].strip() if i < len(r) else "") for h, i in idx.items() if h}))
     log.info("%s: %d sample rows, header line %d", path, len(out), hi + 1)
     return out

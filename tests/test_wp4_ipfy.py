@@ -108,10 +108,10 @@ def test_ipfy_edge_jump_positive_in_every_normalisation_mode(demo):
 
 def test_a_session_without_sig_loads_as_pfy(demo):
     sd, pix = demo
-    zf = ZonesFile.from_json({"holders": {"N5": {"holder": "N5", "zones": [{"id": 1, "label": "a", "st": {
+    zf = ZonesFile.from_json({"holders": {"holderA": {"holder": "holderA", "zones": [{"id": 1, "label": "a", "st": {
         sd.id: {"inc": True, "sdd": [1, 1, 1, 1], "line": "O Kα", "fn": "i0jump", "tey": True, "tn": "i0jump",
                 "ds": True, "k": 6, "i0src": "own", "pre": None, "post": None, "stack": sd.name}}}]}}})
-    st = zf.holders["N5"].zones[0].settings[sd.id]
+    st = zf.holders["holderA"].zones[0].settings[sd.id]
     assert st.signal == "pfy" and st.ipfy_mode == "ratio" and "sig" not in st.to_json()
     assert zone_traces(sd, pix, st).signal == "pfy"
 

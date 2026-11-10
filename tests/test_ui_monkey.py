@@ -136,8 +136,8 @@ def test_click_everything_on_the_demo(qapp, cancel_dialogs, error_dialogs, tmp_p
     mode.set_advanced(advanced)
     win = build_demo_window(qapp, tmp_path)
     ses = win.session
-    ses.zones.holders["N5"].zones.extend(z for z in make_fake_zones(ses.project).holders["N5"].zones
-                                         if z.id not in {zz.id for zz in ses.zones.holders["N5"].zones})
+    ses.zones.holders["holderA"].zones.extend(z for z in make_fake_zones(ses.project).holders["holderA"].zones
+                                         if z.id not in {zz.id for zz in ses.zones.holders["holderA"].zones})
     ses.touch()
     _pump(qapp, win)
     n = click_everything(qapp, win)

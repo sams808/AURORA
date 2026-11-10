@@ -28,7 +28,7 @@ def qapp():
 def _with_unknown_keys(d: dict) -> dict:
     d = copy.deepcopy(d)
     d["top_future"] = {"keep": [1, 2]}
-    h = d["holders"]["N5"]
+    h = d["holders"]["holderA"]
     h["holder_future"] = "h"
     z = h["zones"][0]
     z["zone_future"] = 3.5
@@ -169,7 +169,7 @@ def developer_example(tmp_path) -> str:
     cmd_demo(root)
     ses = Session()
     ses.set_project(Project.discover(root))
-    demo = testdata.make_fake_zones(ses.project).holders["N5"].zones[:2]
+    demo = testdata.make_fake_zones(ses.project).holders["holderA"].zones[:2]
     with ses.edit("demo zones"):
         ses.holder_zones().zones.extend(demo)
     ses.clock = lambda: __import__("datetime").datetime(2026, 11, 8, 9, 0, 0)
@@ -199,7 +199,7 @@ def test_the_generated_developer_example_round_trips(qapp, tmp_path):
     p.write_text(text, encoding="utf-8")
     zf = ZonesFile.load(p)
     assert zf.to_json() == json.loads(text)
-    assert zf.schema == SESSION_SCHEMA and len(zf.holders["N5"].zones) == 2 and zf.holders["N5"].zones[0].settings
+    assert zf.schema == SESSION_SCHEMA and len(zf.holders["holderA"].zones) == 2 and zf.holders["holderA"].zones[0].settings
 
 
 def _developer_block() -> str | None:

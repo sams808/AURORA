@@ -35,7 +35,7 @@ def test_a_pending_edit_is_saved_to_its_own_project(qapp, tmp_path):
     ses.set_project(Project.discover(b))
     wait(qapp, 1500)
     labels = [zz["label"] for zz in json.loads((a / ".aurora" / "session.json").read_text(encoding="utf-8"))
-              ["holders"]["N5"]["zones"]]
+              ["holders"]["holderA"]["zones"]]
     assert labels == ["in A"]
     assert not (b / ".aurora" / "session.json").exists()
     # the same through an edit
@@ -44,7 +44,7 @@ def test_a_pending_edit_is_saved_to_its_own_project(qapp, tmp_path):
     ses.set_project(Project.discover(a))
     wait(qapp, 1200)
     assert [zz["label"] for zz in json.loads((b / ".aurora" / "session.json").read_text(encoding="utf-8"))
-            ["holders"]["N5"]["zones"]] == ["in B"]
+            ["holders"]["holderA"]["zones"]] == ["in B"]
     assert [zz.label for zz in ses.holder_zones().zones] == ["in A"]
     ses._save_timer.stop()
 
@@ -52,15 +52,15 @@ def test_a_pending_edit_is_saved_to_its_own_project(qapp, tmp_path):
 def test_an_edit_of_a_holder_it_did_not_name_is_still_saved(qapp, tmp_path):
     root = testdata.make_fake_project(tmp_path / "two", n_holders=2)
     ses = session(root)
-    ses.set_holder("N6")
-    draw_zone(ses, "on N6")
+    ses.set_holder("holderB")
+    draw_zone(ses, "on holderB")
     ses.flush()
-    ses.set_holder("N5")
-    with ses.edit("an edit named for N5"):                 # changes N6 without saying so
-        ses.holder_zones("N6").zones[0].label = "renamed"
+    ses.set_holder("holderA")
+    with ses.edit("an edit named for holderA"):                 # changes holderB without saying so
+        ses.holder_zones("holderB").zones[0].label = "renamed"
     ses.flush()
     on_disk = json.loads(ses.session_file.read_text(encoding="utf-8"))
-    assert on_disk["holders"]["N6"]["zones"][0]["label"] == "renamed"
+    assert on_disk["holders"]["holderB"]["zones"][0]["label"] == "renamed"
     ses._save_timer.stop()
 
 
@@ -104,7 +104,7 @@ def test_an_edit_then_reload_keeps_both_zones(qapp, fake_project):
     ses.set_project(proj)                                                  # Reload
     assert [z.label for z in ses.holder_zones().zones] == ["one", "two"]
     on_disk = json.loads(ses.session_file.read_text(encoding="utf-8"))
-    assert [z["label"] for z in on_disk["holders"]["N5"]["zones"]] == ["one", "two"]
+    assert [z["label"] for z in on_disk["holders"]["holderA"]["zones"]] == ["one", "two"]
     ses._save_timer.stop()
 
 
@@ -112,7 +112,7 @@ def test_reload_keeps_the_place(qapp, tmp_path):
     root = two_stack_project(tmp_path / "beamtime", n_holders=2)
     win = window(qapp, Project.discover(root))
     ses = win.session
-    ses.set_holder("N5"); pump(qapp)
+    ses.set_holder("holderA"); pump(qapp)
     sid_b = sid_of(STACK_B)
     for sid in (SID_A, sid_b):
         win.reduce.load_stack(sid)
@@ -132,7 +132,7 @@ def test_reload_keeps_the_place(qapp, tmp_path):
     assert ses.stack_loaded(sid_b) is kept                   # not read again
     assert ses.undo_stack.count() == steps
     assert win.reduce.scan_list.currentItem().data(Qt.UserRole) == sid_b
-    assert list(ses.holder_keys) == ["N5", "N6"]
+    assert list(ses.holder_keys) == ["holderA", "holderB"]
     ses._save_timer.stop()
     win.close()
 
@@ -141,17 +141,17 @@ def test_reload_drops_a_changed_stack_and_appends_new_holders(qapp, tmp_path):
     root = two_stack_project(tmp_path / "beamtime")
     ses = session(root)
     a, b = ses.stack(SID_A), ses.stack(sid_of(STACK_B))
-    # stack B gets one more energy folder; a new holder N9 arrives later the same day
+    # stack B gets one more energy folder; a new holder holderE arrives later the same day
     x, y = testdata.snake_grid()
     rng = np.random.default_rng(3)
     testdata._write_point_dir(root / "raw" / testdata.DAY / STACK_B / "CaF2_f_k_695_00eV", len(x), 695.0, rng)
     raw = root / "raw" / testdata.DAY
-    testdata._write_survey(raw / "200000_plateN9_survey", "plateN9", "200000", rng)
+    testdata._write_survey(raw / "200000_holderE_survey", "holderE", "200000", rng)
     testdata._write_stack(raw / "201500_KF_f_k_stack", "KF_f_k", testdata.ENERGIES,
-                          len(testdata.ENERGIES), x, y, rng, created="Thu Nov  5 20:15:00 2026")
+                          len(testdata.ENERGIES), x, y, rng, created="Fri Mar 14 20:15:00 2025")
     ses.set_project(Project.discover(root))
     assert ses.stack_loaded(SID_A) is a and ses.stack_loaded(sid_of(STACK_B)) is None
-    assert list(ses.holder_keys) == ["N5", "N9"]
+    assert list(ses.holder_keys) == ["holderA", "holderE"]
     ses._save_timer.stop()
 
 
@@ -161,20 +161,20 @@ def test_holder_keys_stay_when_a_later_day_repeats_a_name(qapp, tmp_path):
     ses = session(root)
     draw_zone(ses, "kept")
     ses.flush()
-    # a second day with a holder of the same name: the zone tool would key them N5_<day>; the old key stays
-    day2 = root / "raw" / "2026-11-06"
+    # a second day with a holder of the same name: the zone tool would key them holderA_<day>; the old key stays
+    day2 = root / "raw" / "2025-03-15"
     rng = np.random.default_rng(5)
     x, y = testdata.snake_grid()
     testdata._write_survey(day2 / "010000_holderA_survey", "holderA", "010000", rng)
     testdata._write_stack(day2 / "011500_LiF_f_k_stack", "LiF_f_k", testdata.ENERGIES,
-                          len(testdata.ENERGIES), x, y, rng, created="Fri Nov  6 01:15:00 2026")
+                          len(testdata.ENERGIES), x, y, rng, created="Sat Mar 15 01:15:00 2025")
     ses.set_project(Project.discover(root))
-    assert list(ses.holder_keys) == ["N5", "N5_2026-11-06"]
-    assert ses.holder_keys["N5"][0] == testdata.DAY and [z.label for z in ses.holder_zones("N5").zones] == ["kept"]
+    assert list(ses.holder_keys) == ["holderA", "holderA_2025-03-15"]
+    assert ses.holder_keys["holderA"][0] == testdata.DAY and [z.label for z in ses.holder_zones("holderA").zones] == ["kept"]
     fresh = Session()                                         # a later start keeps the key the session file uses
     fresh.set_project(Project.discover(root))
-    assert list(fresh.holder_keys) == ["N5", "N5_2026-11-06"]
-    assert set(fresh.holder_zones("N5").zones[0].settings) == {SID_A}
+    assert list(fresh.holder_keys) == ["holderA", "holderA_2025-03-15"]
+    assert set(fresh.holder_zones("holderA").zones[0].settings) == {SID_A}
     ses._save_timer.stop(); fresh._save_timer.stop()
 
 

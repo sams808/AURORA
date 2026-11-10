@@ -90,7 +90,7 @@ def john(fake_project):
     proj = Project.discover(fake_project)
     scan = proj.find(testdata.STACK)
     sd = StackData.load(proj, scan)
-    zone = Zone(id=1, label="S1", group="Minerals", rects=[[-0.5, -0.25, 5.0, 5.25]])
+    zone = Zone(id=1, label="S1", group="Group 1", rects=[[-0.5, -0.25, 5.0, 5.25]])
     st = ScanSettings(stack=scan.name, line=sd.main)
     return proj, scan, sd, zone, st, f"{scan.day}_{scan.name}"
 

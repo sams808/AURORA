@@ -32,7 +32,7 @@ def fake(fake_project):
     scan = proj.find(testdata.STACK)
     sd = StackData.load(proj, scan)
     # 2 x 2 pixels: columns x = -0.5, -0.25 and rows y = 5.0, 5.25 of the 4 x 3 grid
-    zone = Zone(id=1, label="1 alpha", group="Minerals", rects=[[-0.5, -0.25, 5.0, 5.25]])
+    zone = Zone(id=1, label="1 alpha", group="Group 1", rects=[[-0.5, -0.25, 5.0, 5.25]])
     return proj, scan, sd, zone
 
 
@@ -56,7 +56,7 @@ def test_written_files_follow_johns_layout(fake, tmp_path):
     proj, scan, sd, zone = fake
     st = ScanSettings(stack=scan.name, line=sd.main, roi=dict(WINDOWS), despike_mode="coherent")
     sid = f"{scan.day}_{scan.name}"
-    paths = write_john(zone, sid, sd, st, project=proj, scan=scan, holder="N5")
+    paths = write_john(zone, sid, sd, st, project=proj, scan=scan, holder="holderA")
     out = proj.root / "processed" / "reduced" / "1 alpha"
     assert [p.name for p in paths] == ["1 alpha_full_reduced.csv", "1 alpha_absorption.csv", "1 alpha_polygon_roi.json",
                                        "1 alpha_gui_settings.json"] and all(p.parent == out for p in paths)

@@ -94,16 +94,16 @@ def test_incomplete_energies_on_a_truncated_map(fake_project):
     assert got[1][1].startswith("file missing")
 
 
-def test_incomplete_energies_on_the_real_beamtime(real_project):
-    """alpha_beta of 2026-11-05: the one incomplete map is 696.8 eV with 119 of 121 points (as the reduced cache says)."""
-    proj = Project.discover(real_project / "raw" / "2026-11-05")
-    st = proj.find("092758_alpha_beta_f_k_stack")
-    assert overview.incomplete_energies(st) == [(696.8, "119 of 121 points")]
+def test_incomplete_energies_on_the_real_beamtime(real_project, real_expect):
+    """The stack of the expectations file: its incomplete maps (as the reduced cache says) and its summary rows."""
+    proj = Project.discover(real_project / "raw" / real_expect["day"])
+    st = proj.find(real_expect["stack"])
+    assert overview.incomplete_energies(st) == [tuple(x) for x in real_expect["stack_incomplete"]]
     rows = dict(overview.scan_rows(st, proj, incomplete=[]))
-    assert rows["energy regions"] == "680–685 eV in 0.5 eV steps; 685–700 eV in 0.1 eV steps; 700–730 eV in 0.2 eV steps"
-    assert rows["grating"] == "MEG" and rows["mirror stripe"] == "Si"
+    for key, value in real_expect["stack_rows"].items():
+        assert rows[key] == value, key
     assert re.fullmatch(r"\d{2}G\d{5}", rows["project"]), rows["project"]      # a CLS proposal id, read from the h5
-    assert rows["time per map"] == "3 s per map" and rows["estimated total"].startswith("311 maps × 3 s = 15.6 min")
+    assert rows["estimated total"].startswith(real_expect["stack_estimated_total_starts"])
 
 
 # ----------------------------------------------------------------------------- the panel

@@ -62,7 +62,7 @@ def build_demo_window(qapp, root: Path, size=(1500, 940)):
     # Reduce: one zone over the stack footprint
     x0, x1, y0, y1 = sd.bbox
     z = ses.new_zone("1 alpha")
-    z.group = "Minerals"
+    z.group = "Group 1"
     z.rects.append([x0, x1, y0, y1])
     ses.touch()
     ses.select_zone(z.id)

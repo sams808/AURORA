@@ -82,7 +82,7 @@ def test_a_project_another_process_holds_opens_read_only_until_it_is_gone(qapp, 
         assert not ses.read_only and ses._lock is not None
         draw_zone(ses, "after the other one closed")
         assert ses.flush() is True
-        assert [z["label"] for z in holders_json(ses.session_file)["N5"]["zones"]] == \
+        assert [z["label"] for z in holders_json(ses.session_file)["holderA"]["zones"]] == \
             ["drawn in the second window", "after the other one closed"]
     finally:
         if proc.poll() is None:
@@ -139,7 +139,7 @@ def test_a_session_changed_on_disk_is_kept_before_it_is_written_over(qapp, fake_
     labels = set()
     for f in files:
         d = json.loads(f.read_text(encoding="utf-8"))
-        labels |= {z["label"] for z in d["holders"].get("N5", {}).get("zones", [])}
+        labels |= {z["label"] for z in d["holders"].get("holderA", {}).get("zones", [])}
     assert {"A1", "A2", "A3", "B1", "B2"} <= labels
     assert any(json.loads(f.read_text(encoding="utf-8")).get("backup", {}).get("reason", "").startswith("changed on disk")
                for f in a.backup_dir.glob("*.json"))
@@ -179,7 +179,7 @@ def test_closing_with_edits_that_could_not_be_saved_asks(qapp, fake_project, mon
         assert "not saved" in calls[0]
         _answer(monkeypatch, "Discard", calls)
         assert win.close() is True and len(calls) == 2
-        assert [z["label"] for z in holders_json(sf)["N5"]["zones"]] == ["saved zone"]
+        assert [z["label"] for z in holders_json(sf)["holderA"]["zones"]] == ["saved zone"]
     finally:
         os.chmod(sf, stat.S_IWRITE | stat.S_IREAD)
 
@@ -198,7 +198,7 @@ def test_export_from_the_question_keeps_the_edits(qapp, fake_project, tmp_path, 
     calls = []
     _answer(monkeypatch, "Export zones…", calls)
     assert win.close() is True and len(calls) == 1
-    assert [z.label for z in ZonesFile.load(out).holders["N5"].zones] == ["rescued zone"]
+    assert [z.label for z in ZonesFile.load(out).holders["holderA"].zones] == ["rescued zone"]
     assert not (fake_project / ".aurora").exists()              # nothing was written into the protected project
 
 
@@ -239,7 +239,7 @@ def test_a_writable_project_closes_without_a_question(qapp, fake_project, monkey
     calls = []
     _answer(monkeypatch, "Cancel", calls)
     assert win.close() is True and calls == []
-    assert [z["label"] for z in holders_json(win.session.session_file)["N5"]["zones"]] == ["kept"]
+    assert [z["label"] for z in holders_json(win.session.session_file)["holderA"]["zones"]] == ["kept"]
 
 
 # ----------------------------------------------------------------------------- data-safety-3: malformed geometry
@@ -250,12 +250,12 @@ def test_a_writable_project_closes_without_a_question(qapp, fake_project, monkey
                                         ({"id": 7, "rects": [[0, 1, "a", 2]]}, "rectangle")])
 def test_malformed_geometry_is_refused_when_read(zone, word):
     with pytest.raises(ValueError, match=word):
-        ZonesFile.from_json({"holders": {"N5": {"holder": "N5", "zones": [zone]}}})
+        ZonesFile.from_json({"holders": {"holderA": {"holder": "holderA", "zones": [zone]}}})
 
 
-@pytest.mark.parametrize("d", [{"holders": [1, 2]}, {"holders": {"N5": {"zones": [{"id": 1, "rects": 5}]}}},
-                               {"goodI0": [1]}, {"holders": {"N5": {"zones": {"a": 1}}}},
-                               {"holders": {"N5": {"zones": [None]}}}])
+@pytest.mark.parametrize("d", [{"holders": [1, 2]}, {"holders": {"holderA": {"zones": [{"id": 1, "rects": 5}]}}},
+                               {"goodI0": [1]}, {"holders": {"holderA": {"zones": {"a": 1}}}},
+                               {"holders": {"holderA": {"zones": [None]}}}])
 def test_a_zones_file_of_the_wrong_shape_is_a_value_error(d):
     with pytest.raises(ValueError):
         ZonesFile.from_json(d)
@@ -266,7 +266,7 @@ def test_an_import_with_a_malformed_zone_changes_nothing(qapp, fake_project, tmp
     draw_zone(ses, "good zone")
     ses.flush()
     bad = tmp_path / "short_rect.json"
-    bad.write_text(json.dumps({"holders": {"N5": {"holder": "N5", "zones": [
+    bad.write_text(json.dumps({"holders": {"holderA": {"holder": "holderA", "zones": [
         {"id": 1, "label": "bad zone", "rects": [[-0.6, 0.35, 4.9]]}]}}}), encoding="utf-8")
     msgs = []
     ses.status.connect(msgs.append)
@@ -277,7 +277,7 @@ def test_an_import_with_a_malformed_zone_changes_nothing(qapp, fake_project, tmp
     with ses.edit("rename zone 1"):                 # a later edit is an undo step and is saved
         ses.holder_zones().zones[0].label = "good zone++"
     assert ses.undo_stack.count() == n + 1 and ses.flush()
-    assert [z["label"] for z in holders_json(ses.session_file)["N5"]["zones"]] == ["good zone++"]
+    assert [z["label"] for z in holders_json(ses.session_file)["holderA"]["zones"]] == ["good zone++"]
 
 
 def test_a_session_with_a_malformed_zone_is_recovered_not_raised(qapp, fake_project):
@@ -289,7 +289,7 @@ def test_a_session_with_a_malformed_zone_is_recovered_not_raised(qapp, fake_proj
     ses.flush()
     ses.release_lock()
     d = json.loads(ses.session_file.read_text(encoding="utf-8"))
-    d["holders"]["N5"]["zones"][1]["rects"] = [[-0.6, 0.35, 4.9]]
+    d["holders"]["holderA"]["zones"][1]["rects"] = [[-0.6, 0.35, 4.9]]
     ses.session_file.write_text(json.dumps(d), encoding="utf-8")
     s2 = Session()
     s2.set_project(Project.discover(fake_project))              # never raises
@@ -309,7 +309,7 @@ def test_a_bad_zone_in_memory_never_blocks_the_edits_of_its_holder(qapp, fake_pr
     assert ses.dirty and ses.undo_stack.count() == n + 1
     ses._save_timer.stop()
     assert ses.flush()
-    assert "renamed" in [z["label"] for z in holders_json(ses.session_file)["N5"]["zones"]]
+    assert "renamed" in [z["label"] for z in holders_json(ses.session_file)["holderA"]["zones"]]
 
 
 def test_survey_import_of_a_wrong_shape_shows_a_message(qapp, fake_project, tmp_path, monkeypatch):
@@ -335,10 +335,10 @@ def test_zones_keyed_by_a_bare_holder_name_land_on_that_holder(qapp, tmp_path):
     exp = tmp_path / "zones_all.json"
     s1.export_zones(exp)
     two = testdata.make_fake_project(tmp_path / "two_days")
-    shutil.copytree(two / "raw" / testdata.DAY, two / "raw" / "2026-11-06")
+    shutil.copytree(two / "raw" / testdata.DAY, two / "raw" / "2025-03-15")
     s2 = session(two)
-    day1 = f"N5_{testdata.DAY}"
-    assert day1 in s2.holder_keys and "N5" not in s2.holder_keys
+    day1 = f"holderA_{testdata.DAY}"
+    assert day1 in s2.holder_keys and "holderA" not in s2.holder_keys
     s2.set_holder(day1)
     draw_zone(s2, "zone drawn by hand on day 1")
     assert s2.import_zones(exp, "merge") == 1
@@ -368,14 +368,14 @@ def test_two_keys_of_one_holder_show_the_first(qapp, fake_project):
     ses.flush()
     ses.release_lock()
     d = json.loads(ses.session_file.read_text(encoding="utf-8"))
-    hidden = json.loads(json.dumps(d["holders"]["N5"]))
+    hidden = json.loads(json.dumps(d["holders"]["holderA"]))
     hidden["zones"][0]["label"] = "imported"
-    d["holders"]["N5_hidden"] = hidden
+    d["holders"]["holderA_hidden"] = hidden
     ses.session_file.write_text(json.dumps(d), encoding="utf-8")
     s2 = session(fake_project)
-    assert list(s2.holder_keys) == ["N5"] and s2.current_holder == "N5"      # the first key keeps the holder
+    assert list(s2.holder_keys) == ["holderA"] and s2.current_holder == "holderA"      # the first key keeps the holder
     assert [z.label for z in s2.holder_zones().zones] == ["drawn"]
-    assert [z.label for z in s2.zones.holders["N5_hidden"].zones] == ["imported"]     # still in the file
+    assert [z.label for z in s2.zones.holders["holderA_hidden"].zones] == ["imported"]     # still in the file
 
 
 # ----------------------------------------------------------------------------- data-safety-5: damaged library
@@ -492,7 +492,7 @@ def test_untick_all_over_two_holders_is_undone_for_both(qapp, tmp_path):
     ses = win.session
     items = []
     try:
-        for hk in ("N5", "N6"):
+        for hk in ("holderA", "holderB"):
             ses.set_holder(hk)
             pump(qapp)
             sid = ses.stack_id(ses.stacks_of(hk)[0])
@@ -500,7 +500,7 @@ def test_untick_all_over_two_holders_is_undone_for_both(qapp, tmp_path):
             ses.touch()
             z = draw_zone(ses, f"zone of {hk}")
             items.append(CheckItem(hk, z.id, sid))
-        ses.set_holder("N5")
+        ses.set_holder("holderA")
         pump(qapp)
         ses.queue_for_check(items)
         win.jobs.wait_idle(60000); pump(qapp, 20)
@@ -512,13 +512,13 @@ def test_untick_all_over_two_holders_is_undone_for_both(qapp, tmp_path):
         assert len(win.check._rows) == 2
         win.check.set_all_ok(True)
         pump(qapp)
-        assert ticks() == {"N5": True, "N6": True}
+        assert ticks() == {"holderA": True, "holderB": True}
         win.check.set_all_ok(False)
         pump(qapp)
-        assert ticks() == {"N5": False, "N6": False}
+        assert ticks() == {"holderA": False, "holderB": False}
         ses.undo()
         pump(qapp)
-        assert ticks() == {"N5": True, "N6": True}
+        assert ticks() == {"holderA": True, "holderB": True}
     finally:
         win.jobs.wait_idle(60000)
         ses._save_timer.stop()
@@ -567,7 +567,7 @@ def test_a_session_and_a_zones_file_with_a_bom_read_normally(qapp, fake_project,
     assert not list(ses.session_file.parent.glob("session.corrupt-*.json"))
     exp = tmp_path / "zones_all.json"
     exp.write_bytes(b"\xef\xbb\xbf" + data)
-    assert len(ZonesFile.load(exp).holders["N5"].zones) == 2
+    assert len(ZonesFile.load(exp).holders["holderA"].zones) == 2
 
 
 # ----------------------------------------------------------------------------- data-safety-18: time zones

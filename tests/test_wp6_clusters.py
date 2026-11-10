@@ -121,7 +121,7 @@ def test_a_zone_from_clusters_has_exactly_their_pixels(maps, qapp):
     z = mp.make_zone_from_clusters()
     assert z is not None and len(ses.holder_zones().zones) == n_zones + 1 and ses.current_zone == z.id
     assert np.array_equal(members(z, hc.x, hc.y, hc.pitch), np.where(np.isin(labels, [0, 2]))[0])
-    assert z.label.startswith("clusters 1+3 · N5 09:27") and not z.rects and len(z.paint) == 8
+    assert z.label.startswith("clusters 1+3 · holderA 09:27") and not z.rects and len(z.paint) == 8
     # zones_all.json keeps its format: the same keys as any zone, painted squares of four numbers
     assert set(z.to_json()) == set(Zone(id=99, label="x").to_json())
     assert all(len(s) == 4 for s in z.paint)
@@ -141,7 +141,7 @@ def test_send_to_compare_adds_one_row_with_provenance(maps, qapp):
     assert mp.send_clusters_to_compare() == 1
     assert len(lib.requests) == n0 + 1
     r = lib.requests[-1]
-    assert r.label == "clusters 1+3 · N5 09:27" and r.signal == "fluo"
+    assert r.label == "clusters 1+3 · holderA 09:27" and r.signal == "fluo"
     spec = lib.spectrum_of(r)
     prov = spec.meta["provenance"]
     assert prov["scan"] == hc.name and prov["clusters"] == [1, 3] and prov["k"] == 3 and prov["seed"] == 0
