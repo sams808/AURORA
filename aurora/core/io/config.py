@@ -8,6 +8,7 @@ import csv
 import datetime as dt
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def _read_json(path: Path, default):
     if not path.exists():
         return default
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))         # a BOM (Notepad, PowerShell 5) is accepted
     except (OSError, ValueError) as err:
         log.warning("%s unreadable (%s); ignored", path, err)
         return default
@@ -205,6 +206,31 @@ def _floats(v) -> list[float]:
     return [float(a) for a in v]
 
 
+def _numbers(v, n: int, what: str) -> list[float]:
+    """A geometry entry read from a file: exactly n finite numbers (a rectangle [x0, x1, y0, y1], a painted square
+    [cx, cy, pitch x, pitch y], a polygon vertex [x, y]), else ValueError naming it."""
+    if not isinstance(v, (list, tuple)) or len(v) != n:
+        got = f"{len(v)} values" if isinstance(v, (list, tuple)) else repr(v)
+        raise ValueError(f"{what} needs {n} numbers, not {got}")
+    try:
+        out = [float(a) for a in v]
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} needs {n} numbers, not {v!r}") from None
+    if not all(math.isfinite(a) for a in out):
+        raise ValueError(f"{what} needs {n} finite numbers, not {v!r}")
+    return out
+
+
+def _of(v, kind, what: str, default):
+    """A value read from a file that must be a dict or a list (`kind`): `default` when it is absent (None, unless
+    default is None too), else ValueError naming it, so a file of the wrong shape is refused whole, never half-read."""
+    if v is None and default is not None:
+        return default
+    if not isinstance(v, kind):
+        raise ValueError(f"{what} must be {'an object' if kind is dict else 'a list'}, not {type(v).__name__}")
+    return v
+
+
 @dataclass
 class ScanSettings:
     """Per-zone, per-scan settings of the zone tool (docs/HANDOFF.md section 4), plus the fields AURORA adds."""
@@ -300,14 +326,29 @@ class Zone:
 
     @classmethod
     def from_json(cls, d: dict) -> "Zone":
-        return cls(id=int(d.get("id", 0)), label=str(d.get("label", "")), group=str(d.get("group", "")),
-                   comment=str(d.get("comment", "")), rects=[_floats(r) for r in d.get("rects", [])],
-                   erects=[_floats(r) for r in d.get("erects", [])],
-                   paint=[_floats(r) for r in d.get("paint", [])],
-                   erase=[_floats(r) for r in d.get("erase", [])],
-                   settings={k: ScanSettings.from_json(v) for k, v in d.get("st", {}).items()},
-                   members={k: [int(i) for i in v] for k, v in d.get("members", {}).items()},
-                   polys=[[_floats(p) for p in poly] for poly in d.get("polys", [])],
+        """A zone of a file. Its geometry is checked here (ValueError 'zone 3: a rectangle needs 4 numbers, not 3
+        values'): a malformed entry would otherwise fail later, inside every edit of its holder."""
+        d = _of(d, dict, "a zone", None)
+        try:
+            zid = int(d.get("id", 0))
+        except (TypeError, ValueError):
+            raise ValueError(f"a zone id must be a number, not {d.get('id')!r}") from None
+        z = f"zone {zid}"
+
+        def rows(key: str, n: int, what: str) -> list[list[float]]:
+            return [_numbers(r, n, f"{z}: {what}") for r in _of(d.get(key), list, f"{z}: '{key}'", [])]
+        polys = [[_numbers(p, 2, f"{z}: a polygon vertex") for p in _of(poly, list, f"{z}: a polygon", None)]
+                 for poly in _of(d.get("polys"), list, f"{z}: 'polys'", [])]
+        return cls(id=zid, label=str(d.get("label", "")), group=str(d.get("group", "")),
+                   comment=str(d.get("comment", "")), rects=rows("rects", 4, "a rectangle"),
+                   erects=rows("erects", 4, "an erase rectangle"),
+                   paint=rows("paint", 4, "a painted square"),
+                   erase=rows("erase", 4, "an erased square"),
+                   settings={k: ScanSettings.from_json(_of(v, dict, f"{z}: the settings of {k}", None))
+                             for k, v in _of(d.get("st"), dict, f"{z}: 'st'", {}).items()},
+                   members={k: [int(i) for i in _of(v, list, f"{z}: the members of {k}", None)]
+                            for k, v in _of(d.get("members"), dict, f"{z}: 'members'", {}).items()},
+                   polys=polys,
                    extra=_unknown(d, cls.BASE_KEYS + cls.ADDED_KEYS),
                    _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
@@ -334,8 +375,13 @@ class HolderZones:
 
     @classmethod
     def from_json(cls, d: dict, name: str = "") -> "HolderZones":
+        d = _of(d, dict, f"holder {name}", None)
+        try:
+            zones = [Zone.from_json(z) for z in _of(d.get("zones"), list, f"the zones of {name}", [])]
+        except (ValueError, TypeError) as err:
+            raise ValueError(f"holder {name}, {err}") from None
         return cls(holder=str(d.get("holder", name)), day=str(d.get("day", "")), survey=str(d.get("survey", "")),
-                   zones=[Zone.from_json(z) for z in d.get("zones", [])], extra=_unknown(d, cls.BASE_KEYS))
+                   zones=zones, extra=_unknown(d, cls.BASE_KEYS))
 
     def to_json(self) -> dict:
         out = {"holder": self.holder, "day": self.day, "survey": self.survey, "zones": [z.to_json() for z in self.zones]}
@@ -406,8 +452,9 @@ class ZonesFile:
             raise ValueError(f"'version' must be an integer, not {d.get('version')!r}") from None
         return cls(version=version, exported=str(d.get("exported", "")), project=str(d.get("project", "")),
                    built=str(d.get("built", "")), notes=str(d.get("notes", "")),
-                   good_i0={k: bool(v) for k, v in d.get("goodI0", {}).items()},
-                   holders={name: HolderZones.from_json(h, name) for name, h in d.get("holders", {}).items()},
+                   good_i0={k: bool(v) for k, v in _of(d.get("goodI0"), dict, "'goodI0'", {}).items()},
+                   holders={name: HolderZones.from_json(h, name)
+                            for name, h in _of(d.get("holders"), dict, "'holders'", {}).items()},
                    ui=dict(ui) if isinstance(ui, dict) else {}, rules=list(rules) if isinstance(rules, list) else [],
                    format=str(d.get("format", "")), schema=schema, app=str(d.get("app", "")),
                    extra=_unknown(d, known),
@@ -415,7 +462,9 @@ class ZonesFile:
 
     @classmethod
     def load(cls, path: Path) -> "ZonesFile":
-        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        """Read a zones_all.json or session.json (a leading BOM is accepted). ValueError for a file that is not
+        valid JSON or not of this shape (holders, zones, geometry), with what is wrong."""
+        d = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         if not isinstance(d, dict):
             raise ValueError(f"{path}: not a zones file (a JSON object is expected)")
         zf = cls.from_json(d)

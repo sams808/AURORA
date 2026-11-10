@@ -164,7 +164,11 @@ Keys:
 Holder keys are the holder name, or `<name>_<day>` when a name repeats in the project; a key already used by the
 session file is kept. Stack ids are `<day>_<scan folder>`. Keys a version does not know are kept at every level and
 written back. A file without `schema` is schema 1 (AURORA ≤ 0.3, the zone tool): it is read as is and kept once as
-`session.v1.bak.json` before the first save; a higher schema opens read-only. Coordinates are mm on the hexapod. The
+`session.v1.bak.json` before the first save; a higher schema opens read-only. A Session takes the project's lock
+(`.aurora/session.lock`, aurora/core/io/lock.py: pid, host, user, start and refresh time, shared by the Sessions of
+one process) and checks it before every save; a project another live AURORA holds, or whose session cannot be written,
+opens read-only. Geometry is validated when a file is read (4 numbers per rectangle or square, 2 per polygon vertex;
+ValueError otherwise). Coordinates are mm on the hexapod. The
 browser zone tool writes the same keys, which is why the two agree pixel for pixel on the Nov 2026 beamtime (224
 zone-scan pairs verified).
 

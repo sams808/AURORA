@@ -3,7 +3,8 @@
 write_text_atomic / write_json_atomic write a temporary file in the target folder, flush and fsync it, then move it
 over the target with os.replace, so a crash or a full disk never leaves a half-written session.json, qc.json,
 library.json or manifest behind. On Windows a virus scanner or an indexer may hold the new file for a moment:
-os.replace is retried. Every write goes through aurora.core.io.safety.assert_writable first.
+os.replace is retried (not when the target is a read-only file, which no wait changes). A temporary file whose write
+fails (a full disk) is removed. Every write goes through aurora.core.io.safety.assert_writable first.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ def read_json(path, default=None):
     """The parsed JSON of a UTF-8 file, or `default` when it is missing or unreadable (the reason is logged)."""
     path = Path(path)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))      # a BOM (Notepad, PowerShell 5) is accepted
     except FileNotFoundError:
         return default
     except (OSError, ValueError) as err:
@@ -41,31 +42,42 @@ def write_text_atomic(path, text: str, encoding: str = "utf-8") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     data = text.encode(encoding)
-    with open(tmp, "wb") as f:                  # explicit handle: closed before the rename (Windows refuses otherwise)
-        f.write(data)
-        f.flush()
-        try:
-            os.fsync(f.fileno())
-        except OSError:                         # some network shares refuse fsync; the rename still protects the file
-            pass
+    try:
+        with open(tmp, "wb") as f:              # explicit handle: closed before the rename (Windows refuses otherwise)
+            f.write(data)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:                     # some network shares refuse fsync; the rename still protects the file
+                pass
+    except BaseException:                       # a full disk mid-write: no partial temporary file is left behind
+        _unlink(tmp)
+        raise
+    # a read-only target (its file attribute) refuses every attempt: one is enough, the window does not wait seconds
+    retries = REPLACE_RETRIES if not path.exists() or os.access(path, os.W_OK) else 1
     last: Exception | None = None
-    for attempt in range(REPLACE_RETRIES):
+    for attempt in range(retries):
         try:
             os.replace(tmp, path)
             return path
         except PermissionError as err:          # the target or the new file is held for a moment
             last = err
-            time.sleep(REPLACE_WAIT_S * (attempt + 1))
+            if attempt + 1 < retries:
+                time.sleep(REPLACE_WAIT_S * (attempt + 1))
         except FileNotFoundError as err:        # the temporary file vanished (seen in synced folders): write directly
             log.warning("%s: temporary file vanished (%s); writing in place", path, err)
             with open(path, "wb") as f:
                 f.write(data)
             return path
+    _unlink(tmp)
+    raise last if last is not None else OSError(f"{path}: could not be replaced")
+
+
+def _unlink(p: Path) -> None:
     try:
-        tmp.unlink()
+        p.unlink()
     except OSError:
         pass
-    raise last if last is not None else OSError(f"{path}: could not be replaced")
 
 
 def write_json_atomic(path, obj, indent: int | None = 1) -> Path:

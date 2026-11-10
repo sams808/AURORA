@@ -187,6 +187,8 @@ class HomePerspective(QWidget):
         self._map_errors: dict[str, str] = {}
         self._check_pending: ScanInfo | None = None
         self._generation = 0                          # +1 per project shown: a map check of an earlier one is dropped
+        self.can_leave = None                         # fn(new project) -> bool, asked before another project replaces
+        #                                               the open one (the window: zone edits that could not be saved)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
@@ -374,6 +376,10 @@ class HomePerspective(QWidget):
         self._show_project(project, facts)
 
     def _show_project(self, project: Project, facts: overview.ProjectFacts | None) -> None:
+        if self.project is not None and self.can_leave is not None and not self.can_leave(project):
+            self._quiet = False                       # the user kept the open project (Cancel): nothing changes
+            self.path_label.setText(f"{self.project.root}   ·   still open: {project.root} was not opened")
+            return
         self._quiet = False
         self._failed = ""
         self.project = project

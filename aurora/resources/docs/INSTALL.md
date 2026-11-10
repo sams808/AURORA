@@ -117,7 +117,7 @@ the log folder** and the address of the GitHub issues page.
 | the demo beamtime of **Help > Open the demo beamtime** | `%LOCALAPPDATA%\AURORA\demo_beamtime` | `~/Library/Application Support/AURORA/demo_beamtime` | `~/.local/share/AURORA/demo_beamtime` |
 | matplotlib's font cache for the report figures (installed copies) | `%LOCALAPPDATA%\AURORA\Cache\matplotlib` | `~/Library/Caches/AURORA/matplotlib` | matplotlib's own default |
 | hypercubes of projects whose folder cannot be written (a read-only share) | `%LOCALAPPDATA%\AURORA\Cache\hypercubes` | `~/Library/Caches/AURORA/hypercubes` | `~/.cache/AURORA/hypercubes` |
-| session, backups and checks of a beamtime | `<project>/.aurora/` (`session.json`, `session.json.bak`, `backups/`, `qc.json`, `library.json`) | the same | the same |
+| session, backups and checks of a beamtime | `<project>/.aurora/` (`session.json`, `session.json.bak`, `backups/`, `qc.json`, `library.json`, `session.lock` while an AURORA has it open) | the same | the same |
 | caches of a beamtime | `<project>/.aurora/cache/<day>/<scan>/` | the same | the same |
 | reports | the output folder chosen in Report (default `<project>/reports/aurora/<date>_<time>_<scope>/`) | the same | the same |
 
@@ -132,7 +132,9 @@ a backup in `.aurora/backups/` or an exported `zones_all.json` is kept; **File >
 
 A beamtime folder on a network share works; the first read of a stack is slow, and the caches live beside the data.
 On a read-only share the hypercubes go to the per-user cache above; the session cannot be saved there, so copy the
-beamtime locally to keep zones with it.
+beamtime locally to keep zones with it. Such a project opens read-only and says so; closing the window offers to
+export the zones. Two AURORAs on one beamtime (two computers on a share, or AURORA started twice): the second opens it
+read-only and names the first.
 
 A session written by an older AURORA opens and is upgraded (the original is kept once as `session.v1.bak.json`); a
 session written by a newer AURORA opens read-only.

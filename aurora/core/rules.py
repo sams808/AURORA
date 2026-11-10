@@ -190,11 +190,17 @@ class Rule:
     patch: dict = field(default_factory=dict)
     enabled: bool = True
     name: str = ""
+    extra: dict = field(default_factory=dict)       # keys this version does not know, written back unchanged
+
+    KEYS = ("name", "enabled", "scope", "filter", "patch")
 
     # ------------------------------------------------------------------ JSON (ZonesFile.rules)
     def to_json(self) -> dict:
-        return {"name": self.name, "enabled": self.enabled, "scope": copy.deepcopy(self.scope),
-                "filter": copy.deepcopy(self.scan_filter), "patch": copy.deepcopy(self.patch)}
+        out = {"name": self.name, "enabled": self.enabled, "scope": copy.deepcopy(self.scope),
+               "filter": copy.deepcopy(self.scan_filter), "patch": copy.deepcopy(self.patch)}
+        for k, v in self.extra.items():
+            out.setdefault(k, copy.deepcopy(v))
+        return out
 
     @classmethod
     def from_json(cls, d: dict) -> "Rule":
@@ -205,7 +211,8 @@ class Rule:
             except KeyError:
                 patch[str(k)] = v                     # an unknown field is kept as written (ignored when applied)
         return cls(scope=dict(d.get("scope") or {"kind": "project"}), scan_filter=dict(d.get("filter") or {}),
-                   patch=patch, enabled=bool(d.get("enabled", True)), name=str(d.get("name", "")))
+                   patch=patch, enabled=bool(d.get("enabled", True)), name=str(d.get("name", "")),
+                   extra={k: copy.deepcopy(v) for k, v in d.items() if k not in cls.KEYS})
 
     # ------------------------------------------------------------------ matching
     def in_scope(self, holder: str, zone) -> bool:

@@ -4,7 +4,10 @@
 - File > Restore zones from a backup… (Advanced);
 - the save indicator in the top bar ('unsaved', 'saved 12:03', 'read-only'), driven by Session.save_state;
 - the per-holder import dialog and the import error message (Session.import_zones);
-- the 'session restored' message after a damaged session.json (Session.recovered);
+- the 'session restored' message after a damaged session.json (Session.recovered), and the non-modal messages of
+  Session.warned (opened read-only because another AURORA holds the project, its lock taken over, a foreign change);
+- the question before closing or opening another project with edits that could not be saved (Session.confirm_leave):
+  Export zones… / Discard / Cancel;
 - putting the Reduce scan list back on the kept stack after a Reload (Session.reloaded).
 
 The menu entries go through aurora.app.shortcuts (their owner is this object, a child of the Session, itself a child
@@ -14,11 +17,12 @@ the top bar is inside the window (an event filter on the window watches for it d
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel, QMessageBox, QToolButton, QUndoView, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QLabel, QMessageBox, QToolButton, QUndoView,
+                               QVBoxLayout, QWidget)
 
 from aurora.app import shortcuts
 from aurora.app.help_text import HELP, explain, explain_buttons
@@ -30,9 +34,13 @@ STATE_DETAIL = {
     "saved": "The zones are saved in {path}.",
     "not saved": "The last save failed (the status line said why); AURORA tries again at the next change and when "
                  "the window closes.",
-    "read-only": "This session.json was written by a newer AURORA, or cannot be written: edits here are not saved. "
-                 "Survey > Export zones… keeps them in a file.",
+    "read-only": "This session is read-only (written by a newer AURORA, open in another AURORA, or in a folder that "
+                 "cannot be written): edits here are not saved. Closing the window offers to export them to a file.",
 }
+UNSAVED_TITLE = "Unsaved zone edits"
+UNSAVED_TEXT = ("The zone edits of {project} are not saved: {why}.\n\nExport zones… writes them to a zones_all.json "
+                "of your choice (Survey > Import zones… reads it back); Discard {then} without them.")
+UNSAVED_THEN = {"close the window": "closes the window", "open another project": "opens the other project"}
 
 
 def _menu_text(text: str) -> str:
@@ -75,7 +83,8 @@ class SessionUI(QObject):
         self.window = window
         self.indicator: QLabel | None = None
         self.state = ""
-        self.last_message = ""                  # the last 'session restored' text shown (tests read it)
+        self.last_message = ""                  # the last 'session restored' or warning text shown (tests read it)
+        self.unsaved_box: QMessageBox | None = None     # the unsaved-edits question while it is open
         self._history: HistoryDialog | None = None
         self.undo_action = shortcuts.add(self, "Undo", "Ctrl+Z", session.undo, menu="edit", section="Edit")
         self.redo_action = shortcuts.add(self, "Redo", "Ctrl+Y", session.redo, menu="edit", section="Edit")
@@ -93,6 +102,7 @@ class SessionUI(QObject):
             sig.connect(self._sync)
         session.save_state.connect(self._on_state)
         session.recovered.connect(self._on_recovered)
+        session.warned.connect(self._on_warned)
         session.reloaded.connect(self._on_reloaded)
         session.project_changed.connect(self._sync)
         window.installEventFilter(self)
@@ -148,13 +158,67 @@ class SessionUI(QObject):
         QMessageBox.warning(self.window, title, text)
 
     def _on_recovered(self, text: str) -> None:
+        self._on_warned("Session restored", text)
+
+    def _on_warned(self, title: str, text: str) -> None:
+        """A non-modal message box (the window stays usable): a restored or read-only session, a foreign change."""
         self.last_message = text
-        box = QMessageBox(QMessageBox.Warning, "Session restored", text, QMessageBox.Ok, self.window)
+        box = QMessageBox(QMessageBox.Warning, title, text, QMessageBox.Ok, self.window)
         box.setWindowModality(Qt.NonModal)
         box.setAttribute(Qt.WA_DeleteOnClose)
         for b in box.buttons():
             b.setToolTip("Close this message")
         box.show()
+
+    def ask_unsaved(self, action: str, why: str) -> bool:
+        """Session.confirm_leave: edits that could not be saved. Export zones… (a file outside the project, then go
+        on), Discard (go on without them) or Cancel (stay). True when the window may go on with `action`."""
+        ses = self.session
+        name = ses.project.root.name if ses.project is not None else "this project"
+        box = QMessageBox(QMessageBox.Warning, UNSAVED_TITLE,
+                          UNSAVED_TEXT.format(project=name, why=why.rstrip("."),
+                                              then=UNSAVED_THEN.get(action, "goes on")), QMessageBox.NoButton,
+                          self.window)
+        export = box.addButton("Export zones…", QMessageBox.AcceptRole)
+        discard = box.addButton("Discard", QMessageBox.DestructiveRole)
+        cancel = box.addButton(QMessageBox.Cancel)
+        export.setToolTip("Write the zones of this session to a zones_all.json you choose, then go on")
+        discard.setToolTip("Go on without the edits that are not saved")
+        cancel.setToolTip("Stay: nothing is closed or opened")
+        box.setDefaultButton(export)
+        box.setEscapeButton(cancel)
+        self.unsaved_box = box                  # tests answer it
+        try:
+            box.exec()
+            clicked = box.clickedButton()
+        finally:
+            self.unsaved_box = None
+            box.deleteLater()
+        if clicked is discard:
+            log.warning("unsaved zone edits of %s discarded (%s)", name, action)
+            ses.discard_unsaved()
+            return True
+        if clicked is not export:
+            return False
+        return self.export_unsaved(name)
+
+    def export_unsaved(self, name: str) -> bool:
+        """Export zones… of the unsaved-edits question: a file dialog that starts outside the project (which may not
+        be writable), then Session.export_zones. True when the file was written."""
+        docs = Path.home() / "Documents"
+        start = (docs if docs.is_dir() else Path.home()) / f"{name}_zones_all.json"
+        p, _ = QFileDialog.getSaveFileName(self.window, "Export zones", str(start), "JSON (*.json)")
+        if not p:
+            return False
+        try:
+            self.session.export_zones(Path(p))
+        except (OSError, ValueError, TypeError) as err:
+            reason = (getattr(err, "strerror", None) or str(err)).strip().rstrip(".")
+            QMessageBox.warning(self.window, "Could not write", f"Could not write {Path(p).name}: {reason}. "
+                                                                "The edits are still in this window.")
+            return False
+        self.session.discard_unsaved()
+        return True
 
     def _on_reloaded(self, sid: str) -> None:
         """After a Reload the Reduce scan list shows the stack that stayed selected (without loading another)."""
@@ -204,6 +268,8 @@ class SessionUI(QObject):
         lab.setText(state)
         lab.setVisible(bool(state))
         word = "saved" if state.startswith("saved") else state
+        from aurora.app.theme import set_tone
+        set_tone(lab, "warn" if word in ("not saved", "read-only") else None)      # edits at risk stand out
         path = self.session.session_file if self.session.project is not None else "session.json"
         detail = STATE_DETAIL.get(word, "").format(path=path)
         tip = HELP["main.save_state"][0]

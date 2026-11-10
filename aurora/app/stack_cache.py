@@ -74,13 +74,15 @@ class StackCacheOffer(QObject):
         self.session.status.emit(f"re-reducing {scan.name} with the project ROI bins …")
         jobs.of(self.window_).submit(
             f"stack:{sid}", lambda cb: StackData.load(project, scan, progress=cb, use_report_cache=False),
-            on_done=lambda new, sid=sid: self._done(sid, new), on_end=lambda _s: self.refresh(),
+            on_done=lambda new, sid=sid: self._done(sid, new, project), on_end=lambda _s: self.refresh(),
             label=f"re-reducing {scan.name}", taskbar=getattr(host, "taskbar", None))
         self.refresh()
 
-    def _done(self, sid: str, sd) -> None:
-        if self.session.scan_of(sid) is None:             # the project changed meanwhile
-            return
+    def _done(self, sid: str, sd, project=None) -> None:
+        cur = self.session.project
+        if cur is None or (project is not None and cur is not project) or self.session.scan_of(sid) is None:
+            log.info("%s: re-reduced for a project that is no longer open: not kept", sid)
+            return                                         # another project was opened meanwhile
         self.session._stacks[sid] = sd                     # the session's stack table (aurora.app.session)
         log.info("%s: re-reduced with the project ROI bins (%s)", sid, sd.source)
         self.session.touch()                               # memberships for the new arrays, as after any stack load

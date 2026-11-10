@@ -1,7 +1,7 @@
 """Undo and redo of zone, settings and good-I0 edits: one QUndoStack per Session, one SnapshotCommand per edit.
 
-Every `with session.edit(description):` records the JSON of the holders it touched and of the good-I0 choices, before
-and after (zones are small, so a snapshot is simpler and safer than an inverse per operation). Undo puts the 'before'
+Every `with session.edit(description):` records the JSON of the holders it touched, of the good-I0 choices and of the
+settings rules, before and after (zones are small, so a snapshot is simpler and safer than an inverse per operation). Undo puts the 'before'
 snapshot back, redo the 'after' one. Edits with the same description that follow each other within MERGE_WINDOW_S
 merge into one step, so a brush stroke (many 'paint pixels in zone 3' events) or a run of card edits undo at once.
 Attaching scans and loading stacks are not edits and are never recorded.
@@ -25,7 +25,8 @@ def dumps(obj) -> str:
 
 
 class Snapshot(dict):
-    """{'holders': {holder key: JSON text | None (absent)}, 'good_i0': JSON text}: the state an edit can change."""
+    """{'holders': {holder key: JSON text | None (absent)}, 'good_i0': JSON text, 'rules': JSON text}: the state an
+    edit can change."""
 
     @property
     def keys_touched(self) -> frozenset:
@@ -78,7 +79,7 @@ class SnapshotCommand(QUndoCommand):
             self.setText(other.text().replace(f"zone {self.place_after[1]}", "a new zone"))
         # the newer edit starts where this one ended: keep this 'before', take its 'after'
         self.after = Snapshot(holders={**self.after["holders"], **other.after["holders"]},
-                              good_i0=other.after["good_i0"])
+                              good_i0=other.after["good_i0"], rules=other.after.get("rules"))
         self.place_after = other.place_after
         self.when = other.when
         if self.after == self.before:

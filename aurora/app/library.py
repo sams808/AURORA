@@ -3,12 +3,16 @@
 The library belongs to the open project: set_project restores <project>/.aurora/library.json (rows, sources, settings)
 and .aurora/library_spectra.npz (the arrays of spectra that have no file: zone traces sent from Reduce, differences),
 and every change is saved back, debounced, atomically (aurora.core.io.textio). Nothing is written when nothing
-changed, and never into a protected folder (raw data, $AURORA_PROTECT_DIRS).
+changed, and never into a protected folder (raw data, $AURORA_PROTECT_DIRS). A library.json that cannot be read is
+kept as library.corrupt-<time>.json (its library_spectra.npz beside it, as library_spectra.corrupt-<time>.npz), the
+library starts empty, the `warning` signal says so, and nothing is written until the library changes.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -46,6 +50,7 @@ class Library(QObject):
     changed = Signal()
     restored = Signal()                                  # a project's library or a config was loaded (view settings too)
     saved = Signal(str)                                  # the path written by the autosave
+    warning = Signal(str)                                # the library of the project could not be read (the window says)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -96,6 +101,11 @@ class Library(QObject):
             except (OSError, ValueError, KeyError, TypeError) as err:
                 log.warning("%s unreadable (%s); the library starts empty", path, err)
                 self._clear()
+                self._last_text, self._last_npz = self._snapshot()     # closing writes nothing over it
+                kept = self._set_aside(path)
+                self.warning.emit(f"The Compare library of this project could not be read ({err}); it starts empty. "
+                                  + (f"The file was kept as {kept.name}." if kept is not None else
+                                     "The file was left as it is."))
             finally:
                 self._restoring = False
             self.changed.emit()
@@ -114,6 +124,31 @@ class Library(QObject):
     def _clear(self) -> None:
         self.requests, self.spectra, self.sources, self.missing = [], {}, {}, {}
         self.extra = {}
+
+    @staticmethod
+    def _set_aside(path: Path) -> Path | None:
+        """A library.json that does not read: renamed library.corrupt-<time>.json, with its library_spectra.npz
+        (the arrays of its zone traces and differences) renamed to match, so a later save never writes over them.
+        None when it could not be moved (a protected or read-only folder: then nothing is written there either)."""
+        from aurora.core.io.safety import assert_writable
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        target, n = path.with_name(f"library.corrupt-{stamp}.json"), 2
+        while target.exists():
+            target, n = path.with_name(f"library.corrupt-{stamp}-{n}.json"), n + 1
+        try:
+            assert_writable(target)
+            os.replace(path, target)
+        except OSError as err:
+            log.warning("the damaged %s could not be kept aside (%s)", path, err)
+            return None
+        npz = sidecar_path(path).with_name("library_spectra.npz")
+        if npz.exists():
+            try:
+                os.replace(npz, target.with_name(target.stem.replace("library.", "library_spectra.") + ".npz"))
+            except OSError as err:
+                log.warning("%s not kept aside with the damaged library (%s)", npz, err)
+        log.warning("the damaged library was kept as %s", target)
+        return target
 
     @Slot()
     def touch(self) -> None:

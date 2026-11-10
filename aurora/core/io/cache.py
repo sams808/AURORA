@@ -48,8 +48,15 @@ def save_npz(path: Path, **arrays) -> None:
     assert_writable(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp.npz")
-    with open(tmp, "wb") as f:                  # explicit handle: closed before the rename (Windows refuses otherwise)
-        np.savez(f, **arrays)
+    try:
+        with open(tmp, "wb") as f:              # explicit handle: closed before the rename (Windows refuses otherwise)
+            np.savez(f, **arrays)
+    except BaseException:                       # a full disk mid-write: no partial temporary file is left behind
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     for attempt in range(5):
         try:
             os.replace(tmp, path)
@@ -58,8 +65,14 @@ def save_npz(path: Path, **arrays) -> None:
             time.sleep(0.2 * (attempt + 1))
         except FileNotFoundError:               # the temporary file vanished (seen in %TEMP% folders): write directly
             break
-    with open(path, "wb") as f:
-        np.savez(f, **arrays)
+    try:
+        with open(path, "wb") as f:
+            np.savez(f, **arrays)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _slug(label: str) -> str:

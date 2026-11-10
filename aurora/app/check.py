@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeade
 from aurora.app import jobs, nav
 from aurora.app.help_text import explain_all, header_tips, labelled
 from aurora.app.mode import mark_advanced, on_mode_changed
-from aurora.app.session import CheckItem, Session
+from aurora.app.session import ALL_HOLDERS, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS
@@ -382,22 +382,34 @@ class CheckPerspective(QWidget):
         if self._results:
             log.info("%d stored checks read from %s", len(self._results), qc.qc_path(project))
             stored, scans = dict(self._results), self._all_scans()
-            jobs.of(self).submit("check:verify", lambda cb: qc.stale(stored, scans), on_done=self._verified,
+            jobs.of(self).submit("check:verify", lambda cb: qc.stale(stored, scans),
+                                 on_done=lambda changed, p=project: self._verified(changed, p),
                                  label="looking for scans changed since their check", taskbar=self.taskbar, report=False)
         self.update_actions()
 
-    def _verified(self, changed: list) -> None:
-        if not changed or self.session.project is None:
+    def _is_open(self, project) -> bool:
+        """Whether `project` (the one a job started for) is still the open one: a job that ends after another project
+        was opened has its results dropped, never shown or saved for that other project."""
+        cur = self.session.project
+        if cur is None or project is None or Path(cur.root) != Path(project.root):
+            log.info("checks of %s dropped: the open project is now %s", getattr(project, "root", None),
+                     getattr(cur, "root", None))
+            return False
+        return True
+
+    def _verified(self, changed: list, project=None) -> None:
+        if not changed or self.session.project is None or (project is not None and not self._is_open(project)):
             return
         holders = sorted({self.session.holder_of_stack(sid) for sid in changed} - {None})
         self.day_label.setText(f"{len(changed)} scan(s) changed since their check: checking them again")
         self._probe(holders, "check:changed", load=False)
 
-    def _save_results(self, results: dict) -> None:
-        if not results or self.session.project is None:
+    def _save_results(self, results: dict, project=None) -> None:
+        project = project if project is not None else self.session.project
+        if not results or project is None:
             return
         try:
-            qc.save_qc(self.session.project, results)
+            qc.save_qc(project, results)
         except OSError as err:
             log.warning("checks not saved: %s", err)
             self.day_label.setText(f"the checks are shown but not saved ({err})")
@@ -496,7 +508,7 @@ class CheckPerspective(QWidget):
                         log.warning("%s not loaded for the good-I0 list (%s)", s.name, err)
             return res
 
-        jobs.of(self).submit(job_key, job, on_done=lambda res: self._probed(res, load),
+        jobs.of(self).submit(job_key, job, on_done=lambda res, p=project: self._probed(res, load, p),
                              on_failed=lambda t: self.day_label.setText(t.strip().splitlines()[-1]),
                              on_end=lambda _s: self.update_actions(), label="running the checks", taskbar=self.taskbar)
         self.update_actions()
@@ -513,9 +525,11 @@ class CheckPerspective(QWidget):
             return
         self._probe(list(self.session.holder_keys), "check:every", load=False)
 
-    def _probed(self, results: dict, loaded: bool) -> None:
+    def _probed(self, results: dict, loaded: bool, project=None) -> None:
+        if project is not None and not self._is_open(project):
+            return
         self._results.update(results)
-        self._save_results(results)
+        self._save_results(results, project)
         self._fill_table(); self._fill_i0(); self._update_sdd()
         self.day_label.setText(self._day_text())
         self._row_cache.clear()
@@ -755,7 +769,7 @@ class CheckPerspective(QWidget):
             z2, st2 = copy.deepcopy(zone), copy.deepcopy(st)
             jobs.of(self).submit(f"checkrow:{it.holder}:{it.zone_id}:{it.sid}",
                                  lambda cb: export.john_frame(z2, it.sid, sd, st2, progress=cb, **args),
-                                 on_done=lambda fr, k=key, f=flags, s=sd: self._frame_done(k, fr, s, f),
+                                 on_done=lambda fr, k=key, f=flags, s=sd, p=ses.project: self._frame_done(k, fr, s, f, p),
                                  label="reading the detector windows", taskbar=self.taskbar)
             return row
         try:
@@ -772,7 +786,9 @@ class CheckPerspective(QWidget):
         self._load_errors[sid] = lines[-1] if lines else "unknown error"
         self._refresh_queue()
 
-    def _frame_done(self, key, fr, sd, flags) -> None:
+    def _frame_done(self, key, fr, sd, flags, project=None) -> None:
+        if project is not None and not self._is_open(project):
+            return
         self._row_cache[key] = (fr, qc.check_zone(fr.traces, sd, flags))
         self._refresh_queue()
 
@@ -804,8 +820,8 @@ class CheckPerspective(QWidget):
                     self._seen.add(r.item)
         finally:
             self._filling = False
-        if first_bad:
-            with ses.edit(f"untick {len(first_bad)} spectra to check with a problem"):
+        if first_bad:                           # the rows may span holders: one undo step restores every one
+            with ses.edit(f"untick {len(first_bad)} spectra to check with a problem", holder=ALL_HOLDERS):
                 for r in first_bad:
                     r.settings.include = False
         self._fill_queue()
@@ -949,8 +965,9 @@ class CheckPerspective(QWidget):
     def set_all_ok(self, on: bool) -> None:
         """Tick all / Untick all: every row's 'Looks OK' in one edit."""
         rows = [r for r in self._rows if bool(r.settings.include) != on]
-        if rows:
-            with self.session.edit(f"{'tick' if on else 'untick'} all {len(self._rows)} spectra to check"):
+        if rows:                                # the rows may span holders: one undo step restores every one
+            with self.session.edit(f"{'tick' if on else 'untick'} all {len(self._rows)} spectra to check",
+                                   holder=ALL_HOLDERS):
                 for r in rows:
                     r.settings.include = on
         self._fill_queue()
