@@ -42,7 +42,7 @@ installs on Windows and macOS.
   colour scale naming the quantity ("counts / I0", "log10(counts / I0 + 1)").
 - Renamed controls: Reduce **New sample** and **Propose zones**, the map energy in eV, **de-spike** with its k box;
   Compare **Add saved spectra…** and **Remove**; Report **Browse…**. Spectra sent from Reduce are labelled with the
-  scan time, for example "1 alpha · N5 09:27".
+  scan time, for example "1 alpha · holderA 09:27".
 - A folder or an .h5 file dropped on the window opens it. "Open the last project at start" runs after the window
   appears, and a last project that cannot be reached gives a note instead of blocking the start.
 - Help menu: Open the demo beamtime (written in the background, with reduced spectra in John Bussey's layout and a
@@ -288,9 +288,9 @@ installs on Windows and macOS.
   `aurora demo` it says that there are no zones yet, and its summary counts what it wrote ("1 zone spectrum, 1 CSV,
   1 figure").
 - `aurora demo <folder>` writes only into a new or empty folder and never into a protected one (written into an
-  existing beamtime, it could replace raw files and `config/roi_bins.json`). Its complete stack covers 660–740 eV in
-  2 eV steps (41 maps), so the tutorials' Easy path ends in a normalised Compare plot; a demo written by an earlier
-  version keeps its 5-energy stack until its `demo_beamtime` folder is deleted and rebuilt.
+  existing beamtime, it could replace raw files and `config/roi_bins.json`). Its complete stack covers 670–735 eV in
+  1 eV steps (66 maps) across the F K edge, so the tutorials' Easy path ends in normalised Compare plots; a demo
+  written by an earlier version is left as it is, and the current one is written next to it (`demo_beamtime_2`).
 - Deep self-test: `aurora --selftest` and Help > Run self-test… run 57 named and timed checks of every core path and
   every perspective (the update check against a local server, TLS, icons, manuals and their images, the session's
   recovery, each perspective's main action) on a synthetic beamtime in a temporary folder, removed afterwards on
