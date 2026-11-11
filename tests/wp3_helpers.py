@@ -50,11 +50,15 @@ class FakeClick:
 
     def __init__(self, vb, x: float, y: float, button=Qt.LeftButton, modifiers=Qt.NoModifier, double: bool = False):
         self._pos = vb.mapFromView(QPointF(x, y))
+        self._scene = vb.mapViewToScene(QPointF(x, y))
         self._button, self._mods, self._double = button, modifiers, double
         self.accepted = False
 
     def pos(self):
         return self._pos
+
+    def scenePos(self):
+        return self._scene
 
     def button(self):
         return self._button
@@ -81,6 +85,8 @@ class FakeDrag:
     def __init__(self, vb, p0, p, start=False, finish=False, button=Qt.LeftButton, modifiers=Qt.NoModifier):
         self._down = vb.mapFromView(QPointF(*p0))
         self._pos = vb.mapFromView(QPointF(*p))
+        self._scene_down = vb.mapViewToScene(QPointF(*p0))
+        self._scene = vb.mapViewToScene(QPointF(*p))
         self._start, self._finish, self._button, self._mods = start, finish, button, modifiers
 
     def modifiers(self):
@@ -91,6 +97,12 @@ class FakeDrag:
 
     def buttonDownPos(self, _b=None):
         return self._down
+
+    def scenePos(self):
+        return self._scene
+
+    def buttonDownScenePos(self, _b=None):
+        return self._scene_down
 
     def isStart(self) -> bool:
         return self._start

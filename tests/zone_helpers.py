@@ -9,8 +9,25 @@ import numpy as np
 
 from aurora.core import testdata
 
-WIDE = "093000_Wide_f_k_stack"          # a second complete stack of the holder, 12 x 4 points
+WIDE = "093000_wide_f_k_stack"                    # a second complete stack of the holder, 12 x 4 points
 WIDE_GRID = {"nx": 12, "ny": 4, "pitch": 0.25, "x0": 2.0, "y0": 5.0}
+_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def ctime(hhmmss: str, day: str | None = None) -> str:
+    """The ctime form the beamline writes into the h5 files ('Thu Nov  5 09:30:00 2026') on testdata.DAY, with English
+    names whatever the locale: the stacks of this fixture stay on the fixture's day whatever day testdata uses."""
+    import datetime as dt
+    d = dt.date.fromisoformat(day or testdata.DAY)
+    return (f"{_DAYS[d.weekday()]} {_MONTHS[d.month - 1]} {d.day:2d} {hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]} "
+            f"{d.year}")
+
+
+def holder() -> str:
+    """The holder of the fixture's survey (the name testdata gives it)."""
+    from aurora.core.names import holder_from_survey
+    return holder_from_survey(testdata.SURVEY)
 
 
 def zone_project(root: Path) -> Path:
@@ -19,7 +36,7 @@ def zone_project(root: Path) -> Path:
     x, y = testdata.snake_grid(**WIDE_GRID)
     d = root / "raw" / testdata.DAY / WIDE
     testdata._write_stack(d, WIDE[7:-6], testdata.ENERGIES, len(testdata.ENERGIES), x, y, np.random.default_rng(21),
-                          created="Thu Nov  5 09:30:00 2026")
+                          created=ctime(WIDE[:6]))
     return root
 
 
@@ -89,14 +106,15 @@ def survey_project(root: Path) -> Path:
     inside = np.zeros(len(x), bool)
     for x0, x1, y0, y1 in boxes:
         inside |= (x >= x0 - 1e-6) & (x <= x1 + 1e-6) & (y >= y0 - 1e-6) & (y <= y1 + 1e-6)
-    with open_h5(sdir / f"holderA_survey_{testdata.DAY}_010013_695.00eV.h5", "w") as h:
+    tag = testdata.SURVEY.split("_", 1)[1].rsplit("_survey", 1)[0]      # the survey's name without time and plan
+    with open_h5(sdir / f"{tag}_survey_{testdata.DAY}_{testdata.SURVEY[:6]}_695.00eV.h5", "w") as h:
         h.create_dataset("hexapod_waves/x", data=x)
         h.create_dataset("hexapod_waves/y", data=y)
         g = h.create_group("scan_metadata")
         g.attrs["energy"] = 695.0
         g.attrs["step_size"] = 0.2
         g.attrs["plan_name"] = "survey"
-        g.attrs["scan_name"] = "holderA_survey"
+        g.attrs["scan_name"] = f"{tag}_survey"
         h.attrs["ring_current"] = 219.0
     _write_survey_points(sdir, x, y, inside, np.random.default_rng(5))
     (root / "config" / "roi_bins.json").write_text(json.dumps(BINS), encoding="utf-8")

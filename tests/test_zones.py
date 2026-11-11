@@ -187,10 +187,12 @@ def test_erase_polygons_round_trip_copy_and_export(tmp_path):
     assert moved.epolys == [[[p[0] + 1.0, p[1] - 1.0] for p in TRIANGLE]]
     # the session file (ZonesFile)
     zf = ZonesFile(project="T")
-    zf.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=[z])
+    from aurora.core.names import holder_from_survey
+    hk = holder_from_survey(testdata.SURVEY)
+    zf.holders[hk] = HolderZones(holder=hk, day=testdata.DAY, survey=testdata.SURVEY, zones=[z])
     path = tmp_path / "session.json"
     zf.save(path)
-    assert ZonesFile.load(path).holders["N5"].zones[0].epolys == [TRIANGLE]
+    assert ZonesFile.load(path).holders[hk].zones[0].epolys == [TRIANGLE]
     # the HTML zone tool knows rectangles and squares only: the erase outline reaches it as erase squares, on every
     # stack, whatever its pitch
     want = members(z, x, y, pitch).tolist()
@@ -202,7 +204,7 @@ def test_erase_polygons_round_trip_copy_and_export(tmp_path):
     assert members(tool, x, y, pitch).tolist() == want
     assert members(tool, xc, yc, (0.5, 0.5)).tolist() == members(z, xc, yc, (0.5, 0.5)).tolist()
     out = export_json(zf, {"fine": (x, y, pitch)})
-    assert out["holders"]["N5"]["zones"][0]["erase"]
+    assert out["holders"][hk]["zones"][0]["erase"]
 
 
 # reference copies of the zone tool's loops (aurora.core.spectra before they were vectorised), kept for equality

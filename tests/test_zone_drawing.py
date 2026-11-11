@@ -757,7 +757,7 @@ def test_survey_preview_xas_of_covered_stack(qapp, swin):
     # a zone over no stack names the holder
     ses.select_zone(None); pump(qapp)
     qdrag(qapp, sv.map, _box_path(0.75, 1.65, 4.45, 4.85))
-    assert not zp.xas.isVisible() and zp.xas_note.text() == MSG_NO_STACK.format(zone="zone 3", holder="N5")
+    assert not zp.xas.isVisible() and zp.xas_note.text() == MSG_NO_STACK.format(zone="zone 3", holder=ses.holder().name)
     # Open in Reduce: the stack and the zone there
     ses.select_zone(z.id); pump(qapp)
     assert zp.open_btn.isEnabled()
@@ -989,3 +989,233 @@ def test_window_source_survey_inside_the_zone(qapp, swin):
     ses.select_zone(None); pump(qapp)
     assert np.allclose(wc._spectrum, survey.spec) and wc.status.text().startswith("no zone selected")
     mode.set_advanced(False)
+
+
+# ============================================================================= stage C: the review
+@pytest.fixture
+def small(qapp, project):
+    """The window at the smallest size (1200 x 760, Easy): Reduce's stack map is narrow, its axis wide beside it."""
+    mode.set_advanced(False)
+    w, sid = open_window(qapp, project, size=(1200, 760))
+    w.sid = sid
+    yield w
+    mode.set_advanced(False)
+    close(w)
+
+
+def _beside_the_map(map_view):
+    """A point (mm) on the left axis of a map, level with the middle of the view: outside the view box, where a drag
+    started in the margin begins."""
+    ax = map_view.plot.getAxis("left")
+    sp = ax.sceneBoundingRect().center()
+    assert not map_view.vb.sceneBoundingRect().contains(sp)
+    p = map_view.vb.mapSceneToView(sp)
+    return float(p.x()), float(p.y())
+
+
+def test_a_stroke_started_beside_the_map_starts_where_the_press_was(qapp, small):
+    """A rectangle started in the margin left of the stack (on the axis) begins under the pointer, so it takes the
+    edge column. pyqtgraph hands such a drag over from the axis with the positions in the axis' own coordinates, which
+    put the stroke a whole axis width to the right (0.32 mm on this map: the first column was missed)."""
+    win, rd, ses = small, small.reduce, small.session
+    sd = ses.stack_loaded(win.sid)
+    x_ax, y_mid = _beside_the_map(rd.map)
+    assert x_ax < float(sd.x.min()) - sd.pitch[0]               # left of the stack, beyond its first column
+    rd.set_tool("rect+")
+    # a click on the axis is a click outside the scan: nothing written, and the map says why (it added a pixel)
+    n = ses.undo_stack.count()
+    QTest.mouseClick(rd.map.viewport(), Qt.LeftButton, Qt.NoModifier, view_to_viewport(rd.map, x_ax, y_mid))
+    pump(qapp)
+    assert ses.undo_stack.count() == n and not _zones(ses)
+    assert rd.map.hint_text() == f"outside scan {rd._map_points()[3]}: draw over its pixels"
+    starts = []
+    rd.map.stroke_started.connect(lambda st: starts.append(st.start))
+    cols = np.unique(np.round(sd.x, 6))
+    end = (float(cols[1]), float(sd.y.max()) + 0.4 * sd.pitch[1])
+    qdrag(qapp, rd.map, [(x_ax, float(sd.y.min()) - 0.4 * sd.pitch[1]), ((x_ax + end[0]) / 2, y_mid), end])
+    assert len(starts) == 1 and abs(starts[0][0] - x_ax) < 0.02, (starts, x_ax)
+    z = ses.zone()
+    first_col = np.where(np.isclose(sd.x, cols[0]))[0]
+    got = set(members(z, sd.x, sd.y, sd.pitch).tolist())
+    assert set(first_col.tolist()) <= got and abs(z.rects[0][0] - x_ax) < 0.02
+
+
+def test_the_map_hint_is_one_line_when_it_fits(qapp, small):
+    """A short sentence stays on one line (QLabel's own word-wrap broke 'erases 4 points from zone 1' and even
+    'new zone 1: 12 points' over two or three lines), a long one wraps at its width."""
+    rd, ses = small.reduce, small.session
+    sd = ses.stack_loaded(small.sid)
+    m = rd.map
+    rd.set_tool("rect+")
+    box = _box_path(*inner_box(sd, 0.05))
+    qdrag(qapp, m, box, release=False)
+    assert m.hint_text().startswith("new zone 1: ") and m.hint_lines() == 1
+    qrelease(qapp, m, box[-1]); pump(qapp)
+    rd.set_tool("rect-")
+    two = _around(sd, np.array([0, 1]))
+    qdrag(qapp, m, two, release=False)
+    assert m.hint_text().startswith("erases 2 points from zone 1") and m.hint_lines() == 1, m.hint_text()
+    qrelease(qapp, m, two[-1]); pump(qapp)
+    long = "a sentence much longer than the map is wide, which has to wrap over several lines to be read at all"
+    m.set_hint(long)
+    assert m.hint_lines() >= 2 and m._hint.width() <= max(120, int(0.6 * m.width()), min(m.width() - 16, 280))
+    assert m._hint.geometry().right() < m.width()
+
+
+def test_a_scan_change_cancels_the_stroke_in_progress(qapp, wide):
+    """A stroke whose map changes under it (another scan picked, a holder changed) is dropped, not written with the
+    old map's points."""
+    rd, ses, win = wide.reduce, wide.session, wide
+    sd = ses.stack_loaded(win.sid)
+    rd.set_tool("rect+")
+    n = ses.undo_stack.count()
+    path = _around(sd, row_points(sd, 1)[:4])
+    qdrag(qapp, rd.map, path, release=False)
+    assert rd.map.vb.drawing() == "rect"
+    other = ses.stack_id(_scan_by(ses, testdata.STACK))
+    ses.stack(other)
+    ses.select_stack(other); pump(qapp)
+    assert rd.map.vb.drawing() == "" and rd.map.stroke_preview_counts() == (0, 0)
+    qrelease(qapp, rd.map, path[-1]); pump(qapp)
+    assert ses.undo_stack.count() == n and not _zones(ses)
+
+
+def test_zone_preview_names_its_curves_and_windows(qapp, swin):
+    """The Zone preview names its curves in one line under the emission (SDD1-SDD4 and the sum, the colours and dashes
+    of both plots), which gives way to the hover readout over the plot; the XAS panel has no legend box over its
+    short plot. The shaded window carries the map channel's name, the other lines' names sit beside their ticks."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    from zone_helpers import LINE_A, LINE_B, sample_box
+    win, ses, sv = swin, swin.session, swin.survey
+    zp = sv.zone_preview
+    sd = ses.stack_loaded(win.sid)
+    assert not zp.legend.isVisible()                            # no zone: a sentence, no legend
+    sv.channel.setCurrentText(LINE_A); pump(qapp)
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _box_path(*sample_box(sd)))
+    pump(qapp)
+    assert zp.legend.isVisible() and zp.legend.texts() == ["SDD1", "SDD2", "SDD3", "SDD4", "sum"]
+    assert all(not sw.pixmap().isNull() for sw in zp.legend.swatches)
+    assert zp.xas.isVisible() and zp.xas.top.legend is None and zp.xas._traces
+    em = zp.emission
+    assert em.window_label is not None and em.window_label.label.toPlainText() == LINE_A
+    (tick,) = em.ticks
+    assert tick.label.toPlainText() == LINE_B and tick.value() < em.window_label.value()
+    assert tick.label.anchors[1][0] == pytest.approx(1.0)      # line B's name left of its tick, away from line A
+    top = em.plot.getViewBox().viewRange()[1][1]
+    assert top > np.log10(np.nanmax(em.data["sum"]))            # room above the highest peak for the names
+    lo, hi = em.window["sdd1"]
+    assert em.readout_text(lo).split(" · ")[1] == f"{LINE_A} window"
+    assert em.readout_text(int(tick.value())).split(" · ")[1] == f"near {LINE_B}"
+    # ten lines a few channels apart: only the names that fit are printed, never over each other
+    crowd = [(f"line {i}", 120.0 + 4 * i) for i in range(10)]
+    em.set_windows(dict(em.window), crowd, None, name=LINE_A)
+    named = [t for t in em.ticks if getattr(t, "label", None) is not None]
+    assert 1 <= len(named) < 10 and len(em.ticks) == 10
+    boxes = sorted((t.label.mapRectToScene(t.label.boundingRect()).left(),
+                    t.label.mapRectToScene(t.label.boundingRect()).right()) for t in named)
+    assert all(a[1] <= b[0] + 1 for a, b in zip(boxes, boxes[1:])), boxes
+    assert em.readout_text(124).split(" · ")[1] == "near line 1"
+    zp.refresh(); pump(qapp)
+    # the hover readout takes the legend's line while the pointer is over the plot, and gives it back
+    pi = em.plot.getPlotItem()
+    em._moved(pi.vb.mapViewToScene(pi.vb.viewRect().center()))
+    assert em.line.currentWidget() is em.readout and em.readout.text().startswith("channel ")
+    QApplication.sendEvent(em.plot, QEvent(QEvent.Leave))
+    assert em.line.currentWidget() is em.legend
+    sv.channel.setCurrentText("total"); pump(qapp)
+    assert em.window_label is None and em.regions == []
+
+
+def test_the_survey_zones_table_shows_its_zones(qapp, swin):
+    """At 1200 x 760 the zones table shows two zones without a sideways scroll bar (no second row number), and the
+    zone a stroke creates is the selected row."""
+    win, ses, sv = swin, swin.session, swin.survey
+    win.resize(1200, 760); pump(qapp, 10)
+    sd = ses.stack_loaded(win.sid)
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    ses.select_zone(None); pump(qapp)
+    qdrag(qapp, sv.map, _box_path(1.9, 4.85, 4.9, 5.85))
+    pump(qapp, 5)
+    t = sv.zone_table
+    assert t.rowCount() == 2 and not t.verticalHeader().isVisible()
+    assert not t.horizontalScrollBar().isVisible()
+    for r in range(2):
+        rect = t.visualRect(t.model().index(r, 1))
+        assert rect.bottom() <= t.viewport().height() + 1, (r, rect, t.viewport().height())
+    assert [i.row() for i in t.selectionModel().selectedRows()] == [1] and ses.current_zone == 2
+    assert t.minimumHeight() >= t.horizontalHeader().sizeHint().height() + 2 * t.verticalHeader().defaultSectionSize()
+
+
+def test_undo_names_the_step_it_undoes(qapp, swin):
+    """The tool bar's Undo undoes the last edit of the one history (a setting edited on a card is a step too): its
+    tooltip names that step, as Edit > Undo does."""
+    from aurora.app.help_text import HELP
+    win, ses, sv = swin, swin.session, swin.survey
+    bar = sv.toolbar
+    assert bar.undo_btn.toolTip() == HELP["zones.undo"][0] and not bar.undo_btn.isEnabled()
+    sd = ses.stack_loaded(win.sid)
+    sv.set_tool("rect+")
+    qdrag(qapp, sv.map, _footprint_box(sd))
+    want = "Undo: add a rectangle to a new zone (Ctrl+Z). One stroke is one step."
+    assert bar.undo_btn.toolTip() == want == win.reduce.toolbar.undo_btn.toolTip()
+    z = ses.zone()
+    with ses.edit(f"rename zone {z.id}"):
+        z.label = "sample A"
+    assert bar.undo_btn.toolTip().startswith(f"Undo: rename zone {z.id} ")
+    bar.undo_btn.click(); pump(qapp)
+    assert ses.zone(z.id).label != "sample A" and bar.undo_btn.toolTip() == want
+    bar.undo_btn.click(); pump(qapp)
+    assert not _zones(ses) and bar.undo_btn.toolTip() == HELP["zones.undo"][0]
+
+
+def test_polygon_draw_and_erase_on_the_survey_in_advanced(qapp, swin):
+    """Advanced: P, then a click on each corner and a double-click on the last draws a polygon zone on the plate map
+    (one step); X switches to Erase and the same clicks cut an erased outline out of it (epolys); Esc drops a polygon
+    half drawn. Clicks only, real QTest events."""
+    from zone_helpers import sample_box
+    win, ses, sv = swin, swin.session, swin.survey
+    mode.set_advanced(True); pump(qapp)
+    sd = ses.stack_loaded(win.sid)
+    survey = ses.survey()
+    x0, x1, y0, y1 = sample_box(sd)
+    win.activateWindow()
+    sv.map.setFocus()
+    QTest.keyClick(win, Qt.Key_P); pump(qapp)
+    assert sv.map.vb.tool == "polygon+" and sv.toolbar.shape() == "polygon"
+    gap = qapp.doubleClickInterval() + 60                      # separate clicks, never read as a double-click
+
+    def polygon(pts):
+        for pt in pts[:-1]:
+            QTest.mouseClick(sv.map.viewport(), Qt.LeftButton, Qt.NoModifier, view_to_viewport(sv.map, *pt))
+            pump(qapp)
+            QTest.qWait(gap)
+        qdclick(qapp, sv.map, pts[-1])
+        pump(qapp)
+    n = ses.undo_stack.count()
+    pad = 0.08
+    polygon([(x0 - pad, y0 - pad), (x1 + pad, y0 - pad), (x1 + pad, y1 + pad), (x0 - pad, y1 + pad)])
+    z = ses.zone()
+    assert z is not None and len(z.polys) == 1 and len(z.polys[0]) == 4
+    assert ses.undo_stack.count() == n + 1 and ses.undo_stack.text(n) == "add a polygon to a new zone"
+    inside = members(z, survey.x, survey.y, survey.pitch)
+    assert inside.size and set(z.settings) == {win.sid}
+    QTest.keyClick(win, Qt.Key_X); pump(qapp)
+    assert sv.map.vb.tool == "polygon-"
+    xm = (x0 + x1) / 2
+    polygon([(x0 - pad, y0 - pad), (xm, y0 - pad), (xm, y1 + pad), (x0 - pad, y1 + pad)])
+    assert len(z.epolys) == 1 and ses.undo_stack.count() == n + 2
+    left = members(z, survey.x, survey.y, survey.pitch)
+    assert 0 < left.size < inside.size and (survey.x[left] > xm).all()
+    # Esc drops a polygon in progress: nothing written
+    QTest.mouseClick(sv.map.viewport(), Qt.LeftButton, Qt.NoModifier, view_to_viewport(sv.map, x0, y0)); pump(qapp)
+    QTest.qWait(gap)
+    QTest.mouseClick(sv.map.viewport(), Qt.LeftButton, Qt.NoModifier, view_to_viewport(sv.map, x1, y0)); pump(qapp)
+    assert sv.map.vb.drawing() == "polygon"
+    sv.map.setFocus()
+    QTest.keyClick(sv.map, Qt.Key_Escape); pump(qapp)
+    assert sv.map.vb.drawing() == "" and ses.undo_stack.count() == n + 2
+    mode.set_advanced(False); pump(qapp)
+    assert sv.map.vb.tool != "polygon-"                          # Easy has no polygon: back to the rectangle
