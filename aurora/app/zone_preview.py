@@ -33,7 +33,8 @@ from aurora.core.constants import DETS, N_CH
 
 TITLE = "Zone preview"
 MIN_PANEL_PX = 140              # the emission and the XAS panel each get at least this (px at the Text size): their
-EMISSION_PX = 150               # data areas keep 48 px (the XAS's sparse axis) and 80 px (the emission) for their ticks
+EMISSION_PX = 154               # data areas keep 48 px (the XAS's sparse axis) and 80 px (the emission, under its
+                                # title) for their ticks
 HEADROOM = 0.18                 # the emission's y range reaches this share of its decades above the highest count
 OPEN_TEXT = "Open in Reduce"
 NOT_LOADED = " (not loaded)"
