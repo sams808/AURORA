@@ -205,6 +205,7 @@ def test_help_code_blocks_follow_text_size_and_wrap(qapp, text):
     try:
         h = HelpWindow()
         h.show()
+        with_code = []
         for name, _t, _tip in DOCS:
             h.show_doc(name)
             pump(qapp, 5)
@@ -218,9 +219,11 @@ def test_help_code_blocks_follow_text_size_and_wrap(qapp, text):
                 elif block.textList() is None and block.text().strip() and block.blockFormat().headingLevel() == 0:
                     gaps += block.blockFormat().bottomMargin() >= theme.px(8)
                 block = block.next()
-            assert sizes == {theme.px(12)}, (name, sizes)
+            assert sizes <= {theme.px(12)}, (name, sizes)     # GLOSSARY.md has no code block
+            with_code += [name] if sizes else []
             assert gaps > 0, name
             assert h.browser.horizontalScrollBar().maximum() == 0, (name, h.browser.horizontalScrollBar().maximum())
+        assert {"MANUAL.md", "USER_GUIDE.md"} <= set(with_code), with_code
         QTest.keyClick(h, Qt.Key_Escape)
         pump(qapp)
         assert not h.isVisible()
@@ -230,7 +233,7 @@ def test_help_code_blocks_follow_text_size_and_wrap(qapp, text):
 
 
 def test_empty_states_sit_below_headers_and_cover_plot_hints(qapp, fake_project):
-    from aurora.app.help_text import HELP
+    from aurora.app.help_text import tooltip
     from aurora.app.main import MainWindow
     from aurora.app.shortcuts import native_text
     from aurora.app.widgets import EMPTY_HELP
@@ -250,7 +253,7 @@ def test_empty_states_sit_below_headers_and_cover_plot_hints(qapp, fake_project)
             for b in es.buttons:
                 assert b.toolTip() != es.text(), (key, b.text())
                 if b.text() in EMPTY_HELP:
-                    assert b.toolTip() == native_text(HELP[EMPTY_HELP[b.text()]][0]), (key, b.text())
+                    assert b.toolTip() == native_text(tooltip(EMPTY_HELP[b.text()])), (key, b.text())   # + 'What is
     # Check with a project and an empty queue: the card sits below the table's header row
     win.home.set_project(Project.discover(fake_project))
     win.show_perspective("check")

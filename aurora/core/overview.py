@@ -336,8 +336,10 @@ def easy_project_rows(project, facts: ProjectFacts | None = None) -> list[tuple[
             key = "detector energy scale"
             if cal is not None and cal.calibrated:
                 val = val.replace("(last updated", "(updated")
-            else:
+            elif cal is None or not getattr(cal, "exists", False):
                 val = "standard, 10 eV per channel (no config/sdd_calibration.json; fine for the fixed windows)"
+            else:                                       # a file AURORA cannot use: its problems stay named
+                val = val.replace("nominal", "standard")
         elif key == "ROI bins":
             key = "emission windows"
             bins = project.roi_bins

@@ -527,7 +527,9 @@ def render_markdown() -> str:
 
 
 def markdown_path() -> Path:
-    return Path(__file__).resolve().parent / "resources" / "docs" / "GLOSSARY.md"
+    """The generated GLOSSARY.md among the bundled manuals (aurora.resources_dir, the only way to the bundled files)."""
+    from aurora import resources_dir
+    return resources_dir() / "docs" / "GLOSSARY.md"
 
 
 def main(argv=None) -> int:

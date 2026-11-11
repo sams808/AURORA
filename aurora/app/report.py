@@ -159,6 +159,8 @@ FINDING_PLAIN = {
     "label_not_in_sheet": "{n} sample names are not in the sample sheet",
     "duplicate_label": "{n} sample names appear on several holders of one group",
     "sheet_row_no_zone": "{n} samples of the sample sheet have no outline yet",
+    "line_not_defined": "{n} spectra count X-rays in a window this beamtime does not define: their fluorescence is left "
+                        "out (the electron yield, TEY, is kept)",
 }
 
 

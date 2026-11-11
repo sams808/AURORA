@@ -195,7 +195,7 @@ def test_layout_prefills_and_accept_is_one_edit(qapp, window, monkeypatch):
     assert sv.zone_table.rowCount() == len(hz.zones) and sv._grid_preview is None and sv.grid_dialog is None
     assert "added 8 zones" in sv.hint.text()
     sv.redraw_map()                                            # any later redraw keeps the note in the hint line
-    assert "added 8 zones to holder holderA" in sv.hint.text() and "points at" in sv.hint.text()
+    assert "added 8 zones to holder holderA" in sv.hint.text() and "points, pitch" in sv.hint.text()
     # the next grid continues the numbering
     dlg = sv.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
     assert dlg.start_id() == max(z.id for z in hz.zones) + 1

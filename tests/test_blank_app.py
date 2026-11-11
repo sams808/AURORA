@@ -84,11 +84,28 @@ def test_reduce_with_a_malformed_calibration_has_no_error(qapp, tmp_path, error_
     win, sid = open_window(qapp, Project.discover(root))
     try:
         wc = win.reduce.window_card
-        assert wc.ev_label.text().startswith("all detectors: channels") and "nominal" in wc.ev_label.text()
+        t = wc.ev_label.text()                        # Easy words; Advanced keeps the channel range and 'nominal'
+        assert t.startswith("All four detectors:") and "10 eV per channel, not calibrated" in t, t
+        from aurora.app import mode
+        mode.set_advanced(True)
+        pump(qapp)
+        try:
+            assert wc.ev_label.text().startswith("all detectors: channels") and "nominal" in wc.ev_label.text()
+        finally:
+            mode.set_advanced(False)
+            pump(qapp)
         win.show_perspective("home")
         pump(qapp)
-        text = details(win)
-        assert "sdd1: not a JSON object (5)" in text and "Calibration" in text
+        text = details(win)                           # Easy: the 'detector energy scale' row names the problem too
+        assert "sdd1: not a JSON object (5)" in text and "Detector energy scale" in text, text
+        mode.set_advanced(True)
+        pump(qapp)
+        try:
+            text = details(win)
+            assert "sdd1: not a JSON object (5)" in text and "Calibration" in text
+        finally:
+            mode.set_advanced(False)
+            pump(qapp)
         assert not error_dialogs
     finally:
         close3(win)
@@ -108,12 +125,14 @@ def test_save_as_a_fixed_line_on_a_raw_only_beamtime(qapp, tmp_path, error_dialo
         ses, wc = win.session, win.reduce.window_card
         assert wc.bins_note.isVisible() and wc.bins_note.text() == NO_FIXED_LINES
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items == ["total XRF (fixed bins)", "John Bussey's 60:83 (F Kα)", "custom"]     # it holds F Kα
+        assert items == ["all X-rays (total XRF)", "standard 60:83 (F Kα)",                  # it holds F Kα
+                         "custom (drag the band on the plot)"]
         sd0, scan0 = ses.stack_loaded(sid), ses.scan_of(sid)
         sd0.edge = ("O", "K")                         # an edge John Bussey's 60:83 does not hold (O Kα is channel 52)
         wc.set_stack(sd0, scan0)
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items[1].startswith("line of the edge: O Kα") and items[1].endswith("(nominal calibration, check the peak)")
+        assert items[1].startswith("line of the edge element: O Kα") and \
+            items[1].endswith("(nominal calibration, check the peak)")
         el = wc._edge_line
         assert el.nominal and el.windows == xw.edge_line_windows(("O", "K"), None, None, nominal=True).windows
         sd0.edge = ("F", "K")
@@ -128,7 +147,7 @@ def test_save_as_a_fixed_line_on_a_raw_only_beamtime(qapp, tmp_path, error_dialo
         bins = RoiBins(root / "config" / "roi_bins.json")
         assert bins.labels == ["F Kα"] and bins.bounds("F Kα") == {d: (60, 75) for d in DETS}
         assert ses.project.roi_bins.labels == ["F Kα"] and not wc.bins_note.isVisible()
-        assert "F Kα (fixed bins)" in [wc.preset.itemText(i) for i in range(wc.preset.count())]
+        assert "F Kα (fixed window)" in [wc.preset.itemText(i) for i in range(wc.preset.count())]
         # a second save of the same name asks first; No keeps the file
         wc.confirm_replace = lambda name: False
         assert wc.save_fixed_line("F Kα") == ""
@@ -279,7 +298,8 @@ def test_import_sdd_calibration(qapp, tmp_path, monkeypatch):
         assert list((root / "config").glob("sdd_calibration.backup-*.json"))       # the previous file is kept
         pump(qapp)
         assert "config/sdd_calibration.json" in details(win)
-        assert "(calibrated)" in win.reduce.window_card.ev_label.text() or win.reduce.window_card._sd is None
+        ev = win.reduce.window_card.ev_label.text()  # Easy: '(channels 5 to 199, calibrated)'
+        assert (", calibrated)" in ev and "not calibrated" not in ev) or win.reduce.window_card._sd is None, ev
     finally:
         close(win)
 
@@ -372,7 +392,9 @@ def test_survey_explains_a_holder_without_survey_and_no_sheet(qapp, tmp_path, si
             pump(qapp, 10)
             assert sv.no_map_state.isVisible() and sv.no_map_state.text() == NO_SURVEY_MAP
             assert sv.holder_combo.currentText().startswith(BEFORE_SURVEY)
-            assert sv.zones_card.title.text().startswith("Zones of the stacks before the first survey")
+            # Advanced names the holder; Easy's title is the samples outlined on 'this holder' (plain words)
+            assert sv.zones_card.title.text().startswith("Zones of the stacks before the first survey" if adv else
+                                                         "Samples outlined on this holder")
             assert sv.sheet_note.isVisible() and sv.sheet_note.text().startswith(NO_SHEET) and not sv.sheet_table.isVisible()
             assert sv.new_sheet_btn.isVisible() and sv.choose_sheet_btn.isVisible()
         mode.set_advanced(False)
