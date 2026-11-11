@@ -697,12 +697,12 @@ EASY_TEXT: dict[str, tuple[str, str]] = {
     "fit.lcf_title": ("Mix of references (LCF)", "Linear combination"),
     "fit.components_label": ("references (tick)", "references / components (tick)"),
     # Survey
+    # (the texts of the plain spec 5.3 for a Survey that draws zones)
     "survey.subtitle": ("Where each sample and each measured area sits on the holder. Draw around a sample, or click a "
-                        "measured area to outline a sample in it in Reduce.", "plate map, scan footprints, zones"),
+                        "measured area to open it in Reduce.", "plate map, scan footprints, zones"),
     "survey.zones_title": ("Samples outlined on this holder", "Zones of the holder"),
-    "survey.zones_empty": ("No samples outlined on this holder yet. Choose Draw and drag around a sample on the map, or "
-                           "click a measured area (a rectangle) to outline a sample in Reduce.",
-                           "No zones on this holder yet."),
+    "survey.zones_empty": ("No samples outlined on this holder yet. Draw around a sample on the map (Draw, then drag), "
+                           "or click a measured area to open it in Reduce.", "No zones on this holder yet."),
     # Report
     "report.zone_state": ("No sample outlined yet: the report is built from the samples outlined in Reduce and kept in "
                           "Check.", "No zone yet: the report is built from the zones drawn in Reduce."),

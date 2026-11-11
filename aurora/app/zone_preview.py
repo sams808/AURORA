@@ -13,7 +13,7 @@
    read it twice) once the stroke is written, and drawn when it is in. 'Open in Reduce' opens it with the zone
    selected.
 3. One summary line (what a screen reader reads): "zone 3 'NaF': 49 survey points · F Kα window 60–73 ch · on 09:27:
-   36 of 121 pixels".
+   36 of 121 pixels"; Easy mode names the sample by its label ("NaF: 49 survey points · …").
 Empty states say what to do (no zone, an empty zone, a zone off the plate map, a zone over no scan), never bare axes.
 The traces come from aurora.app.trace_cache, shared with Reduce and Check.
 """
@@ -30,6 +30,7 @@ from aurora.app.theme import TOKENS, curve, dash, make_plot, min_height, mk_pen,
 from aurora.app.vocab import DET_LABELS, plural
 from aurora.app.widgets import Card, ElidedLabel, FlowLayout, TaskBar, pair, set_plot_hint
 from aurora.core.constants import DETS, N_CH
+from aurora.glossary import what_is
 
 TITLE = "Zone preview"
 MIN_PANEL_PX = 140              # the emission and the XAS panel each get at least this (px at the Text size): their
@@ -47,6 +48,25 @@ MSG_NO_SPECTRA = "the survey's per-point spectra could not be read again"
 MSG_READING = "reading {scan} …"
 MSG_AT_RELEASE = "{scan} is not loaded: it is read when you let go"
 MSG_GOOD_I0 = "reading the good-I0 scans …"
+# Easy mode: the same messages in the Survey's words, naming the sample by its label (plain-language spec 5.3)
+EASY_NO_SURVEY = "This holder has no survey map: outline the samples on their stack map in Reduce"
+EASY_NO_ZONE = "Select a sample, or draw one on the map (Draw, then drag)"
+EASY_EMPTY = MSG_EMPTY
+EASY_OFF_PLATE = "{zone} holds no survey pixel: it lies outside the holder map"
+EASY_NO_STACK = "{zone} covers no measured area of holder {holder}: draw it over a rectangle of the map"
+
+
+def msg(name: str, **fields) -> str:
+    """A message of the card in the words of the current mode: EASY_<name> in Easy mode, MSG_<name> in Advanced."""
+    from aurora.app.mode import is_advanced
+    text = globals()[("MSG_" if is_advanced() else "EASY_") + name]
+    return text.format(**fields) if fields else text
+
+
+def sample_name(z, next_id: int = 0) -> str:
+    """The zone as the card names it (zone_tools.sample_name: the label in Easy mode, the zone in Advanced)."""
+    from aurora.app import zone_tools
+    return zone_tools.sample_name(z, next_id)
 
 
 class SeriesLegend(QWidget):
@@ -66,6 +86,7 @@ class SeriesLegend(QWidget):
             sw.setAccessibleName(f"{name} curve")
             t = QLabel(name)
             t.setObjectName("muted")
+            t.setToolTip(what_is("sdd") if name != "sum" else "the sum of the detectors in use")
             lay.addWidget(sw)
             lay.addWidget(t)
             self.swatches.append(sw)
@@ -287,12 +308,13 @@ class EmissionPlot(QWidget):
 
 
 def window_text(channel: str, bounds: dict | None) -> str:
-    """'F Kα window 60–73 ch' (first and last channel, SDD1; '(SDD1)' when the detectors' windows differ)."""
+    """'F Kα window 60–73 ch' (first and last channel, SDD1; 'on detector 1 (SDD1)' when the detectors'
+    windows differ)."""
     if not bounds:
         return ""
     lo, hi = bounds[DETS[0]]
     same = len({tuple(v) for v in bounds.values()}) == 1
-    return f"{channel} window {lo}–{hi - 1} ch" + ("" if same else " (SDD1)")
+    return f"{channel} window {lo}–{hi - 1} ch" + ("" if same else " on detector 1 (SDD1)")
 
 
 class ZonePreviewCard(Card):
@@ -383,8 +405,7 @@ class ZonePreviewCard(Card):
 
     # ------------------------------------------------------------------ drawing
     def _name(self, z) -> str:
-        from aurora.app.zone_tools import zone_name
-        return zone_name(z) if getattr(z, "id", 0) else f"new zone {self._next_id()}"
+        return sample_name(z, self._next_id())
 
     def _next_id(self) -> int:
         hz = self.session.holder_zones(create=False) if self.session.project is not None else None
@@ -407,14 +428,14 @@ class ZonePreviewCard(Card):
         from aurora.core.zones import members
         sv = self._sv
         if sv is None:
-            self._say(self._sv_error or MSG_NO_SURVEY)
+            self._say(self._sv_error or msg("NO_SURVEY"))
             return
         if z is None:
-            self._say(MSG_NO_ZONE)
+            self._say(msg("NO_ZONE"))
             return
         name = self._name(z)
         if not zone_drawn(z):
-            self._say(MSG_EMPTY.format(zone=name))
+            self._say(msg("EMPTY", zone=name))
             return
         if pix is None:
             pix = members(z, sv.x, sv.y, sv.pitch)
@@ -424,7 +445,7 @@ class ZonePreviewCard(Card):
         if bounds:
             parts.append(window_text(self._channel, bounds))
         if n == 0:
-            self.emission.show_message(MSG_OFF_PLATE.format(zone=name))
+            self.emission.show_message(msg("OFF_PLATE", zone=name))
         elif not (sv.has_spectra or sv.reload_spectra()):
             self.emission.show_message(MSG_NO_SPECTRA)
         else:
@@ -433,7 +454,7 @@ class ZonePreviewCard(Card):
         self._covered = self._covering(z)
         if not self._covered:
             h = self.session.holder()
-            self._show_xas(False, MSG_NO_STACK.format(zone=name, holder=h.name if h is not None else ""))
+            self._show_xas(False, msg("NO_STACK", zone=name, holder=h.name if h is not None else ""))
             if n:
                 self.emission.set_windows(bounds, self._other_ticks(), None, name=self._channel)
             self._summary(parts)

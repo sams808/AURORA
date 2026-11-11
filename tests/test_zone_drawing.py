@@ -106,9 +106,12 @@ def test_reduce_left_drag_draws_one_step(qapp, win):
     win.activateWindow()
     QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier)
     pump(qapp)
-    from aurora.app.reduce import PREVIEW_NO_ZONE
+    from aurora.app.reduce import EASY_PREVIEW_NO_ZONE, PREVIEW_NO_ZONE
     assert not _zones(ses) and ses.zone() is None and rd.preview._traces == []
-    assert rd.preview._waiting == PREVIEW_NO_ZONE                               # 'Draw a zone on the map (drag) ...' 
+    assert rd.preview._waiting == EASY_PREVIEW_NO_ZONE                          # 'Select a sample, or draw one ...'
+    mode.set_advanced(True); pump(qapp)
+    assert rd.preview._waiting == PREVIEW_NO_ZONE                               # 'Draw a zone on the map (drag) ...'
+    mode.set_advanced(False); pump(qapp)
 
 
 def test_new_sample_then_the_first_stroke_is_one_step(qapp, win):
@@ -691,7 +694,7 @@ def test_survey_preview_emission(qapp, swin):
     zp = sv.zone_preview
     sd = ses.stack_loaded(win.sid)
     survey = ses.survey()
-    assert zp.summary.text().startswith("Select a zone, or draw one on the map")
+    assert zp.summary.text().startswith("Select a sample, or draw one on the map")    # Easy words (plain 5.3)
     sv.channel.setCurrentText(LINE_A); pump(qapp)
     sv.set_tool("rect+")
     qdrag(qapp, sv.map, _box_path(*sample_box(sd)))             # the sample's survey points
@@ -707,7 +710,13 @@ def test_survey_preview_emission(qapp, swin):
     assert zp.emission.plot.getPlotItem().titleLabel.text == f"XRF at {survey.energy:.1f} eV · {pix.size} survey points"
     assert [tuple(r.getRegion()) for r in zp.emission.regions] == [tuple(BINS[LINE_A][d]) for d in DETS]
     assert [t.value() for t in zp.emission.ticks] == [np.mean([(lo + hi) / 2 for lo, hi in BINS[LINE_B].values()])]
-    assert zp.summary.full_text().startswith(f"zone 1: {pix.size} survey points · {LINE_A} window 60–73 ch (SDD1)")
+    # Easy names the sample (its default label: "sample 1"), Advanced the zone; the detector in words
+    assert zp.summary.full_text().startswith(f"sample 1: {pix.size} survey points · {LINE_A} window 60–73 ch on "
+                                             "detector 1 (SDD1)")
+    mode.set_advanced(True); pump(qapp)
+    assert zp.summary.full_text().startswith(f"zone 1: {pix.size} survey points · {LINE_A} window 60–73 ch on "
+                                             "detector 1 (SDD1)")
+    mode.set_advanced(False); pump(qapp)
     sv.channel.setCurrentText(LINE_B); pump(qapp)              # the map's channel moves the shaded window
     assert [tuple(r.getRegion()) for r in zp.emission.regions] == [tuple(BINS[LINE_B][d]) for d in DETS]
     sv.channel.setCurrentText("total"); pump(qapp)             # no window for the total XRF
@@ -725,7 +734,7 @@ def test_survey_preview_emission(qapp, swin):
 
 
 def test_survey_preview_xas_of_covered_stack(qapp, swin):
-    from aurora.app.zone_preview import MSG_NO_STACK
+    from aurora.app.zone_preview import EASY_NO_STACK, MSG_NO_STACK
     from aurora.core.zones import zone_traces
     from zone_helpers import WIDE
     win, ses, sv = swin, swin.session, swin.survey
@@ -758,7 +767,11 @@ def test_survey_preview_xas_of_covered_stack(qapp, swin):
     # a zone over no stack names the holder
     ses.select_zone(None); pump(qapp)
     qdrag(qapp, sv.map, _box_path(0.75, 1.65, 4.45, 4.85))
-    assert not zp.xas.isVisible() and zp.xas_note.text() == MSG_NO_STACK.format(zone="zone 3", holder=ses.holder().name)
+    assert not zp.xas.isVisible() and zp.xas_note.text() == EASY_NO_STACK.format(zone="sample 3",
+                                                                                   holder=ses.holder().name)
+    mode.set_advanced(True); pump(qapp)
+    assert zp.xas_note.text() == MSG_NO_STACK.format(zone="zone 3", holder=ses.holder().name)
+    mode.set_advanced(False); pump(qapp)
     # Open in Reduce: the stack and the zone there
     ses.select_zone(z.id); pump(qapp)
     assert zp.open_btn.isEnabled()
@@ -854,32 +867,42 @@ def test_preview_throttle_counts(qapp, swin, monkeypatch):
 
 # ----------------------------------------------------------------------------- Z10: messages of the previews
 def test_preview_messages(qapp, swin):
-    from aurora.app.reduce import PREVIEW_NO_SCAN, PREVIEW_NO_ZONE
-    from aurora.app.zone_preview import MSG_EMPTY, MSG_NO_ZONE, MSG_OFF_PLATE
+    from aurora.app.reduce import EASY_PREVIEW_NO_ZONE, PREVIEW_NO_SCAN, PREVIEW_NO_ZONE
+    from aurora.app.zone_preview import EASY_NO_ZONE, EASY_OFF_PLATE, MSG_EMPTY, MSG_NO_ZONE, MSG_OFF_PLATE
     from zone_helpers import WIDE
     win, ses, sv, rd = swin, swin.session, swin.survey, swin.reduce
     sd = ses.stack_loaded(win.sid)
     zp = sv.zone_preview
-    assert zp.summary.text() == MSG_NO_ZONE
+    assert zp.summary.text() == EASY_NO_ZONE                   # Easy: the sample by its name (plain 5.3)
     z = ses.new_zone(); pump(qapp)                             # an empty zone
-    assert zp.summary.text() == MSG_EMPTY.format(zone=f"zone {z.id}")
+    assert zp.summary.text() == MSG_EMPTY.format(zone=f"sample {z.id}")
     with ses.edit("a zone off the plate"):
         z.rects.append([-3.0, -2.5, 8.0, 8.5])
     pump(qapp)
+    assert zp.summary.full_text().startswith(f"sample {z.id}: 0 survey points") and \
+        zp.emission.plot.getPlotItem()._aurora_hint.toPlainText() == EASY_OFF_PLATE.format(zone=f"sample {z.id}")
+    mode.set_advanced(True); pump(qapp)                        # Advanced: the zone, the zones spec words
     assert zp.summary.full_text().startswith(f"zone {z.id}: 0 survey points") and \
         zp.emission.plot.getPlotItem()._aurora_hint.toPlainText() == MSG_OFF_PLATE.format(zone=f"zone {z.id}")
+    ses.select_zone(None); pump(qapp)
+    assert zp.summary.text() == MSG_NO_ZONE
+    mode.set_advanced(False); pump(qapp)
+    ses.select_zone(z.id); pump(qapp)
     # Reduce: no zone, an empty zone, a zone outside this scan naming the scans it covers, no scan
     win.show_perspective("reduce"); pump(qapp, 5)
     ses.select_zone(None); pump(qapp)
-    assert rd.preview._waiting == PREVIEW_NO_ZONE
+    assert rd.preview._waiting == EASY_PREVIEW_NO_ZONE
     zid = ses.new_zone().id; pump(qapp)
+    assert rd.preview._waiting == f"sample {zid} is empty: drag on the map to draw it"
+    mode.set_advanced(True); pump(qapp)
     assert rd.preview._waiting == f"zone {zid} is empty: drag on the map to draw it"
+    mode.set_advanced(False); pump(qapp)
     wid = ses.stack_id(_scan_by(ses, WIDE))
     with ses.edit("a zone on the other stack"):
         ses.zone(zid).rects.append([1.9, 4.85, 4.9, 5.85])
     pump(qapp)
     assert ses.zone(zid).settings and wid in ses.zone(zid).settings and ses.stack_loaded(wid) is None
-    assert rd.preview._waiting == (f"zone {zid} holds no pixel of 09:27: it lies outside this scan. Scans it covers: "
+    assert rd.preview._waiting == (f"sample {zid} holds no pixel of 09:27: it lies outside this scan. Scans it covers: "
                                    "09:30 (pick one in step 1)")
     ses.select_stack(None); pump(qapp)
     ses.select_zone(None); pump(qapp)
@@ -887,22 +910,22 @@ def test_preview_messages(qapp, swin):
 
 
 def test_undo_after_drag_refreshes_previews(qapp, swin):
-    from aurora.app.zone_preview import MSG_NO_ZONE
+    from aurora.app.zone_preview import EASY_NO_ZONE
     win, ses, sv, rd = swin, swin.session, swin.survey, swin.reduce
     sd = ses.stack_loaded(win.sid)
     sv.set_tool("rect+")
     qdrag(qapp, sv.map, _footprint_box(sd))
     drawn = sv.zone_preview.summary.full_text()
-    assert drawn.startswith("zone 1: ")
+    assert drawn.startswith("sample 1: ")                                 # Easy: the sample (plain 5.3)
     win.activateWindow()
     QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier); pump(qapp)
-    assert sv.zone_preview.summary.text() == MSG_NO_ZONE and not _zones(ses)
+    assert sv.zone_preview.summary.text() == EASY_NO_ZONE and not _zones(ses)
     QTest.keyClick(win, Qt.Key_Y, Qt.ControlModifier); pump(qapp)
     assert sv.zone_preview.summary.full_text() == drawn
     win.show_perspective("reduce"); pump(qapp, 5)
-    assert rd.preview._traces and rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 points")
+    assert rd.preview._traces and rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 pixels")
     QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier); pump(qapp)
-    assert rd.preview._traces == [] and rd.region_caption.text().startswith("Region: nothing selected")
+    assert rd.preview._traces == [] and rd.region_caption.text().startswith("Nothing outlined yet")
     QTest.keyClick(win, Qt.Key_Y, Qt.ControlModifier); pump(qapp)
     assert rd.preview._traces and rd.region_caption.text().startswith("Region: 1 rectangle")
 

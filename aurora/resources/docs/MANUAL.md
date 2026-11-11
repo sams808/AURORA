@@ -319,7 +319,8 @@ Selecting a scan shows its **Scan** panel, the scan analysis summary John Bussey
 In Easy mode the scan summary starts with a row *What it is* (*A map of this area at 66 energies (670–735 eV): outline a
 sample on it in Reduce to get its spectrum.*), leaves out the rows that were not recorded, and says pixels instead of
 points (*4 × 3 pixels, 0.250 × 0.250 mm apart*). The project summary names the calibration *detector energy scale*
-(*standard, 10 eV per channel* without `config/sdd_calibration.json`) and the ROI bins *emission windows*, and says what
+(*standard, 10 eV per channel* without `config/sdd_calibration.json`; a file it cannot use keeps the problems of 2.5,
+with *standard* for *nominal*) and the ROI bins *emission windows*, and says what
 a missing optional file means (*none: type the sample names yourself*). The Edge column reads *F K-edge*, and a holder's
 aborted and test scans are *not used* (they are drawn on the Survey map, not offered in Reduce).
 
@@ -519,11 +520,16 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
     when covered, else the earliest. A loaded stack previews live; one not loaded is read once the stroke is written
     (progress and **Cancel** in the card), then drawn. **Open in Reduce** opens that stack in Reduce with the zone
     selected. In Advanced, **Show** chooses the curves, as in Reduce's preview (4.7);
-  - one line that a screen reader reads too: *zone 1: 30 survey points · F Kα window 60–73 ch · on 09:27: 12 of 12
-    pixels*.
-  Without a zone it reads *Select a zone, or draw one on the map (Draw, then drag)*; an empty zone *zone 3 is empty:
-  drag on the map to draw it*; a zone off the plate *zone 3 holds no survey point: it lies outside the plate map*; a
-  zone over no stack *zone 3 covers no scan of holder holderA: draw it over a scan footprint (dashed outlines)*.
+  - one line that a screen reader reads too: *1 alpha: 30 survey points · F Kα window 60–73 ch · on 09:27: 12 of 12
+    pixels* (Advanced names the zone: *zone 1 '1 alpha': …*; when the detectors' windows differ, the window is the
+    one *on detector 1 (SDD1)*).
+  Easy mode names the sample (its label, *sample 3* while it has none): without a sample selected it reads *Select a
+  sample, or draw one on the map (Draw, then drag)*; an empty one *1 alpha is empty: drag on the map to draw it*; one
+  off the plate *1 alpha holds no survey pixel: it lies outside the holder map*; one over no stack *1 alpha covers no
+  measured area of holder holderA: draw it over a rectangle of the map*. Advanced mode says *Select a zone, or draw one
+  on the map (Draw, then drag)*, *zone 3 is empty: drag on the map to draw it*, *zone 3 holds no survey point: it lies
+  outside the plate map* and *zone 3 covers no scan of holder holderA: draw it over a scan footprint (dashed
+  outlines)*.
 
 ![Survey, a rectangle being drawn with its Zone preview](img/survey_zone.png)
 
@@ -782,15 +788,19 @@ right (*SDD1* … *SDD4*, *sum of the detectors in use*, a red dot for *repaired
 fluorescence panel shows some). **all scans of the sample** overlays every included scan; Easy mode keeps only this
 toggle, Advanced adds the **Show** menu: *SDDs*, *sum*, *TEY*, *I0* and *spikes*. The hover readout is the line under
 the plots; the line under it says what the grey bands are (the energy ranges before and after the edge used to scale
-the spectrum) while they are drawn. The preview follows a stroke while it is drawn, on the current scan (at most every
-0.15 s; on a scan large enough to make it slow, without the de-spike, then only when you let go: the map's line then
-says *preview updates when you let go (large scan)*); the release draws the zone as written. The three panels keep room for readable ticks (about 300 px
-at Normal text, the fluorescence panel at least 110 px): at the smallest window the page scrolls rather than squeezing
-them. A shorter preview (the Survey's **Zone preview**) shows the fluorescence only; below 260 px the TEY and I0 panels
-hide so the fluorescence takes the height (*TEY and I0 panels* in the **Show** menu brings them back). An empty
-preview says why: *Pick a scan in step 1*, *Draw a zone on the map (drag) to see its spectrum here*, *zone 3 is
-empty: drag on the map to draw it*, *zone 3 holds no pixel of 09:27: it lies outside this scan. Scans it covers:
-09:30 (pick one in step 1)*, *reading the XRF windows of … *. The per-detector scale is the sum's scale
+the spectrum) while they are drawn (the Survey's **Zone preview**, short of room, says it in the plot's tooltip). A
+title too long for a narrow panel ends in *…*, and the plot's tooltip gives it whole. The preview follows a stroke
+while it is drawn, on the current scan (at most every 0.15 s; on a scan large enough to make it slow, without the
+de-spike, then only when you let go: the map's line then says *preview updates when you let go (large scan)*); the
+release draws the zone as written. The three panels keep room for readable ticks (about 300 px at Normal text plus the
+TEY and I0 titles, the fluorescence panel at least 110 px): at the smallest window the page scrolls rather than
+squeezing them. A shorter preview (the Survey's **Zone preview**) shows the fluorescence only; below 260 px the TEY
+and I0 panels hide so the fluorescence takes the height (*TEY and I0 panels* in the **Show** menu brings them back).
+An empty preview says why: *Pick a scan in step 1*, *Select a sample, or draw one on the map (Draw, then drag), to
+see its spectrum here* (Advanced: *Draw a zone on the map (drag) to see its spectrum here*), *1 alpha is empty: drag
+on the map to draw it*, *1 alpha holds no pixel of 09:27: it lies outside this scan. Scans it covers: 09:30 (pick
+one in step 1)* (Easy names the sample, Advanced the zone: *zone 3 is empty: …*), *reading the XRF windows of … *.
+The per-detector scale is the sum's scale
 divided by the number of ticked detectors, so a missing detector is visible as a gap rather than hidden by rescaling.
 In the coherent de-spike mode the sum may carry spike markers of its own.
 

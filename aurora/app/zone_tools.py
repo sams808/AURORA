@@ -55,6 +55,20 @@ def zone_name(z: Zone) -> str:
     return f"zone {z.id}" if not label or _DEFAULT_LABEL.match(label) else f"zone {z.id} '{label}'"
 
 
+def sample_name(z, next_id: int = 0) -> str:
+    """The zone as the preview messages name it: zone_name in Advanced mode ("new zone 4" for a stroke that starts
+    one); in Easy mode the sample's label ('NaF', 'sample 3' while it keeps its default label, 'the new sample' for a
+    stroke that starts one: plain-language spec 5.3)."""
+    from aurora.app.mode import is_advanced
+    zid = getattr(z, "id", 0)
+    if is_advanced():
+        return zone_name(z) if zid else f"new zone {next_id}"
+    if not zid:
+        return "the new sample"
+    label = (getattr(z, "label", "") or "").strip()
+    return label if label and not _DEFAULT_LABEL.match(label) else f"sample {zid}"
+
+
 def description(stroke: Stroke, zid: int | None) -> str:
     """The undo text of a stroke: 'add a rectangle to zone 3', 'erase pixels in zone 3', 'add a polygon to a new
     zone', ... (the texts of earlier versions, so Edit > Undo reads the same)."""

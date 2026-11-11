@@ -51,6 +51,13 @@ CHIP_FIELDS = tuple(f for f in ScanSettings.SETTINGS_FIELDS if f not in ("line",
 COPY_FIELDS_SETTING = "reduce/copy_fields"
 PREVIEW_NO_SCAN = "Pick a scan in step 1"
 PREVIEW_NO_ZONE = "Draw a zone on the map (drag) to see its spectrum here"
+EASY_PREVIEW_NO_ZONE = "Select a sample, or draw one on the map (Draw, then drag), to see its spectrum here"
+
+
+def no_zone_message() -> str:
+    """The empty preview without a zone, in the words of the mode (Easy names a sample, plain-language spec 5.3)."""
+    from aurora.app.mode import is_advanced
+    return PREVIEW_NO_ZONE if is_advanced() else EASY_PREVIEW_NO_ZONE
 
 
 def popup(menu: QMenu, pos) -> QMenu:
@@ -641,6 +648,9 @@ class ReducePerspective(QWidget):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self.fit_cards)
         self._refresh_easy()
+        if self.session.project is not None:            # the caption and the preview's messages in the mode's words
+            self._caption()
+            self.update_preview()
 
     def _shortcuts(self) -> None:
         """Reduce shortcuts (Help > Keyboard shortcuts lists them under 'Reduce')."""
@@ -1954,18 +1964,19 @@ class ReducePerspective(QWidget):
                 st.roi = None                           # the fixed bins until the windows are read (at release)
                 note = f"reading the XRF windows of {sd.name} …"
         if st is None or not pix.size:
-            self.preview.set_traces([], waiting=PREVIEW_NO_ZONE)
+            self.preview.set_traces([], waiting=no_zone_message())
         elif st.i0_source == "good" and self.session.good_i0_missing():
             pass                                        # the good-I0 scans are read at release (update_preview)
         else:
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
             t = zone_traces_cached(sd, pix, st, good)
             if t is None:
-                self.preview.set_traces([], waiting=PREVIEW_NO_ZONE)
+                self.preview.set_traces([], waiting=no_zone_message())
             else:
                 self.preview.update_traces([(name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text})])
         k, dk = int(pix.size), int(pix.size) - int(draft.members_before.size)
-        self.region_caption.setText(f"Region: {shape_text(draft.zone)} · {k} of {sd.n_pix} points of {sd.name}"
+        self.region_caption.setText(say("reduce.caption.region", shape=shape_text(draft.zone), k=k, m=sd.n_pix,
+                                        scan=sd.name)
                                     + (f" ({dk:+d} while drawing)" if dk else "") + (f" · {note}" if note else ""))
         self.window_card.set_region(pix)
         self.window_card.set_zone(draft.zone)
@@ -1973,27 +1984,28 @@ class ReducePerspective(QWidget):
     def preview_message(self, z, sd) -> str:
         """Why the preview shows no trace (the sentences of the spec): no scan, no zone, an empty zone, a zone outside
         this scan (naming the scans it covers)."""
-        from aurora.app.zone_tools import zone_drawn
+        from aurora.app.zone_tools import sample_name, zone_drawn
         if sd is None:
             return PREVIEW_NO_SCAN
         if z is None:
-            return PREVIEW_NO_ZONE
+            return no_zone_message()
+        who = sample_name(z)                            # Easy: the sample's label; Advanced: "zone 3 'NaF'"
         if not zone_drawn(z):
-            return f"{zone_name(z)} is empty: drag on the map to draw it"
+            return f"{who} is empty: drag on the map to draw it"
         if sd.id not in z.settings:
             name = short_time(sd.id) or sd.name
             others = [short_time(s) or split_stack_id(s)[1] for s in z.settings]
             if others:
-                return (f"{zone_name(z)} holds no pixel of {name}: it lies outside this scan. Scans it covers: "
+                return (f"{who} holds no pixel of {name}: it lies outside this scan. Scans it covers: "
                         f"{', '.join(others)} (pick one in step 1)")
-            return f"{zone_name(z)} holds no pixel of {name}: it lies outside this scan"
+            return f"{who} holds no pixel of {name}: it lies outside this scan"
         return ""
 
     def update_preview(self) -> None:
         z = self.session.zone()
         if z is None:
             self.preview.set_traces([], waiting=PREVIEW_NO_SCAN if self.current_stack() is None and
-                                    self.session.project is not None else PREVIEW_NO_ZONE)
+                                    self.session.project is not None else no_zone_message())
             return
         sids = []
         if self.preview.all_scans.isChecked():

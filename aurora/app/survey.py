@@ -346,7 +346,7 @@ class SurveyPerspective(QWidget):
         # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
         mark_advanced(self.options_row, self.import_btn, self.export_btn, self.grid_btn)
         on_mode_changed(self, lambda _a: (self.subtitle.setText(say("survey.subtitle")), self.update_actions(),
-                                          self.redraw_map()), call_now=False)
+                                          self.redraw_map(), self._preview_when_shown()), call_now=False)
         self.update_actions()
 
     def update_actions(self) -> None:
