@@ -21,6 +21,15 @@ if [ -f "$LICDIR/THIRD_PARTY_LICENSES.txt" ]; then cp "$LICDIR/THIRD_PARTY_LICEN
 mkdir -p "$STAGE/LICENSES" && cp "$HERE"/LICENSES/*.txt "$STAGE/LICENSES/"
 codesign --verify --deep --strict --verbose=2 "$STAGE/AURORA.app"
 rm -f "$OUT"
-hdiutil create -volname "AURORA $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$OUT"
+# 'hdiutil: create failed - Resource busy' comes and goes on GitHub's macOS runners (a disk-arbitration race): retry
+for attempt in 1 2 3 4 5; do
+  if hdiutil create -volname "AURORA $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$OUT"; then
+    break
+  fi
+  if [ "$attempt" = 5 ]; then echo "hdiutil create failed 5 times" >&2; exit 1; fi
+  echo "hdiutil create failed (attempt $attempt), retrying in $((attempt * 10)) s" >&2
+  rm -f "$OUT"
+  sleep $((attempt * 10))
+done
 hdiutil verify "$OUT"
 echo "wrote $OUT"
