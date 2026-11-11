@@ -903,11 +903,12 @@ def style_plot(obj, kind: str = "plot") -> None:
 
 
 def make_plot(kind: str = "plot", title: str | None = None, x: str | None = None, y: str | None = None,
-              legend: str | None = None, parent=None):
+              legend: str | None = None, parent=None, axis_items: dict | None = None):
     """A themed pg.PlotWidget: background, axes, ticks, titles and legend in px; restyles live on a theme change.
-    legend None / 'inside' (top left of the data) / 'outside' (a column right of the data)."""
+    legend None / 'inside' (top left of the data) / 'outside' (a column right of the data); axis_items: pyqtgraph
+    axes of its own ({'left': AxisItem}), themed like the others."""
     import pyqtgraph as pg
-    w = pg.PlotWidget(parent)
+    w = pg.PlotWidget(parent, axisItems=axis_items)
     pi = w.getPlotItem()
     if title:
         w.setTitle(title)

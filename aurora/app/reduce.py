@@ -527,14 +527,17 @@ class ReducePerspective(QWidget):
         self.zone_card.body.addWidget(self.chip_box)
         self.group_box = QWidget()                      # group and comment fields: Advanced
         gl = QHBoxLayout(self.group_box); gl.setContentsMargins(0, 0, 0, 0)
-        self.z_group = QComboBox(); self.z_group.setEditable(True); self.z_group.setMinimumWidth(140)
-        gl.addWidget(labelled("group", self.z_group, "reduce.group")); gl.addWidget(self.z_group, 1)
-        self.zone_card.body.addWidget(self.group_box)
-        self.comment_box = QWidget()
-        zr2 = QHBoxLayout(self.comment_box); zr2.setContentsMargins(0, 0, 0, 0)
+        self.z_group = QComboBox(); self.z_group.setEditable(True)
+        # never narrower than its text at any Text size (it shares the row with the comment)
+        from PySide6.QtWidgets import QSizePolicy
+        self.z_group.setSizePolicy(QSizePolicy.Minimum, self.z_group.sizePolicy().verticalPolicy())
+        gl.addWidget(labelled("group", self.z_group, "reduce.group")); gl.addWidget(self.z_group, 2)
+        # the comment on the group's row: the scan cards below keep that row's height (1500 x 940, Advanced)
+        self.comment_box = self.group_box
         self.z_comment = QLineEdit()
-        zr2.addWidget(labelled("comment", self.z_comment, "reduce.comment")); zr2.addWidget(self.z_comment, 1)
-        self.zone_card.body.addWidget(self.comment_box)
+        self.z_comment.setMinimumWidth(80)
+        gl.addWidget(labelled("comment", self.z_comment, "reduce.comment")); gl.addWidget(self.z_comment, 3)
+        self.zone_card.body.addWidget(self.group_box)
         self.z_info = ElidedLabel("", Qt.ElideRight); self.z_info.setObjectName("muted")
         self.zone_card.body.addWidget(self.z_info)
         zb2 = QWidget()
@@ -581,6 +584,12 @@ class ReducePerspective(QWidget):
         self.preview = PreviewPlot()
         self.preview.all_scans.setText("all scans of the sample")
         self.preview.all_scans.toggled.connect(self.update_preview)
+        # the preview's Show menu and 'all scans of the sample' sit in the card's title row: the plots and the scan
+        # cards above keep that row's height (the scan cards showed two rows at 1500 x 940 in Advanced)
+        pc.header.addWidget(self.preview.show_btn)
+        pc.header.addWidget(self.preview.all_scans)
+        _whole_title(pc.title)                          # the header's controls never squeeze it to 'Prev…'
+        on_theme_changed(pc.title, lambda _s, t=pc.title: _whole_title(t))
         pc.body.addWidget(self.preview, 1)
         right.addWidget(pc)
         min_height(self.cards_area, 120)                # one scan card row and its line row at every Text size
@@ -680,6 +689,8 @@ class ReducePerspective(QWidget):
         self.zone_card.set_title(say("reduce.title.zone"))
         self.window_card.set_title(say("reduce.title.window"))
         self.subtitle.setText(say("reduce.subtitle"))
+        # Advanced: 'all scans' beside the Show menu, so the preview's title row fits a 1200 px window at Larger text
+        self.preview.all_scans.setText("all scans" if adv else "all scans of the sample")
         self._relabel_scans()
         self._paint_next_link()
         h = max(self.right_split.height(), 600)          # Easy: step 4 is short, the preview takes the rest

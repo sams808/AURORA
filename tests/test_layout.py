@@ -214,7 +214,8 @@ def test_preview_height_at_minimum_size(qapp, tmp_path, size, advanced):
         rd = win.reduce
         pv = rd.preview
         assert pv.gl.height() >= MIN_PLOT_PX and pv.top.height() >= MIN_TOP_PX - 0.5, (pv.gl.height(), pv.top.height())
-        assert pv.readout.y() > pv.gl.y()                               # the readout under the plots
+        # the readout under the plots, on one line with the grey-band note
+        assert pv.line.y() > pv.gl.y() and pv.readout.parentWidget() is pv.line and pv.bands_note.parentWidget() is pv.line
         if advanced:
             assert pv.show_btn.isVisible() and pv.all_scans.isVisible()
             assert abs(pv.show_btn.geometry().center().y() - pv.all_scans.geometry().center().y()) <= 4   # one row

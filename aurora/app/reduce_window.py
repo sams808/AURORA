@@ -52,7 +52,22 @@ def preset_text(label: str) -> str:
 
 
 def axis_x(calibrated: bool) -> str:
-    return "detector channel (calibrated)" if calibrated else "detector channel (about 10 eV each)"
+    """The x label of the step-2 plot, short enough for the card's width at 1200 px."""
+    return "channel (calibrated)" if calibrated else "channel (about 10 eV each)"
+
+
+class DecadeAxis(pg.AxisItem):
+    """A log axis labelled on the decades only (10³, 10⁴), the 2…9 ticks between them unlabelled. pyqtgraph puts the
+    2…9 ticks in the first (labelled) level when fewer than three decades are in view, and their labels piled up in a
+    plot as low as step 2's. A range inside one decade keeps pyqtgraph's ticks."""
+
+    def logTickValues(self, minVal, maxVal, size, stdTicks):
+        lo, hi = (minVal, maxVal) if minVal <= maxVal else (maxVal, minVal)
+        decades = [float(v) for v in range(int(np.ceil(lo)), int(np.floor(hi)) + 1)]
+        if not decades:
+            return super().logTickValues(minVal, maxVal, size, stdTicks)
+        between = [v + np.log10(k) for v in range(int(np.floor(lo)), int(np.ceil(hi))) for k in range(2, 10)]
+        return [(1.0, decades), (None, [float(v) for v in between if lo < v < hi])]
 
 
 class XrfWindowCard(Card):
@@ -99,10 +114,11 @@ class XrfWindowCard(Card):
         self.body.addWidget(self.note)
         self._label = ""                                   # the selected sample's name (the status line)
         # the spectrum
-        self.plot = make_plot(x=axis_x(False), y="counts (log scale)")
+        self.plot = make_plot(x=axis_x(False), y="counts (log scale)", axis_items={"left": DecadeAxis("left")})
         min_height(self.plot, 125)                         # 80 px of data under the axis (Easy's caption takes the rest)
         self.plot.getViewBox().disableAutoRange()
         self.plot.setLogMode(x=False, y=True)
+        self.plot.getAxis("left").setStyle(maxTextLevel=0)      # DecadeAxis: text on the decades only
         self.plot.setAccessibleName("emission spectrum with the four detector windows")
         self.regions: list[pg.LinearRegionItem] = []
         for i in range(len(DETS)):

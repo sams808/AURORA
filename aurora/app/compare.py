@@ -956,13 +956,15 @@ class ComparePerspective(QWidget):
         return self.lib.processed(lambda r: r.show)
 
     def _ylabel(self, units: bool = False) -> str:
+        """The y label: short on screen (a longer one was cut at both ends of a 200 px axis; the offset of the curves
+        is in sight, and the subtitle says how they are scaled), complete in the exported figures (units=True)."""
         if not mode.is_advanced() and not units:
             if self.deriv.isChecked():
-                return "slope of the scaled absorption (per eV), curves offset"
-            return "absorption, scaled so the edge step is 1 (curves offset)"
+                return "slope of the absorption (per eV)"
+            return "absorption (edge step = 1)"
         if self.deriv.isChecked():
-            return "d/dE of the normalised signal (1/eV), offset" if units else "d/dE of the normalised signal, offset"
-        return "normalised signal (edge step = 1), offset"
+            return "d/dE of the normalised signal (1/eV), offset" if units else "d/dE of the normalised signal"
+        return "normalised signal (edge step = 1), offset" if units else "normalised signal (step = 1)"
 
     def plot_traces(self) -> list:
         """The shown traces as drawn: row index, colour, shifted energies, offset values, label text."""

@@ -357,12 +357,8 @@ class ZonePreviewCard(Card):
         self.body.addWidget(self.xas_note)
         self.xas = PreviewPlot(min_plot_px=MIN_PANEL_PX, overlay=False)
         self.xas.set_compact(True)
-        self.xas.readout.hide()                         # the emission's readout line is the card's one
-        lg = self.xas.top.legend                        # the card's legend line names the curves: no box over
-        if lg is not None:                              # the short panel (the theme shows a legend that has items)
-            if lg.scene() is not None:
-                lg.scene().removeItem(lg)
-            self.xas.top.legend = None
+        self.xas.line.hide()                            # the emission's readout line is the card's one
+        self.xas.drop_legend()                          # the card's legend line names the curves: no legend row
         self.header.addWidget(self.xas.show_btn)        # its 'Show ▾' (Advanced) beside the card's title: no row
         self.xas.gl.setAccessibleName("XAS of the zone on the scan")
         self.body.addWidget(self.xas, 1)

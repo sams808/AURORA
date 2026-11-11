@@ -5,7 +5,9 @@ moves the existing curves with setData instead of rebuilding the plots (update_t
 same way): a zone being drawn redraws the preview at every stroke.
 
 What is drawn is chosen in one 'Show ▾' menu (SDDs, sum, TEY, I0, spikes), so the controls stay one row in a narrow
-column, and the hover readout is one elided line under the plots. The plots keep at least MIN_PLOT_PX (the
+column; one elided line under the plots says what the grey bands are, and gives the hover readout while the pointer
+is over them; the legend is a row of its own under the fluorescence data (RowLegend). The plots keep at least
+MIN_PLOT_PX (the
 fluorescence panel MIN_TOP_PX); with the three panels shown, THREE_PANELS_PX at the Text size (so their ticks stay
 readable; the page scrolls). Below COMPACT_BELOW_PX of plot height the TEY and I0 panels hide and the fluorescence
 takes the whole height (compact), until 'TEY and I0 panels' in the menu brings them back. set_compact(True) keeps a
@@ -16,9 +18,10 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QMenu, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QMenu, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from aurora.app.theme import (DASH, PAL, curve, dash, min_height, on_theme_changed, pc, role_pen,  # noqa: F401
                               style_plot, with_alpha)                     # PAL / DASH re-exported
@@ -32,7 +35,8 @@ SHOW_TEXT = "Show ▾"
 TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
           "ipfy": "Inverse yield (IPFY) of the sample", "tey": "Electron yield (TEY): the surface",
           "i0": "Beam intensity (I0) during the scan"}
-SUM_NAME = "sum of the detectors in use"
+SUM_NAME = "sum"            # the title says "each detector and their sum", a detector left out is named so: one
+                            # legend line beside SDD1 to SDD4 (as the Survey's Zone preview)
 SPIKES_NAME = "repaired points (spikes)"          # the legend draws the red dot itself
 BANDS_NOTE = "Grey bands: the energy ranges before and after the edge used to scale the spectrum."
 
@@ -77,6 +81,91 @@ class SparseAxis(pg.AxisItem):
         if spacing and self._mantissa(spacing * scale) == 2.5:
             spacing = spacing / 10
         return super().tickStrings(values, scale, spacing)
+
+
+_QT_MAX = 16777215                  # QWIDGETSIZE_MAX
+_HSPACE = 6                         # px between a legend entry's sample and text, and between entries
+
+
+class RowLegend(pg.LegendItem):
+    """The fluorescence panel's legend in a row of its own under the data, never over the curves (the rise at the edge
+    included): as many columns as the width holds (fit), so the four detectors, the sum and the spikes take one or two
+    lines. A legend inside the data covered the edge, or was cut at the bottom of a low panel."""
+
+    def __init__(self):
+        super().__init__(offset=None, colCount=5, horSpacing=_HSPACE, verSpacing=0, frame=False)
+        self.on_fit = None                              # called after every relayout (PreviewPlot: its min heights)
+        self.layout.setContentsMargins(2, 0, 2, 0)
+        self.room = 0.0                                 # the width the legend may take (fit)
+
+    def addItem(self, item, name):
+        super().addItem(item, name)
+        self.fit()
+
+    def removeItem(self, item):
+        super().removeItem(item)
+        self.fit()
+
+    @staticmethod
+    def _entry_px(sample, label) -> float:
+        return sample.boundingRect().width() + label.item.boundingRect().width() + 12
+
+    def fit(self, room: float | None = None) -> int:
+        """Lay the entries out row by row in the most columns whose widths add up to `room` (the last room given);
+        returns the number of columns."""
+        if room is not None:
+            self.room = float(room)
+        if not self.items:
+            return self.columnCount
+        widths = [self._entry_px(s, lab) for s, lab in self.items]
+        cols = 1
+        if self.room > 0:
+            for n in range(len(widths), 0, -1):
+                if sum(max(widths[j::n]) for j in range(n)) <= self.room:
+                    cols = n
+                    break
+        else:
+            cols = min(len(widths), self.columnCount or 1)
+        self.columnCount = cols
+        lay = self.layout                               # the same grid (a replaced layout is deleted by Qt under the
+        for i in range(lay.count() - 1, -1, -1):        # wrapper pyqtgraph keeps: a crash at the next font change)
+            lay.removeAt(i)
+        for k, (sample, label) in enumerate(self.items):
+            r, c = divmod(k, cols)
+            lay.addItem(sample, r, 2 * c, alignment=Qt.AlignVCenter)
+            lay.addItem(label, r, 2 * c + 1)
+        rows = math.ceil(len(self.items) / cols)
+        # Qt keeps the rows and columns of removed items: an earlier narrow layout (five rows) kept the legend five
+        # rows high. The ones not used now take no room.
+        for r in range(lay.rowCount()):
+            if r < rows:
+                lay.setRowMinimumHeight(r, 0)
+                lay.setRowMaximumHeight(r, _QT_MAX)
+            else:
+                lay.setRowFixedHeight(r, 0)
+            lay.setRowSpacing(r, 0)
+        for c in range(lay.columnCount()):
+            if c < 2 * cols:
+                lay.setColumnMinimumWidth(c, 0)
+                lay.setColumnMaximumWidth(c, _QT_MAX)
+            else:
+                lay.setColumnFixedWidth(c, 0)
+            if c >= 2 * cols - 1:
+                lay.setColumnSpacing(c, 0)
+            else:
+                lay.setColumnSpacing(c, _HSPACE)
+        self.rowCount = rows
+        self.updateSize()
+        # never wider than the room it was laid out for: its width must not hold the plots wider than the view (they
+        # were cut at the right, and the page scrolled sideways, before the next fit)
+        self.setMinimumWidth(1.0)
+        self.updateGeometry()
+        if self.on_fit is not None:
+            self.on_fit()
+        return cols
+
+    def rows(self) -> int:
+        return math.ceil(len(self.items) / max(1, self.columnCount)) if self.items else 0
 
 
 class PreviewPlot(QWidget):
@@ -136,16 +225,27 @@ class PreviewPlot(QWidget):
             p.vb.disableAutoRange()
         for p in (self.top, self.mid):                  # linked x: one row of energies, under the lowest panel
             p.getAxis("bottom").setStyle(showValues=False)
-        self.top.addLegend(offset=(-10, -10))         # bottom right: never over the rise at the edge
-        self.gl.ci.layout.setRowStretchFactor(0, 4)
+        # the legend in a row of its own under the fluorescence data (the top panel's layout, under its bottom axis
+        # and label): never over the curves; its columns follow the width (_fit_legend)
+        self.legend = RowLegend()
+        self.top.layout.addItem(self.legend, 5, 1)
+        self.top.legend = self.legend
+        self.legend.on_fit = lambda: self._apply_min() if hasattr(self, "_min_plot") else None
+        self.gl.ci.layout.setRowStretchFactor(0, 5)
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
-        lay.addWidget(self.readout)
         self.bands_note = ElidedLabel(BANDS_NOTE, Qt.ElideRight)   # what the grey bands are (shown when drawn)
         self.bands_note.setObjectName("muted")
-        self.bands_note.hide()
-        lay.addWidget(self.bands_note)
+        # one line under the plots: what the grey bands are, and the hover readout while the pointer is over the
+        # plots (two lines held the page 14 px taller than a 1500 x 940 window in Advanced mode)
+        self.line = QStackedWidget()
+        self.line.addWidget(self.bands_note)
+        self.line.addWidget(self.readout)
+        self.line.setCurrentWidget(self.readout)
+        self.line.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._bands_line = False                        # the grey-band note is the line's idle text
+        lay.addWidget(self.line)
         self.top.setMinimumHeight(MIN_TOP_PX)
         self._min_plot = int(min_plot_px)
         self._forced_compact: bool | None = None        # None: automatic (by the plot height)
@@ -180,10 +280,48 @@ class PreviewPlot(QWidget):
         return self._compact
 
     def eventFilter(self, obj, ev) -> bool:
+        if obj is self.gl and ev.type() == QEvent.Leave:
+            self._hover_off()
         if obj is self.gl and ev.type() == QEvent.Resize:
             self._layout_rows()
             self._fit_titles()
+            self._fit_legend()
+            # the view seats its plots at their minimum width before the narrower titles and legend take effect (a
+            # 1500 to 1200 px resize left the plots 80 px wider than the view, cut at the right): seat them again
+            QTimer.singleShot(0, self, self._reseat)
         return False
+
+    def _reseat(self) -> None:
+        """Fit the plots to the view again once the titles and the legend have their new widths."""
+        gl = self.gl
+        if gl.centralWidget is not None and gl.centralWidget.geometry().width() > gl.width() + 0.5:
+            pg.GraphicsView.setRange(gl, gl.range, padding=0, disableAutoPixel=False)
+
+    def _fit_legend(self) -> None:
+        """The legend's columns for the width beside the left axis (RowLegend.fit)."""
+        from aurora.app.theme import px
+        lg = self.top.legend
+        if isinstance(lg, RowLegend):
+            lg.fit(self._room(self.top))                # its on_fit refits the plots' minimum heights
+
+    def _room(self, plot) -> float:
+        """The width a panel's title or legend may take: the view less the panel's left axis and the layout's margins
+        (wider, and the plots grow past the view and are cut at the right)."""
+        from aurora.app.theme import px
+        m = self.gl.ci.layout.getContentsMargins()
+        pm = plot.layout.getContentsMargins()
+        spare = m[0] + m[2] + pm[0] + pm[2] + px(8)
+        return max(float(px(60)), self.gl.width() - plot.getAxis("left").width() - spare)
+
+    def drop_legend(self) -> None:
+        """No legend in the plot (a card that names the curves in a line of its own: the Survey's Zone preview)."""
+        lg = self.top.legend
+        if lg is None:
+            return
+        self.top.layout.removeItem(lg)
+        if lg.scene() is not None:
+            lg.scene().removeItem(lg)
+        self.top.legend = None
 
     # ------------------------------------------------------------------ titles and the grey-band note
     def _set_titles(self, top: str, mid: str, low: str) -> None:
@@ -205,7 +343,7 @@ class PreviewPlot(QWidget):
         cut = False
         for key, plot in (("top", self.top), ("mid", self.mid), ("low", self.low)):
             text = titles[key]
-            room = max(float(px(60)), self.gl.width() - plot.getAxis("left").width() - px(16))
+            room = self._room(plot)
             shown = fm.elidedText(text, Qt.ElideRight, room) if text else ""
             cut = cut or shown != text
             if plot.titleLabel.text != shown:
@@ -221,8 +359,13 @@ class PreviewPlot(QWidget):
         Survey's Zone preview, whose column has no line to spare) says it in the plots' tooltip instead."""
         held = self._forced_compact is True
         self._bands_tip = bool(on and held)
-        self.bands_note.setVisible(bool(on and not held))
+        self._bands_line = bool(on and not held)
+        self._hover_off()
         self._fit_titles()
+
+    def _hover_off(self) -> None:
+        """The pointer left the plots: the line under them says what the grey bands are again (when they are drawn)."""
+        self.line.setCurrentWidget(self.bands_note if self._bands_line else self.readout)
 
     def _title_font(self) -> QFont:
         from aurora.app.theme import px
@@ -234,15 +377,25 @@ class PreviewPlot(QWidget):
         """The height of a panel's title row: one line of the title font (pyqtgraph gives every title 30 px)."""
         return int(math.ceil(QFontMetricsF(self._title_font()).height())) + 2
 
+    def legend_px(self) -> int:
+        """The height of the legend's row under the fluorescence data (0 without a legend or entries)."""
+        lg = self.top.legend
+        if not isinstance(lg, RowLegend) or not lg.items:
+            return 0
+        return int(math.ceil(lg.effectiveSizeHint(Qt.PreferredSize).height()))
+
     def _apply_min(self) -> None:
         """The plots' minimum height at the Text size: THREE_PANELS_PX with the three panels, plus the title rows of the
-        TEY and I0 panels (their data keep the room they had before they had titles); min_plot_px compact."""
+        TEY and I0 panels (their data keep the room they had before they had titles); min_plot_px compact. The legend's
+        row is added to both, so the fluorescence data keep their height under it."""
         from aurora.app.theme import px
         compact = self._forced_compact if self._forced_compact is not None else self._compact
+        extra = self.legend_px()
+        self.top.setMinimumHeight(MIN_TOP_PX + extra)
         if compact:
-            self.gl.setMinimumHeight(px(self._min_plot))
+            self.gl.setMinimumHeight(px(self._min_plot) + extra)
         else:
-            self.gl.setMinimumHeight(px(max(self._min_plot, THREE_PANELS_PX)) + 2 * self.title_row_px())
+            self.gl.setMinimumHeight(px(max(self._min_plot, THREE_PANELS_PX)) + 2 * self.title_row_px() + extra)
 
     def _layout_rows(self) -> None:
         if self._forced_compact is not None:
@@ -470,7 +623,9 @@ class PreviewPlot(QWidget):
 
     def _moved(self, pos) -> None:
         if not self._traces or not self.top.sceneBoundingRect().contains(pos):
+            self._hover_off()
             return
+        self.line.setCurrentWidget(self.readout)
         e = self.top.vb.mapSceneToView(pos).x()
         t = self._traces[0][1]
         i = int(np.argmin(np.abs(t.E - e)))

@@ -279,7 +279,13 @@ class SurveyPerspective(QWidget):
         self.sheet_table = QTableWidget(0, 4)
         self.sheet_table.setHorizontalHeaderLabels(["Sample", "Group", "Composition", "Edges"])
         self.sheet_table.setAccessibleName("samples of the holder")
-        self.sheet_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        # the sample name takes the room; the short columns their content (their headers included: a squeezed
+        # Composition column printed 'nposi'); no row numbers
+        head = self.sheet_table.horizontalHeader()
+        head.setSectionResizeMode(0, QHeaderView.Stretch)
+        for col in (1, 2, 3):
+            head.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        self.sheet_table.verticalHeader().hide()
         self.sheet_table.setEditTriggers(QTableWidget.NoEditTriggers)
         tc.body.addWidget(self.sheet_table, 1)
         # without a sheet (or without a row for this holder): one line and the two ways to add one, no empty table

@@ -802,12 +802,15 @@ A plate measured as several overlapping stacks (tiles) becomes one stack with **
 
 Three linked panels for the current zone and selected scan, each with its title: *Fluorescence of the sample (each
 detector and their sum)* (*Inverse yield (IPFY) of the sample* for an inverse yield), *Electron yield (TEY): the
-surface* and *Beam intensity (I0) during the scan*, in arbitrary units (*arb. units*). The legend sits at the bottom
-right (*SDD1* … *SDD4*, *sum of the detectors in use*, a red dot for *repaired points (spikes)* while the
+surface* and *Beam intensity (I0) during the scan*, in arbitrary units (*arb. units*). The legend sits in a line of
+its own under the fluorescence panel, never over the curves, in as many columns as the width holds (*SDD1* … *SDD4*,
+*sum*, a detector left out of the sum marked *(left out)*, a red dot for *repaired points (spikes)* while the
 fluorescence panel shows some). **all scans of the sample** overlays every included scan; Easy mode keeps only this
-toggle, Advanced adds the **Show** menu: *SDDs*, *sum*, *TEY*, *I0* and *spikes*. The hover readout is the line under
-the plots; the line under it says what the grey bands are (the energy ranges before and after the edge used to scale
-the spectrum) while they are drawn (the Survey's **Zone preview**, short of room, says it in the plot's tooltip). A
+toggle, Advanced adds the **Show** menu: *SDDs*, *sum*, *TEY*, *I0* and *spikes*, and names the toggle **all scans**.
+Both sit in the card's title row. The line under the plots says what the grey bands are
+(the energy ranges before and after the edge used to scale the spectrum) while they are drawn, and gives the hover
+readout while the pointer is over the plots (the Survey's **Zone preview**, short of room, says it in the plot's
+tooltip). A
 title too long for a narrow panel ends in *…*, and the plot's tooltip gives it whole. The preview follows a stroke
 while it is drawn, on the current scan (at most every 0.15 s; on a scan large enough to make it slow, without the
 de-spike, then only when you let go: the map's line then says *preview updates when you let go (large scan)*); the
