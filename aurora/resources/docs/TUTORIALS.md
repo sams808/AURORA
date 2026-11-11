@@ -198,19 +198,23 @@ The same steps on a beamtime of your own. Nothing in it needs to be renamed or p
 optional (MANUAL 12 lists what each one adds).
 
 1. **File > Open project…** and choose the folder you downloaded from the beamline, the one that contains `raw/`.
-   Home lists its days, holders and scans. If it shows no day, holder or scan, compare the folder with the layout of
-   MANUAL 2.3: day folders named YYYY-MM-DD under `raw/`, the scan folders directly inside them.
-2. Read the **Project** summary on the right: the calibration (*none found* means the nominal 10 eV per channel), the
-   fixed emission lines of `config/roi_bins.json` (*none found* means total fluorescence until you set a window), the
-   sample sheet and the plate layout. None of them is required.
+   Home lists its days, holders and scans. If it shows no day, holder or scan, the **Project** summary's *Layout note*
+   says what it found; compare the folder with the layout of MANUAL 2.3: one folder per day under `raw/`, the scan
+   folders directly inside it.
+2. Read the **Project** summary on the right: the calibration (*none (no config/sdd_calibration.json), nominal 10 eV
+   per channel* until **File > Import SDD calibration…** adds one), the fixed emission lines of `config/roi_bins.json`
+   (*none found* means total fluorescence until you set a window), the sample sheet and the plate layout. None of them
+   is required.
 3. Pick a holder in the top bar. Each holder is named after its survey; Survey shows its plate map with the measured
    areas of its stacks (the footprints).
 4. In Reduce, step **2 · XRF window**: without fixed lines, drag the window over the emission peak of your element
-   in the spectrum (the line under it gives the channels and the eV of each detector).
-5. Optional: a sample sheet. Write a CSV at the root of the beamtime folder with the columns of MANUAL 2.4
-   (`Sample ID,Holder,Group,Composition,Edges,Notes`, one row per sample, the holder written as AURORA names it).
-   Reopen the project (**Reload**): Reduce offers the names of each holder's samples, and the report follows the
-   groups.
+   in the spectrum (the line under it gives the channels and the eV of each detector). **Save as a fixed line…** keeps
+   it in `config/roi_bins.json` for every scan of the beamtime, and Maps then draws that element.
+5. Optional: a sample sheet. **File > New sample sheet…** writes `samples.csv` at the root of the beamtime folder with
+   the columns of MANUAL 2.4 (`Sample ID,Holder,Group,Composition,Edges,Notes`) and one row per holder; complete it in
+   a spreadsheet, one row per sample, the holder written as AURORA names it, and save it as CSV. A sheet of your own
+   works too: **File > Choose sample sheet…** picks it. Reopen the project (**Reload**): Reduce offers the names of
+   each holder's samples, and the report follows the groups.
 6. Optional: a sketch or a photo of a holder, with **Load a sketch…** in Survey.
 7. Draw each sample in Reduce, **Add to Check**, look at the messages in Check and **Save ticked → Compare**.
 8. Report: read **Check before building**, fix or ignore the findings, **Build the report**. Appendix C says what was

@@ -63,21 +63,22 @@ be saved are never dropped without asking: closing the window offers **Export zo
 
 | File | What it adds | Without it |
 |---|---|---|
-| `config/roi_bins.json` | fixed emission lines (F Kα, O Kα, …) | the total fluorescence, or a window set by hand in Reduce; no elemental maps |
-| `config/sdd_calibration.json` | the energy of each detector channel | the nominal 10 eV per channel |
-| a sample sheet (a CSV with a `Sample ID` column, MANUAL 2.4) | sample names offered in Reduce, groups for the report | names are typed by hand |
+| `config/roi_bins.json` | fixed emission lines (F Kα, O Kα, …) | the total fluorescence, or a window set by hand in Reduce (**Save as a fixed line…** keeps it in this file); no elemental maps |
+| `config/sdd_calibration.json` | the energy of each detector channel | the nominal 10 eV per channel (**File > Import SDD calibration…** adds one) |
+| a sample sheet (a CSV with a sample column, MANUAL 2.4) | sample names offered in Reduce, groups for the report | names are typed by hand (**File > New sample sheet…** writes one to fill in, **File > Choose sample sheet…** picks a CSV of your own) |
 | `config/plate_layout.json` | rows, columns and names for **Grid of zones…** (Advanced) | the grid is typed |
 | `references/` | reference spectra for Compare and Fit | none offered |
 | a sketch of a holder | a picture of the holder in Survey | no sketch card |
 
-4. If Home shows no day, holder or scan, compare the folder with MANUAL 2.3 (day folders named YYYY-MM-DD, scan
-   folders directly inside them). Tutorial 9 walks through a beamtime of your own from the first open to the report.
+4. If Home shows no day, holder or scan, read the *Layout note* of the **Project** summary and compare the folder with
+   MANUAL 2.3 (one folder per day under `raw/`, the scan folders directly inside it). Tutorial 9 walks through a beamtime of your own from the first open to the report.
 
 ## 2. Survey
 
 The plate map of the holder with the stack footprints (one colour and dash per status; click one to open it in
 Reduce) and the zones with their labels; the first view holds every footprint and zone of the holder. The
-sample-sheet rows of the holder sit on the right (one line when there are none). A sketch of the holder is optional:
+sample-sheet rows of the holder sit on the right (one line when there are none, with **New sample sheet…** and
+**Choose sample sheet…** when the beamtime has no sheet). A sketch of the holder is optional:
 **Load a sketch…**, next to the holder, adds a drawing or photo (AURORA keeps a copy in `.aurora/sketches/`), and its
 card appears only for a holder that has one; **Remove the sketch** removes AURORA's copy. Advanced mode adds the display options (any fixed emission line, total XRF, TEY or I0;
 per detector or summed; / I0; log; inverted for high-energy surveys), **Import zones…** (a `zones_all.json` of the
