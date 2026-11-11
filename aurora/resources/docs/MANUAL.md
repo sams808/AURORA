@@ -907,9 +907,10 @@ no single point far off the curve; a flat or very noisy curve means the outline 
 
 The messages are the checks of John Bussey's GUI, ported, in plain words with the expert term in parentheses (the
 same text in both modes; Advanced mode adds where a flag came from, *(sgm_report)* or *(AURORA check)*): the outline
-holds no pixel of the scan (bad); only N pixels, noisy (fewer than 3); a ticked SDD with no finite values or a signal
-zero everywhere (bad: check its window in step 2 of Reduce, or leave a dead detector out of the sum on the scan card in
-Advanced mode; John Bussey's GUI only warned of a zero signal);
+holds no pixel of the scan (bad); only N pixels, noisy (fewer than 3); a ticked SDD with no finite values (bad); a
+ticked SDD with a signal zero everywhere (a warning, as in John Bussey's GUI: a dead detector adds nothing to the sum,
+so the spectrum of the others stays valid; check its window in step 2 of Reduce, or leave the dead detector out of the
+sum on the scan card in Advanced mode);
 N missing energy points; I0 zero or missing at N energies; I0 varying by more than a factor 3 over the scan; TEY
 without finite values; more than 10 % of the points flagged bad. AURORA adds the scan's flags with their source (SDD
 saturated, high count rate, I0 invalid; from sgm_report or from AURORA's own check) and a note when spikes were found

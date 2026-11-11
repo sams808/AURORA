@@ -239,29 +239,50 @@ def cmd_demo(folder: Path) -> int:
 
 
 def cmd_distcheck() -> int:
-    """Smoke test of a frozen build: build a synthetic project, open the window offscreen, read it back."""
+    """Smoke test of a frozen build: build a synthetic project, open the window offscreen, read it back. Its temporary
+    folder is removed at the end, on every OS (a file still held is retried, then named)."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     tmp = Path(tempfile.mkdtemp(prefix="aurora_distcheck_"))
     os.environ["AURORA_SETTINGS_DIR"] = str(tmp / "settings")
-    from aurora.core.model import Project
-    from aurora.core.testdata import make_fake_project
-    root = make_fake_project(tmp / "project")
-    proj = Project.discover(root)
-    assert len(proj.scans) == 4, proj.scans
-    statuses = sorted(s.status for s in proj.scans)
-    assert statuses == ["aborted", "complete", "survey", "test"], statuses
-    from aurora.app.main import MainWindow, create_app, shutdown_app
-    app = create_app([APP_NAME])
-    win = MainWindow()
-    win.home.set_project(proj)
-    app.processEvents()
-    assert win.home.tree.topLevelItemCount() == 1
-    from aurora.app.about import versions_text
-    size = f"{win.width()}x{win.height()}"
-    shutdown_app(app, win)
-    print(versions_text())
-    print(f"distcheck ok: {len(proj.scans)} scans, statuses {statuses}, window {size}")
-    return 0
+    try:
+        from aurora.core.model import Project
+        from aurora.core.testdata import make_fake_project
+        root = make_fake_project(tmp / "project")
+        proj = Project.discover(root)
+        assert len(proj.scans) == 4, proj.scans
+        statuses = sorted(s.status for s in proj.scans)
+        assert statuses == ["aborted", "complete", "survey", "test"], statuses
+        from aurora.app.main import MainWindow, create_app, shutdown_app
+        app = create_app([APP_NAME])
+        win = MainWindow()
+        win.home.set_project(proj)
+        app.processEvents()
+        assert win.home.tree.topLevelItemCount() == 1
+        from aurora.app.about import versions_text
+        size = f"{win.width()}x{win.height()}"
+        win.session.release_lock()
+        shutdown_app(app, win)
+        print(versions_text())
+        print(f"distcheck ok: {len(proj.scans)} scans, statuses {statuses}, window {size}")
+        return 0
+    finally:
+        _remove_tree(tmp)
+
+
+def _remove_tree(path: Path) -> bool:
+    """Remove a temporary folder: a file another handle still holds (Windows) is retried after a collection and a
+    pause; a folder that stays is named, never hidden."""
+    import gc
+    import shutil
+    import time
+    for attempt in range(3):
+        gc.collect()
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            return True
+        time.sleep(0.3 * (attempt + 1))
+    print(f"note: the temporary folder {path} could not be removed: delete it by hand", file=sys.stderr)
+    return False
 
 
 COMMANDS = ("gui", "project", "scan", "report", "demo")

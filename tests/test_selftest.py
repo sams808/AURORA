@@ -5,6 +5,7 @@ import importlib.abc
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -110,9 +111,15 @@ def test_the_exit_code_counts_the_failed_checks(tmp_path, monkeypatch):
         r.check("fails once", lambda: 1 / 0)
         r.check("fails twice", lambda: [][1])
     monkeypatch.setattr(selftest, "_core_checks", two_fail)
+    before = {k: os.environ.get(k) for k in ("AURORA_SETTINGS_DIR", "AURORA_LOG_DIR")}
     rc = selftest.run(out=tmp_path / "s.json", gui=False)
     d = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
     assert rc == 2 and [c["ok"] for c in d["checks"]] == [True, False, False]
+    home = str(Path.home())
+    assert home.casefold() not in (d["folder"] + d["cwd"]).casefold(), d     # the home folder written as ~ (g01#6)
+    folder = Path(home + d["folder"][1:]) if d["folder"].startswith("~") else Path(d["folder"])
+    assert not folder.exists(), folder                                      # its log files closed, the folder gone
+    assert {k: os.environ.get(k) for k in before} == before                 # the borrowed folders given back
     assert d["checks"][1]["detail"].startswith("ZeroDivisionError") and "traceback" in d["checks"][1]
     from aurora.cli import main
     monkeypatch.setattr(selftest, "run", lambda **kw: 3)

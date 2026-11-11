@@ -523,8 +523,9 @@ def worst(messages) -> str:
 def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | None = None) -> list[tuple[str, str]]:
     """John Bussey's `check_reduced` for one zone x scan, on AURORA's traces: [(level, Msg)], level ok / warn / bad.
 
-    Ported checks: the outline's pixels (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values or a
-    signal zero everywhere (bad), missing energies, I0 zero or missing, I0 varying by more than I0_VARIES_FACTOR, TEY
+    Ported checks: the outline's pixels (0 = bad, fewer than FEW_POINTS = noisy), per ticked SDD no finite values (bad)
+    or a signal zero everywhere (a warning, John Bussey's level: a dead detector adds nothing to the sum, the spectrum
+    of the others is still valid), missing energies, I0 zero or missing, I0 varying by more than I0_VARIES_FACTOR, TEY
     without finite values, and the fraction of energies flagged bad (spikes plus masked energies, BAD_POINT_FRACTION).
     AURORA adds the scan's flags (saturated SDDs, I0 invalid, high rate, each with its source on the Msg; before the
     counting checks, so that the first warning, Check's headline, is the most serious one), the inverse-yield note and
@@ -562,8 +563,8 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
             y = np.asarray(y, float)
             if not np.isfinite(y).any():
                 msgs.append(("bad", Msg(MSG_DET_NAN.format(det=det_phrase([DETS[k]])))))
-            elif np.nanmax(y) <= 0:             # bad by the item spec (I23); the earlier SGM XAS GUI only warned
-                msgs.append(("bad", Msg(MSG_DET_ZERO.format(det=det_phrase([DETS[k]]), window=window(k)))))
+            elif np.nanmax(y) <= 0:             # a warning, as in the earlier SGM XAS GUI (owner decision, I23)
+                msgs.append(("warn", Msg(MSG_DET_ZERO.format(det=det_phrase([DETS[k]]), window=window(k)))))
         if not ticked:
             msgs.append(("warn", Msg(MSG_NO_DET)))
     # the scan's flags before the counting checks: the first warning is the row's headline in Check

@@ -118,6 +118,9 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
     # resolved: the temporary folder can be an alias of itself (C:\Users\RUNNER~1 on Windows, /var -> /private/var on
     # macOS), and the checks compare paths with the project's resolved root
     base = Path(tempfile.mkdtemp(prefix="aurora selftest é ")).resolve()
+    borrowed = {k: os.environ.get(k) for k in ("AURORA_SETTINGS_DIR", "AURORA_LOG_DIR")}
+    import logging
+    had_log = any(getattr(h, "_aurora", False) for h in logging.getLogger().handlers)
     os.environ["AURORA_SETTINGS_DIR"] = str(base / "settings")
     os.environ["AURORA_LOG_DIR"] = str(base / "logs")
     if qpa:
@@ -140,7 +143,7 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
         "app": "AURORA", "version": __version__, "ok": r.ok, "frozen": bool(getattr(sys, "frozen", False)),
         "python": sys.version.split()[0], "platform": platform.platform(), "machine": platform.machine(),
         "qt": _qt_version(), "qt_platform": ctx.get("qt_platform") or os.environ.get("QT_QPA_PLATFORM", ""),
-        "native": native, "folder": str(base), "cwd": cwd, "build": _build_info(), "credits": CREDITS,
+        "native": native, "folder": _tilde(str(base)), "cwd": _tilde(cwd), "build": _build_info(), "credits": CREDITS,
         "checks": r.results,
     }
     try:
@@ -158,14 +161,54 @@ def run(out: Path | None = None, qpa: str | None = None, keep: bool = False, gui
         Path(out).write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
         _say(f"report written to {out}")
     if not keep:
-        import logging
-        for h in list(logging.getLogger().handlers):
-            if getattr(h, "_aurora", False):
-                logging.getLogger().removeHandler(h)
-                h.close()
+        _close_logs(base)
         ctx.clear()
         _remove(base)
+    for k, v in borrowed.items():                       # an in-process run gives the folders back
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    if not keep and had_log:
+        try:
+            from aurora.logsetup import setup_logging
+            setup_logging()                             # the caller's log file again
+        except (ImportError, OSError):
+            pass
     return min(r.failed, 255)
+
+
+def _tilde(text: str) -> str:
+    """The home folder written as '~' (the JSON may be pasted into a public issue)."""
+    home = str(Path.home())
+    if len(home.strip("\\/")) < 3:
+        return text
+    for h in sorted({home, home.replace("\\", "/"), home.replace("/", "\\")}, key=len, reverse=True):
+        if os.path.normcase(text[:len(h)]) == os.path.normcase(h) and (len(text) == len(h) or text[len(h)] in "\\/"):
+            return "~" + text[len(h):]
+    return text
+
+
+def _close_logs(base: Path) -> None:
+    """Close AURORA's log handlers and the faulthandler file when they write under the self-test's folder, so that
+    Windows can remove it (an open file cannot be deleted there)."""
+    import logging
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if getattr(h, "_aurora", False):
+            root.removeHandler(h)
+            h.close()
+    try:
+        from aurora import logsetup
+        import faulthandler
+        for f in list(logsetup._FAULT_FILE):
+            name = str(getattr(f, "name", ""))
+            if name and str(Path(name).resolve()).startswith(str(base)):
+                faulthandler.disable()
+                f.close()
+                logsetup._FAULT_FILE.remove(f)
+    except (ImportError, OSError, ValueError):
+        pass
 
 
 def _remove(base: Path) -> bool:

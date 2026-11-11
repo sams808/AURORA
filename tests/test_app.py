@@ -1,4 +1,6 @@
 """The Qt shell, offscreen."""
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -70,5 +72,9 @@ def test_home_opens_project_in_worker(qapp, fake_project):
 
 
 def test_distcheck():
+    """--distcheck passes and removes its temporary folder (final polish: on every OS)."""
+    import tempfile
     from aurora.cli import main
+    before = set(Path(tempfile.gettempdir()).glob("aurora_distcheck_*"))
     assert main(["--distcheck"]) == 0
+    assert set(Path(tempfile.gettempdir()).glob("aurora_distcheck_*")) <= before

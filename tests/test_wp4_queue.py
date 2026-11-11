@@ -42,8 +42,8 @@ def test_check_zone_ports_johns_messages():
     # a window with zero counts in one detector
     det = sums().det["F Kα"].copy(); det[:, 2] = 0.0
     msgs = check_zone(build_traces(sums(det=det), st), n_total=12)
-    bad = levels(msgs, "bad")
-    assert len(bad) == 1 and bad[0].startswith("detector 3 (SDD3) counts nothing in the window")
+    warn = levels(msgs, "warn")
+    assert not levels(msgs, "bad") and warn[0].startswith("detector 3 (SDD3) counts nothing in the window")
     # an unticked detector is not checked
     assert worst(check_zone(build_traces(sums(det=det), ScanSettings(line="F Kα", sdd=[True, True, False, True])))) == "ok"
     # few points, no finite values, missing energies, I0 varying, TEY without values
@@ -58,14 +58,13 @@ def test_check_zone_ports_johns_messages():
 
 
 def test_a_dead_detector_names_itself_and_the_way_out():
-    """A ticked SDD with zero counts everywhere makes the row bad (the item spec; John Bussey's GUI only warned): the
-    message names the detector, the window and how to leave it out, and says John's GUI warned; unticked, the row is
-    clean."""
+    """A ticked SDD with zero counts everywhere is a warning (John Bussey's level, the owner's decision): the row stays
+    ticked, the message names the detector, the window and how to leave it out; unticked, the row is clean."""
     st = ScanSettings(line="F Kα", despike_mode="coherent")
     det = sums().det["F Kα"].copy(); det[:, 2] = 0.0
     msgs = check_zone(build_traces(sums(det=det), st), n_total=12)
-    assert worst(msgs) == "bad"
-    assert levels(msgs, "bad") == ["detector 3 (SDD3) counts nothing in the window (F Kα): check the window in step 2 "
+    assert worst(msgs) == "warn"
+    assert levels(msgs, "warn")[:1] == ["detector 3 (SDD3) counts nothing in the window (F Kα): check the window in step 2 "
                                    "of Reduce, or leave a dead detector out of the sum on the scan card (Advanced mode)"]
     off = ScanSettings(line="F Kα", despike_mode="coherent", sdd=[True, True, False, True])
     assert worst(check_zone(build_traces(sums(det=det), off), n_total=12)) == "ok"

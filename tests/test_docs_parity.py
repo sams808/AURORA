@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -433,6 +434,20 @@ def test_the_screenshots_go_into_the_bundled_docs():
     shots = {p.stem for p in (DOCS / "img").glob("*.png")}
     used = {Path(t).stem for d in MANUALS for t in LINK.findall(doc_text(d)) if t.endswith(".png")}
     assert used <= shots
+
+
+def test_importing_the_screenshot_script_makes_no_folder(monkeypatch):
+    """Final polish: the settings folder of make_screenshots.py is made by its main() only when AURORA_SETTINGS_DIR is
+    missing, never at import (an empty aurora_docs_settings_* folder was left per import)."""
+    import importlib.util
+    import tempfile
+    monkeypatch.delenv("AURORA_SETTINGS_DIR", raising=False)
+    before = set(Path(tempfile.gettempdir()).glob("aurora_docs_settings_*"))
+    spec = importlib.util.spec_from_file_location("make_screenshots", ROOT / "docs" / "make_screenshots.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert set(Path(tempfile.gettempdir()).glob("aurora_docs_settings_*")) <= before
+    assert "AURORA_SETTINGS_DIR" not in os.environ
 
 
 def test_the_screenshot_demo_lies_outside_the_home_folder():

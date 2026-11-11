@@ -23,7 +23,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault("AURORA_SETTINGS_DIR", str(Path(tempfile.mkdtemp(prefix="aurora_docs_settings_"))))
 
 OUT = ROOT / "aurora" / "resources" / "docs" / "img"          # the manuals bundled with the application
 SIZE = (1500, 940)
@@ -74,6 +73,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
+    own_settings = None
+    if not os.environ.get("AURORA_SETTINGS_DIR"):     # never the user's settings; made only when none is given
+        own_settings = Path(tempfile.mkdtemp(prefix="aurora_docs_settings_"))
+        os.environ["AURORA_SETTINGS_DIR"] = str(own_settings)
 
     from PySide6.QtCore import QTimer, Qt
     from aurora.app import mode
@@ -91,10 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     why = account_in_paths([demo, demo / "references", demo / "reports" / "aurora"])
     if why:
         print(f"make_screenshots: {why}", file=sys.stderr)
-        try:
-            base.rmdir()
-        except OSError:
-            pass
+        for folder in (base, own_settings):
+            try:
+                if folder is not None:
+                    folder.rmdir()
+            except OSError:
+                pass
         return 2
     cmd_demo(demo)                                    # raw data, processed/reduced spectra and references
     s = settings()
@@ -193,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
     ses._save_timer.stop()
     shutdown_app(app, win)
     remove_later(base)                                # a shared folder (Public Documents): leave nothing behind
+    if own_settings is not None:
+        remove_later(own_settings)
     return code
 
 
