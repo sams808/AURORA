@@ -8,7 +8,7 @@ from aurora.core.io.safety import ProtectedPathError, assert_writable, is_protec
 
 def test_raw_and_env_protection(fake_project, tmp_path, monkeypatch):
     raw = fake_project / "raw"
-    assert is_protected(raw) and is_protected(raw / "2026-11-05" / "x.npz")
+    assert is_protected(raw) and is_protected(raw / "2025-03-14" / "x.npz")
     assert not is_protected(fake_project / ".aurora" / "session.json")
     other = tmp_path / "raw" / "notes"            # a folder named raw without day folders is ordinary
     other.mkdir(parents=True)

@@ -44,7 +44,7 @@ def _rate(name, e0, e1, level, n=7):
 
 
 def _scan(name, e0, e1):
-    s = ScanInfo(path=__import__("pathlib").Path(name), day="2026-11-05", kind="stack", name=name)
+    s = ScanInfo(path=__import__("pathlib").Path(name), day="2025-03-14", kind="stack", name=name)
     s.e_min, s.e_max, s.n_points = e0, e1, 100
     return s
 
@@ -55,7 +55,7 @@ def test_the_i0_reference_is_energy_local():
     scans = {k: _scan(k, r.rows[0]["E_eV"], r.rows[-1]["E_eV"]) for k, r in rates.items()}
     ranges = {k: (s.e_min, s.e_max) for k, s in scans.items()}
     assert reference_pool("se", ranges) == [] and sorted(reference_pool("fk1", ranges)) == ["fk2", "fk3"]
-    res = verdicts(rates, scans, "N5")
+    res = verdicts(rates, scans, "holderA")
     assert not res["se"].i0_bad and res["se"].n_ref == 0 and res["se"].i0_ref is None
     assert not any(res[k].i0_bad for k in ("fk1", "fk2", "fk3"))
     # the old rule (every scan of the holder) would have called the Se scan invalid: 0.1 < 10 % of 2.45
@@ -63,7 +63,7 @@ def test_the_i0_reference_is_energy_local():
     # an F K scan with a dropped I0 is flagged against its neighbours in energy
     rates["fk4"] = _rate("fk4", 685, 725, 0.01)
     scans["fk4"] = _scan("fk4", 685, 725)
-    res = verdicts(rates, scans, "N5")
+    res = verdicts(rates, scans, "holderA")
     assert res["fk4"].i0_bad and "I0 invalid" in " ".join(res["fk4"].notes) and not res["se"].i0_bad
     # within +/- 150 eV still counts as a neighbour
     assert reference_pool("a", {"a": (680, 730), "b": (870, 900), "c": (881, 900)}) == ["b"]
@@ -73,7 +73,7 @@ def test_qc_json_round_trip(fake_project):
     proj = Project.discover(fake_project)
     r = qc.QcResult(sid="x", i0_level=2.5, i0_bad=True, kcps=[1.0, None, 3.0, 4.0], saturated=["sdd2"],
                     high_rate=["sdd4"], notes=["n"], probed_at="2026-11-08T10:00:00", aurora_version="0.4.0",
-                    scan_mtime=12.5, n_energies=5, holder="N5")
+                    scan_mtime=12.5, n_energies=5, holder="holderA")
     p = qc.save_qc(proj, {"x": r})
     assert p == fake_project / ".aurora" / "qc.json"
     d = json.loads(p.read_text(encoding="utf-8"))
@@ -127,7 +127,7 @@ def test_checks_persist_and_drive_the_defaults(qapp, fake_project, monkeypatch):
     qapp.processEvents()
     qcfile = fake_project / ".aurora" / "qc.json"
     entry = json.loads(qcfile.read_text(encoding="utf-8"))[sid]
-    assert entry["saturated"] == ["sdd2"] and entry["holder"] == "N5" and entry["aurora_version"]
+    assert entry["saturated"] == ["sdd2"] and entry["holder"] == "holderA" and entry["aurora_version"]
     assert "SDD saturated: SDD2 (AURORA check)" in [str(f) for f in fl.merged_flags(ses.project, scan)]
     _close(win)
     # a new window fills the table from qc.json, without probing again
@@ -175,13 +175,13 @@ def test_run_on_every_holder(qapp, tmp_path):
     root = testdata.make_fake_project(tmp_path / "two", n_holders=2)
     win = _open(qapp, root)
     ses = win.session
-    assert list(ses.holder_keys) == ["N5", "N6"] and ses.current_holder == "N5"
+    assert list(ses.holder_keys) == ["holderA", "holderB"] and ses.current_holder == "holderA"
     win.check.run_every_holder()
     job = win.jobs.job("check:every")
     assert job is not None and win.check.taskbar.job is job        # one job, on the progress strip with Cancel
     assert win.jobs.wait_idle(30000)
     d = json.loads((root / ".aurora" / "qc.json").read_text(encoding="utf-8"))
     sids = {ses.stack_id(s): k for k in ses.holder_keys for s in ses.stacks_of(k)}
-    assert set(d) == set(sids) and {d[s]["holder"] for s in d} == {"N5", "N6"}
+    assert set(d) == set(sids) and {d[s]["holder"] for s in d} == {"holderA", "holderB"}
     assert testdata.STACK2 in " ".join(d)
     _close(win)

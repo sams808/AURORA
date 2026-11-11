@@ -1,6 +1,6 @@
 """Jump to a perspective, holder, zone or stack from anywhere: empty-state buttons, report pre-flight findings, F1.
 
-    nav.go(self, "reduce", holder="N5", zone=3)
+    nav.go(self, "reduce", holder="holderA", zone=3)
 
 The main window is found from the widget (also through a dialog's parent), so no perspective needs a reference to it.
 """

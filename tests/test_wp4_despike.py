@@ -37,7 +37,7 @@ def coarse_stack(seed: int = 4, spike_det: int = 1, spike_at: float = SPIKE, tey
     tey_mu = mu / mu.max() if tey_white else 0.3 + 0.9 / (1 + np.exp(-(E - 696.0) / 0.8))
     tey = tey_mu[:, None] * (1 + 0.002 * rng.standard_normal((nE, n_pix)))
     x = np.array([0.0, 0.1, 0.0, 0.1]); y = np.array([0.0, 0.0, 0.1, 0.1])
-    return StackData(id="2026-11-05_120000_coarse_stack", name="120000_coarse_stack", day="2026-11-05", E=E.copy(), x=x,
+    return StackData(id="2025-03-14_120000_coarse_stack", name="120000_coarse_stack", day="2025-03-14", E=E.copy(), x=x,
                      y=y, i0=i0, tey=tey, roi_pix_det=rpd, valid=np.ones(nE, bool), labels=["F Kα"], main="F Kα",
                      edge=("F", "K"), edge_ev=696.7, pitch=(0.1, 0.1))
 
@@ -101,9 +101,9 @@ def test_classic_removes_the_white_line_on_the_coarse_scan():
 def test_classic_is_the_zone_tool_rule_trace_by_trace():
     """'classic' (and every settings file without 'dsm') is despike() applied to each trace, as before."""
     sd = coarse_stack(seed=9)
-    st = ZonesFile.from_json({"holders": {"N5": {"zones": [{"id": 1, "label": "a", "st": {
+    st = ZonesFile.from_json({"holders": {"holderA": {"zones": [{"id": 1, "label": "a", "st": {
         sd.id: {"inc": True, "sdd": [1, 1, 1, 1], "line": "F Kα", "fn": "i0jump", "ds": True, "k": 6}}}]}}}
-    ).holders["N5"].zones[0].settings[sd.id]
+    ).holders["holderA"].zones[0].settings[sd.id]
     assert st.despike_mode == "classic"
     t = zone_traces(sd, np.arange(4), st)
     sums = sd.sum_over(np.arange(4))

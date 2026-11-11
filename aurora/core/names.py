@@ -1,4 +1,4 @@
-"""Scan-name conventions of the SGM beamline: `<HHMMSS>_<name>_<plan>`, where the name is what the user typed (the
+"""Scan-name conventions of the SGM beamline: `<HHMMSS>_<name>_<plan>` (`092758_alpha_beta_f_k_stack`), where the name is what the user typed (the
 h5 records it as `scan_name`) and often ends in plan words: the edge (`_f_k`, `_fe_l23`, `_ck`), a step (`_coarse`,
 `_fine`, `_edge1`), a detector (`_tey`). Labels, holder names and edges are read from that name without any one
 lab's words; a beamtime can add its own plan words in config/naming.json (`label_suffix_words`).
@@ -83,8 +83,8 @@ _ISO_DAY_ID = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.+)$")
 
 
 def split_stack_id(sid: str) -> tuple[str, str]:
-    """'<day>_<scan folder>' -> (day, scan folder), for day keys of any length: '2026-11-05_092758_alpha_beta_..._stack' ->
-    ('2026-11-05', '092758_alpha_beta_..._stack'); '_092758_x_stack' (a loose folder without a day) -> ('', '092758_x_stack');
+    """'<day>_<scan folder>' -> (day, scan folder), for day keys of any length: '2025-03-14_092758_x_stack' ->
+    ('2025-03-14', '092758_x_stack'); '_092758_x_stack' (a loose folder without a day) -> ('', '092758_x_stack');
     'CLS GUI_092758_x_stack' -> ('CLS GUI', '092758_x_stack'). Ids that are not '<day>_<scan>' (stitched stacks,
     'stitched_<id>') come back as ('', sid), so a project lookup of the scan part finds nothing."""
     sid = str(sid)
@@ -102,7 +102,7 @@ def split_stack_id(sid: str) -> tuple[str, str]:
 
 
 def short_time(sid: str) -> str:
-    """'HH:MM' of a stack id or scan folder name ('2026-11-05_092758_alpha_beta_...' -> '09:27'); '' when it has none."""
+    """'HH:MM' of a stack id or scan folder name ('2025-03-14_092758_alpha_beta_...' -> '09:27'); '' when it has none."""
     return time_label(split_stack_id(sid)[1])
 
 
@@ -115,14 +115,14 @@ def strip_scan_suffix(name: str, words=()) -> str:
 def holder_from_survey(name: str, scan_name: str | None = None) -> str:
     """The holder a survey starts: the survey's own name (`scan_name` from its h5 when given, else the folder name
     without HHMMSS_), without its '_survey' plan suffix and a 'plate' prefix or suffix. A trailing number stays:
-    '101500_holderA_survey' -> 'holderA'; '010013_holderA_survey' -> 'N5'; '011600_N7_plate_survey' -> 'N7';
+    '101500_holderA_survey' -> 'holderA'; '010013_plateB2_survey' -> 'B2'; '011600_C4_plate_survey' -> 'C4';
     '133400_R2_survey_survey' -> 'R2'; '093000_Plate_3_survey' -> 'Plate_3'; '093000_survey' -> 'holder 09:30'."""
     base = re.sub(r"^\d{6}_", "", str(scan_name or name or ""))
     while re.search(r"(?i)(?:^|_)survey$", base):
         base = re.sub(r"(?i)_?survey$", "", base)
     for pat in (r"(?i)^plate[_\s-]?", r"(?i)[_\s-]?plate$"):
         rest = re.sub(pat, "", base)
-        if rest != base and re.search(r"[A-Za-z]", rest):      # 'holderA' -> 'N5'; 'Plate_3' keeps its word
+        if rest != base and re.search(r"[A-Za-z]", rest):      # 'plateB2' -> 'B2'; 'Plate_3' keeps its word
             base = rest
     base = base.strip("_ -")
     if base:
@@ -132,14 +132,14 @@ def holder_from_survey(name: str, scan_name: str | None = None) -> str:
 
 
 def norm_holder(s: str) -> str:
-    """A holder name compared loosely: no 'plate' / 'holder' word, case, spaces and punctuation ignored ('Plate N5',
-    'holderA' and 'N5' are one holder; 'holder A' and 'holderA' too)."""
+    """A holder name compared loosely: no 'plate' / 'holder' word, case, spaces and punctuation ignored ('Plate B2',
+    'plateB2' and 'B2' are one holder; 'holder A' and 'holderA' too)."""
     t = re.sub(r"(?i)plate|holder", "", str(s or ""))
     return re.sub(r"[^0-9a-z]", "", t.lower()) or re.sub(r"[^0-9a-z]", "", str(s or "").lower())
 
 
 def sheet_holders(value: str) -> set[str]:
-    """The holders a sample-sheet cell names, loosely compared (norm_holder): 'N5', 'N5/N6', 'N5?' ."""
+    """The holders a sample-sheet cell names, loosely compared (norm_holder): 'B2', 'B2/B3', 'B2?' ."""
     return {norm_holder(p.strip().rstrip("?")) for p in re.split(r"[/;,]", str(value or "")) if p.strip()}
 
 
@@ -164,7 +164,7 @@ def is_test_name(name: str, words=()) -> bool:
 
 
 def short_label(label: str, holder: str | None) -> str:
-    """Drop the holder tag from a label ('holderB_quartz_grains' on holder N2 -> 'quartz_grains')."""
+    """Drop the holder tag from a label ('holderB_quartz_grains' on holder holderB -> 'quartz_grains')."""
     if holder:
         s = re.sub(rf"(?i)^(plate_?)?{re.escape(holder)}_", "", label)
         if s:
@@ -286,15 +286,15 @@ def pretty_edge(edge: tuple[str, str] | None) -> str:
 
 _DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
-# ctime form of the bluesky files' `file_creation_timestamp_iso` root attribute: 'Thu Nov  5 09:27:59 2026'. Parsed
+# ctime form of the bluesky files' `file_creation_timestamp_iso` root attribute: 'Fri Mar 14 09:27:59 2025'. Parsed
 # with a fixed English month table, never strptime: %b depends on the locale Qt sets at start.
 _CTIME = re.compile(r"(?i)^\s*(?:[a-z]{3,9}\.?,?\s+)?(" + "|".join(_MONTHS) + r")[a-z]*\.?\s+(\d{1,2}),?\s+"
                     r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s+(\d{4})\s*$")
 
 
 def parse_timestamp(text) -> dt.datetime | None:
-    """A timestamp in ISO 8601 form ('2026-11-05T09:27:59', '2026-11-05 09:27:59.12+00:00', '2026-11-05') or in
-    ctime form ('Thu Nov  5 09:27:59 2026', the CLS h5 files); None when it is neither."""
+    """A timestamp in ISO 8601 form ('2025-03-14T09:27:59', '2025-03-14 09:27:59.12+00:00', '2025-03-14') or in
+    ctime form ('Fri Mar 14 09:27:59 2025', the CLS h5 files); None when it is neither."""
     if isinstance(text, bytes):
         text = text.decode(errors="replace")
     s = str(text or "").strip()

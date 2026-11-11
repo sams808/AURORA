@@ -28,7 +28,7 @@ def test_survey_and_reduce_on_fake_project(qapp, fake_project):
     proj = Project.discover(fake_project)
     win = _window(qapp, proj)
     ses = win.session
-    assert list(ses.holder_keys) == ["N5"] and ses.current_holder == "N5"
+    assert list(ses.holder_keys) == ["holderA"] and ses.current_holder == "holderA"
     # survey perspective
     sv = win.survey
     assert sv.holder_combo.count() == 1 and sv.channel.count() == 3                # total, TEY, I0 (no fixed bins)
@@ -84,7 +84,7 @@ def test_survey_and_reduce_on_fake_project(qapp, fake_project):
     out = fake_project / "zones_all.json"
     ses.export_zones(out)
     d = json.loads(out.read_text(encoding="utf-8"))
-    assert d["holders"]["N5"]["zones"][0]["label"] == "13 alpha_beta" and d["version"] == 1
+    assert d["holders"]["holderA"]["zones"][0]["label"] == "13 alpha_beta" and d["version"] == 1
     ses.delete_zone(1)
     assert not ses.holder_zones(create=False).zones
     assert ses.import_zones(out) == 1
@@ -92,33 +92,36 @@ def test_survey_and_reduce_on_fake_project(qapp, fake_project):
     win.close()
 
 
-def test_real_zones_in_the_app(qapp, real_project, monkeypatch):
+def test_real_zones_in_the_app(qapp, real_project, real_expect, monkeypatch):
     zones_file = real_project / "zones_html" / "zones_all.json"
     if not zones_file.exists():
         pytest.skip("zones_all.json not exported yet")
     from aurora.app.session import Session
     monkeypatch.setattr(Session, "save", lambda self: None)        # never write into the real beamtime folder
-    proj = Project.discover(real_project / "raw" / "2026-11-05")
+    ex = real_expect
+    proj = Project.discover(real_project / "raw" / ex["day"])
     win = _window(qapp, proj)
     ses = win.session
     ses.zones.holders.clear()
     ses.import_zones(zones_file)
-    ses.set_holder("N5")
+    ses.set_holder(ex["holder"])
     qapp.processEvents()
-    assert win.survey.map.image.image is not None and "F Kα" in [win.survey.channel.itemText(i) for i in range(win.survey.channel.count())]
-    assert win.survey.zone_table.rowCount() == 38
-    sid = "2026-11-05_092758_alpha_beta_f_k_stack"
+    channels = [win.survey.channel.itemText(i) for i in range(win.survey.channel.count())]
+    assert win.survey.map.image.image is not None and ex["line"] in channels
+    assert win.survey.zone_table.rowCount() == ex["zones_of_holder"]
+    sid = f"{ex['day']}_{ex['stack']}"
     ses.stack(sid)
     ses.touch()
     ses.select_stack(sid)
-    z = next(zz for zz in ses.holder_zones().zones if zz.label == "13 alpha_beta")
+    z = next(zz for zz in ses.holder_zones().zones if zz.label == ex["zone"]["label"])
     ses.select_zone(z.id)
     qapp.processEvents()
-    fz = next(zz for zz in ZonesFile.load(zones_file).holders["N5"].zones if zz.label == "13 alpha_beta")
+    fz = next(zz for zz in ZonesFile.load(zones_file).holders[ex["holder"]].zones if zz.label == ex["zone"]["label"])
     assert fz.id == z.id and z.members[sid] == fz.members[sid] and len(fz.members[sid]) == fz.settings[sid].n
     assert len(win.reduce._cards) == 1 and win.reduce._cards[0].sid == sid
     t = win.reduce.preview._traces[0][1]
-    assert t.n_pix == len(fz.members[sid]) and t.line == "F Kα" and abs(float(t.sum[t.E >= t.post[0]].mean()) - 1.0) < 1e-6
+    assert t.n_pix == len(fz.members[sid]) and t.line == ex["line"]
+    assert abs(float(t.sum[t.E >= t.post[0]].mean()) - 1.0) < 1e-6
     ses._save_timer.stop()
     ses.project = None                    # a later close (session teardown) has nothing to save
     win.close(); win.deleteLater(); qapp.processEvents()

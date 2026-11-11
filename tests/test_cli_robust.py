@@ -198,7 +198,7 @@ class _Builder:
         _Builder.made.append(self)
 
     def scope_keys(self):
-        return ["N5"]
+        return ["holderA"]
 
     def build(self, progress=None):
         from types import SimpleNamespace
@@ -226,10 +226,10 @@ def test_report_flags_reach_the_builder(demo, zones, fake_builder, monkeypatch, 
     monkeypatch.setattr(cli, "settings_author", lambda: "")
     from aurora.core import report
     monkeypatch.setattr(report, "os_full_name", lambda: "")
-    assert cli.main(["report", str(demo), *zones, "--holders", "N5", "N6", "--days", "2026-11-05", "--preset", "draft",
+    assert cli.main(["report", str(demo), *zones, "--holders", "holderA", "holderB", "--days", "2025-03-14", "--preset", "draft",
                      "--author", "A B"]) == 0
     kw = fake_builder[-1].kw
-    assert kw["holders"] == ["N5", "N6"] and kw["days"] == ["2026-11-05"] and kw["preset"] == "draft"
+    assert kw["holders"] == ["holderA", "holderB"] and kw["days"] == ["2025-03-14"] and kw["preset"] == "draft"
     assert kw["author"] == "A B" and kw["png_dpi"] is None and kw["appendix"] is None and kw["maps"] is None
     assert "draft report, figures at 110 dpi, author A B (from --author)" in capsys.readouterr().out
     # the defaults: Final, every holder, the preset's dpi and appendices; --no-appendix / --no-maps / --dpi win
@@ -272,7 +272,7 @@ def test_report_author_order_settings_then_system_account(demo, zones, fake_buil
 
 
 def test_a_draft_of_one_holder_from_the_command_line(tmp_path):
-    """A real build: --preset draft --holders N5 --author on a two-holder beamtime gives a Draft of N5 only, by A B."""
+    """A real build: --preset draft --holders holderA --author on a two-holder beamtime gives a Draft of holderA only, by A B."""
     from wp7_support import project, two_holder_zones
     proj = project(tmp_path, n_holders=2)
     zf = two_holder_zones(proj)
@@ -280,20 +280,20 @@ def test_a_draft_of_one_holder_from_the_command_line(tmp_path):
     zf.save(zpath)
     out = tmp_path / "reports"
     assert cli.main(["report", str(proj.root), "--zones", str(zpath), "--out", str(out), "--preset", "draft",
-                     "--holders", "N5", "--author", "A B"]) == 0
+                     "--holders", "holderA", "--author", "A B"]) == 0
     latest = json.loads((out / "latest.json").read_text(encoding="utf-8"))
     folders = [p for p in out.iterdir() if p.is_dir()]
-    assert len(folders) == 1 and folders[0].name.endswith("_N5_draft"), [p.name for p in folders]
+    assert len(folders) == 1 and folders[0].name.endswith("_holderA_draft"), [p.name for p in folders]
     man = json.loads((folders[0] / "report_manifest.json").read_text(encoding="utf-8"))
-    assert man["options"]["preset"] == "draft" and man["options"]["holders"] == ["N5"] and man["options"]["png_dpi"] == 110
-    assert man["author"] == "A B" and {e["holder"] for e in man["entries"]} == {"N5"}
+    assert man["options"]["preset"] == "draft" and man["options"]["holders"] == ["holderA"] and man["options"]["png_dpi"] == 110
+    assert man["author"] == "A B" and {e["holder"] for e in man["entries"]} == {"holderA"}
     assert latest
 
 
 def test_a_holder_that_does_not_exist_is_named(demo, zones, capsys):
-    assert cli.main(["report", str(demo), *zones, "--holders", "N9"]) == 1
+    assert cli.main(["report", str(demo), *zones, "--holders", "holderE"]) == 1
     err = capsys.readouterr().err
-    assert "no holder of demo beamtime matches N9 (holders: N5)" in err and "Traceback" not in err
+    assert "no holder of demo beamtime matches holderE (holders: holderA)" in err and "Traceback" not in err
 
 
 def test_the_cli_presets_are_the_reports():

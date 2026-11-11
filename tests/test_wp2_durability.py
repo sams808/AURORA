@@ -45,10 +45,10 @@ def test_a_failed_replace_leaves_session_json_intact(qapp, fake_project, monkeyp
     assert ses.save() is False
     monkeypatch.setattr(os, "replace", real)
     assert ses.session_file.read_bytes() == before
-    assert [z.label for z in ZonesFile.load(ses.session_file).holders["N5"].zones] == ["first"]
+    assert [z.label for z in ZonesFile.load(ses.session_file).holders["holderA"].zones] == ["first"]
     assert states[-1] == "not saved" and ses.dirty
     assert not list(ses.session_file.parent.glob(".*.tmp"))  # no temporary file left behind
-    assert ses.save() and len(holders_json(ses.session_file)["N5"]["zones"]) == 2
+    assert ses.save() and len(holders_json(ses.session_file)["holderA"]["zones"]) == 2
 
 
 def test_the_previous_good_file_is_kept_as_bak(qapp, fake_project):
@@ -88,7 +88,7 @@ def test_a_truncated_session_is_restored_from_the_bak(qapp, fake_project):
     assert len(corrupt) == 1 and corrupt[0].read_bytes() == damaged
     assert told and "session.json was damaged; 1 zone restored from the backup of" in told[0]
     assert corrupt[0].name in told[0]
-    assert ZonesFile.load(ses2.session_file).holders["N5"].zones[0].label == "A"      # a valid session exists again
+    assert ZonesFile.load(ses2.session_file).holders["holderA"].zones[0].label == "A"      # a valid session exists again
     ses2.touch()
     ses2.save()
     assert corrupt[0].read_bytes() == damaged                                          # never overwritten
@@ -187,14 +187,14 @@ def test_a_proposal_gets_a_snapshot_first(qapp, fake_project):
     snaps = _snapshots(fake_project)
     assert len(snaps) == n + 1
     d = json.loads((fake_project / ".aurora" / "backups" / snaps[-1]).read_text(encoding="utf-8"))
-    assert [z["label"] for z in d["holders"]["N5"]["zones"]] == ["kept"] and d["backup"]["reason"] == "propose 2 zones"
+    assert [z["label"] for z in d["holders"]["holderA"]["zones"]] == ["kept"] and d["backup"]["reason"] == "propose 2 zones"
     ses._save_timer.stop()
 
 
 # ----------------------------------------------------------------------------- import
 def _file_with(tmp_path, zones, name="zones_all.json"):
     zf = ZonesFile(project="other")
-    zf.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=zones)
+    zf.holders["holderA"] = HolderZones(holder="holderA", day=testdata.DAY, survey=testdata.SURVEY, zones=zones)
     p = tmp_path / name
     zf.save(p, export=True)
     return p
@@ -237,7 +237,7 @@ def test_import_replace_keeps_a_snapshot_of_what_it_replaced(qapp, fake_project,
     assert [z.label for z in ses.holder_zones().zones] == ["B prime", "C"]
     snap = ses.last_import.backup
     d = json.loads(snap.read_text(encoding="utf-8"))
-    assert [z["label"] for z in d["holders"]["N5"]["zones"]] == ["A", "B"]
+    assert [z["label"] for z in d["holders"]["holderA"]["zones"]] == ["A", "B"]
     assert ses.import_zones(p, policy="skip") == 0 and [z.label for z in ses.holder_zones().zones] == ["B prime", "C"]
     ses._save_timer.stop()
 
@@ -267,11 +267,11 @@ def test_import_in_the_window_asks_per_holder(qapp, fake_project, tmp_path, monk
 
     def answer(parent, path, rows):
         asked.append([(r.key, r.existing, r.incoming, r.duplicates) for r in rows])
-        return {"N5": "replace"}
+        return {"holderA": "replace"}
     monkeypatch.setattr(import_dialog, "ask_policies", answer)
     p = _file_with(tmp_path, [Zone(id=1, label="X", rects=[list(r) for r in a.rects])])
     assert ses.import_zones(p) == 1
-    assert asked == [[("N5", 2, 1, 1)]] and [z.label for z in ses.holder_zones().zones] == ["X"]
+    assert asked == [[("holderA", 2, 1, 1)]] and [z.label for z in ses.holder_zones().zones] == ["X"]
     # the same zones as here: every choice gives the same result, so nothing is asked
     asked.clear()
     ses.export_zones(tmp_path / "same.json")
@@ -295,10 +295,10 @@ def test_import_dialog_defaults_to_merge(qapp, tmp_path):
     from aurora.app.import_dialog import ImportDialog
     from aurora.app.session import ImportRow
     from test_a11y import check_root
-    d = ImportDialog(tmp_path / "zones_all.json", [ImportRow("N5", "N5", 2, 3, 1), ImportRow("N6", "N6", 1, 1, 0)])
-    assert d.policies() == {"N5": "merge", "N6": "merge"}
-    d.set_policy("N6", "skip")
-    assert d.policies() == {"N5": "merge", "N6": "skip"}
+    d = ImportDialog(tmp_path / "zones_all.json", [ImportRow("holderA", "holderA", 2, 3, 1), ImportRow("holderB", "holderB", 1, 1, 0)])
+    assert d.policies() == {"holderA": "merge", "holderB": "merge"}
+    d.set_policy("holderB", "skip")
+    assert d.policies() == {"holderA": "merge", "holderB": "skip"}
     assert d.table.item(0, 3).text() == "1"
     d.show(); pump(qapp)
     assert check_root("import", d) == []

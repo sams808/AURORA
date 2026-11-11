@@ -37,7 +37,7 @@ def test_references(tmp_path):
     refs = list_references(tmp_path)
     assert {(r.label, r.edge) for r in refs} == {("NaF F K", "F K"), ("Se L3", "Se L3"), ("CaF2", "F K")}
     assert {r.label for r in list_references(tmp_path, edge="F K")} == {"NaF F K", "CaF2"}
-    assert guess_edge("BaY2F8_f_k") == "F K" and guess_edge("random") == ""
+    assert guess_edge("LiF_f_k") == "F K" and guess_edge("random") == ""
     assert list_references(tmp_path / "missing") == []
 
 

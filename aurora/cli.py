@@ -220,9 +220,8 @@ def cmd_report(args) -> int:
 
 def cmd_demo(folder: Path) -> int:
     """A synthetic beamtime with fixed ROI bins, a sample sheet, reduced spectra and references, for the tutorials
-    (no zones: the tutorials draw them). Only into a new or empty folder: the demo's day and scan names are those of
-    a real beamtime, so written into one it would replace raw files and the beamtime's config/roi_bins.json."""
-    import json
+    (no zones: the tutorials draw them). Only into a new or empty folder: written into a beamtime it would add scans
+    to its raw/ folder and replace its config/roi_bins.json."""
     from aurora.core import testdata
     from aurora.core.io.safety import is_protected
     root = Path(folder)
@@ -233,20 +232,9 @@ def cmd_demo(folder: Path) -> int:
         print(f"aurora demo: {root} is protected (a beamline raw/ folder or a folder in AURORA_PROTECT_DIRS); "
               "AURORA never writes there", file=sys.stderr)
         return 1
-    root = testdata.make_fake_project(root, stack_energies=testdata.DEMO_STACK_ENERGIES)
-    (root / "config" / "roi_bins.json").write_text(json.dumps({
-        "_meta": {"gains": {"sdd1": 10.0, "sdd2": 10.0, "sdd3": 10.0, "sdd4": 10.0}, "n_sigma": 1.5,
-                  "help": "line -> {sdd: [first channel, last channel + 1]}; the demo uses 10 eV per channel"},
-        "F Kα": {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77], "line_ev": 676.8},
-        "O Kα": {"sdd1": [46, 58], "sdd2": [46, 58], "sdd3": [46, 58], "sdd4": [46, 58], "line_ev": 525.0}}, indent=1), encoding="utf-8")
-    from aurora.core.names import holder_from_survey
-    holder = holder_from_survey(testdata.SURVEY)       # the sheet's plate column must equal the holder name
-    (root / "demo samples.csv").write_bytes(("measured demo,,,\n"
-                                            "Paper,Final plate#,Sample group,Sample ID,Composition,F K edge,Other edges?,Notes\n"
-                                            f",{holder},Minerals,1 alpha,CaF2,y,,demo mineral\n,{holder},Simple Glass,2 beta,NaF-glass,y,,demo glass\n").encode("cp1252"))
-    extras = testdata.write_demo_extras(root)
-    print(f"demo beamtime written to {root}\n  reduced spectra in {extras['reduced']}, references in {extras['references']}"
-          f"\n  open it with:  aurora gui \"{root}\"")
+    extras = testdata.write_demo(root)
+    print(f"demo beamtime written to {extras['root']}\n  reduced spectra in {extras['reduced']}, references in "
+          f"{extras['references']}\n  open it with:  aurora gui \"{extras['root']}\"")
     return 0
 
 
@@ -330,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--title", help="the title on the cover (default: 'AURORA report · <project>')")
     r.add_argument("--groups", nargs="*", help="only these sample groups")
     r.add_argument("--holders", nargs="+", metavar="HOLDER",
-                   help="only these holders, by name or key (for example N5 N6; default: every holder)")
+                   help="only these holders, by name or key (for example holderA holderB; default: every holder)")
     r.add_argument("--days", nargs="+", metavar="YYYY-MM-DD", help="only the holders of these days")
     r.add_argument("--preset", choices=REPORT_PRESETS, default="final",
                    help="final: Appendix A and B, figures at 600 dpi (default); draft: no Appendix A or B, 110 dpi")

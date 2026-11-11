@@ -37,7 +37,7 @@ Contents
 
 - **Top bar**: the AURORA mark, the crumb *project ▸ day ▸ holder ▾*, the save indicator and the mode button
   (**Easy mode** or **Advanced mode**). Click the holder part of the crumb to choose another holder of the project;
-  each entry reads like *N5 · 2026-11-05 · 1 stack · 2 zones*. **Ctrl+PgUp** and **Ctrl+PgDown** step to the previous
+  each entry reads like *holderA · 2025-03-14 · 1 stack · 2 zones*. **Ctrl+PgUp** and **Ctrl+PgDown** step to the previous
   and next holder, wrapping around (on macOS also **Ctrl+Alt+Up** / **Ctrl+Alt+Down**, for keyboards without PgUp).
   The save indicator reads *unsaved* while a change waits for the autosave (it is
   written within a second), *saved 12:03* once it is on disk, and *read-only* when the session cannot be saved (a
@@ -71,9 +71,9 @@ in Report, and the same chip over the Compare library).
 | Perspective | Easy mode | Advanced mode adds |
 |---|---|---|
 | Home | the scan tree, the project summary and the scan analysis summary | the Kind column, the folder, kind and label rows, the sgm_report notes, the full table of h5 attributes, the SDD geometry, the full error of a failed open |
-| Survey | the holder, the plate map with footprints and zones, the footprint legend, the sketch, the sample-sheet rows | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…** |
-| Reduce | the four numbered steps: **Scans of holder N5**, **XRF window** (preset, lo, hi), **Region** (**navigate**, **rect+**, **lasso+**, **Clear**, **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **polygon+**, **rect-**, **brush+**, **brush-**, the brush size, **rect+ starts a new zone**, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview toggles |
-| Check | **Spectra to check** (**Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder N5** (**Run the checks on holder N5**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
+| Survey | the holder, the plate map with footprints and zones, the footprint legend, the sample-sheet rows, the sketch when the holder has one, **Load a sketch…** | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…** |
+| Reduce | the four numbered steps: **Scans of holder holderA**, **XRF window** (preset, lo, hi), **Region** (**navigate**, **rect+**, **lasso+**, **Clear**, **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **polygon+**, **rect-**, **brush+**, **brush-**, the brush size, **rect+ starts a new zone**, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview toggles |
+| Check | **Spectra to check** (**Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder holderA** (**Run the checks on holder holderA**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
 | Fit | the **LCF** tab with its fixed options stated; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
 | Maps | not shown (**Ctrl+7** says *Maps is part of Advanced mode (Ctrl+Shift+A)*) | the whole perspective |
@@ -112,7 +112,7 @@ program, no permission) gives one calm dialog that names it.
   (**F5**), **Restore zones from a backup…** (Advanced), **Open recent** (the last ten projects, then **Clear list**),
   **Re-reduce the stack with the project ROI bins** (Advanced; enabled when the current stack comes from an sgm_report
   cache reduced with other windows, see 4.2), **Choose sample sheet…**, **New sample sheet…** and **Import SDD
-  calibration…** (the optional files of the beamtime, see 2.3), **Settings…**, **Quit**. A folder or an .h5 file
+  calibration…** (the optional files of the beamtime, see 2.4 and 2.5), **Settings…**, **Quit**. A folder or an .h5 file
   dropped on the window opens it too.
 - **Edit**: **Undo** (**Ctrl+Z**) and **Redo** (**Ctrl+Y** or **Ctrl+Shift+Z**), each naming the edit (*Undo add a
   rectangle to zone 3*); **History…** (Advanced) lists every edit since the project was opened, and a click on a line
@@ -196,7 +196,7 @@ folder or an `.h5` file on the window, or from the command line (`aurora <folder
 
 - the beamtime folder that holds `raw/<day>/<scan>` (the usual choice), or the same day folders without `raw/` (a copy
   that left that level out);
-- one day or scan folder of a beamtime: that day opens alone. The path line says so (*2026-11-03 only (1 of 4 days)*)
+- one day or scan folder of a beamtime: that day opens alone. The path line says so (*2025-03-14 only (1 of 4 days)*)
   and **Show every day**, next to **Reload**, opens the whole beamtime;
 - a loose folder of scan folders, the way John Bussey's GUI kept them (`CLS GUI/<scan folders>`). It is a project of
   its own: its `.aurora/` folder is written inside it. Each scan's day is the date its `.h5` file was written (the
@@ -228,14 +228,15 @@ choice; it is kept in the session (`ui` block, key `kind_override`) and `aurora 
 
 **After midnight.** Holders are followed across days: a stack recorded after midnight, before the next survey,
 belongs to the holder of the previous day. It is listed under that holder with *(next day)* after its time, and the
-row of its own day says *continues holder N5*. A survey always starts a new holder; a survey re-taken on the same day
+row of its own day says *continues holder holderA*. A survey always starts a new holder; a survey re-taken on the same day
 before any stack replaces the earlier one. *unknown* appears only for stacks recorded before any survey of the
 project; Home and Survey call it *stacks before the first survey*.
 
 Double-click a scan to open it in Reduce. **Reload** rescans the folder (new scans arriving during a beamtime appear
 without reopening). The sgm_report `summary.json` of a day, when present, feeds the flags and the zone proposals.
 
-The SDD calibration, the sample sheet, the other optional files and the layouts of other labs are described in 2.3.
+The folder layout AURORA expects is in 2.3, the sample sheet (optional) in 2.4, and the SDD calibration and the
+other optional files in 2.5.
 
 ### 2.1 Opening a project
 
@@ -261,8 +262,8 @@ one and opens the new one.
 
 With a project open and no scan selected, the panel on the right is the **Project** summary: folder, layout (raw
 folders or a loose folder of scans), the *Layout notes* (2.3), days, holders, scans by status (survey, complete, in
-progress, aborted, test), stacks that continue a holder after midnight, the SDD calibration (2.3), the ROI bins found
-in `config/roi_bins.json`, the sample sheet (name, samples, holders, the columns recognised), each *CSV not used* with
+progress, aborted, test), stacks that continue a holder after midnight, the SDD calibration (2.5), the ROI bins found
+in `config/roi_bins.json`, the sample sheet (2.4: name, samples, holders, the columns recognised), each *CSV not used* with
 its reason, `config/plate_layout.json` when present, and one *Config problem* row per configuration file with entries
 left out.
 
@@ -286,7 +287,95 @@ Selecting a scan shows its **Scan** panel, the scan analysis summary John Bussey
 A survey shows its energy instead of the time and energy rows. Advanced mode adds the folder, kind and label, the
 sgm_report notes, the full table of h5 attributes and the SDD geometry for the date.
 
-### 2.3 The optional files of a beamtime
+### 2.3 Your own beamtime: the folder layout
+
+AURORA opens a beamtime as the beamline writes it, with nothing to prepare: download the beamtime folder and open the
+folder that contains `raw/`. Every other file is optional (2.5 and the table of section 12 say what each one
+adds).
+
+```
+my_beamtime/
+  raw/
+    2025-03-14/                                   one folder per day, named YYYY-MM-DD
+      010013_holderA_survey/                      a survey: it starts holder holderA
+        holderA_survey_2025-03-14_010013_720.00eV.h5, mcc_flyer_0.csv, sdd1_0.bin … sdd4_0.bin
+      092758_alpha_beta_f_k_stack/                a stack of holderA (recorded after its survey)
+        2025-03-14_092758_stack_data.h5
+        alpha_beta_f_k_670_00eV/  …  alpha_beta_f_k_735_00eV/   one folder per energy (mcc_flyer_0.csv, sdd1..4_0.bin)
+      150000_holderB_survey/                      the next survey starts the next holder
+  config/roi_bins.json, config/sdd_calibration.json, config/plate_layout.json      optional
+  samples.csv                                     optional: the sample sheet (2.4)
+  references/, sketches/, processed/              optional
+```
+
+- A scan folder is `<HHMMSS>_<name>_survey` or `<HHMMSS>_<name>_<edge>_stack`; a folder with another ending is
+  recognised from the `plan_name` its `.h5` records, else listed as *other* (Advanced) and not reduced.
+- A survey starts a holder, named after the survey: `010013_holderA_survey` gives holder `holderA` (a `plate` word
+  around the name is dropped: `plateB_survey` gives `B`). The stacks recorded after it, until the next survey,
+  belong to that holder; stacks recorded before any survey form the holder *stacks before the first survey*.
+- The edge a stack was set up for comes from its name (`_f_k`, `_fe_l3`, `_se_l3l2`, …), checked against its energies
+  (*Scan names* below); the energies come from the stack's `.h5` file and its energy folders.
+- A loose folder of scan folders without `raw/<day>/` also opens (2. Home), and so does one day or scan folder.
+
+When Home shows no day, no holder or no scan, the **Project** summary's *Layout note* says what it found instead;
+compare the folder with the tree above: the day folders hold the scan folders directly.
+
+**Other layouts.** A folder of `raw/` that is not named YYYY-MM-DD but holds scan folders (*raw/Mar14*, *raw/day1*)
+is a day folder; its scans are dated from their `.h5` files. A scan folder whose name does not end in `_survey` or
+`_stack` is recognised from the `plan_name` its `.h5` records. The **Project** summary puts a *Layout note* first when
+it finds no day, holder or scan, and lists the others: a day folder read by its `.h5` dates, scan folders one level
+too deep (*raw/2025-03-14/run2/ holds 3 scan folders one level deeper: open that folder, or move them up next to it*),
+folders that are neither surveys nor stacks, stacks before the first survey, an empty `raw/`. Every such `raw/`
+folder is read-only for AURORA, like a YYYY-MM-DD one.
+
+**Scan names.** A survey starts a holder, and the holder takes the survey's name (the `scan_name` its `.h5` records,
+else the folder name), without the time, the `_survey` suffix and a *plate* word: `plateB2` is B2, `Plate_3` stays
+Plate_3, a survey without a name is *holder 09:30*. A stack's sample label is its name without the plan words at its
+end, one after the other: the edge (`_f_k`, `_fe_l23`, `_Fe_L2,3`, `_mnL23`, `_ck`, `_iron_l3`), a step or detector
+word (`_coarse`, `_fine`, `_zone`, `_edge1`, `_tey`, `_pfy`, `_bigstep`, `_smallstep`) and a re-take counter after
+them (`_1`); a sample called *soil_coarse_fraction* keeps its name, and a name is never emptied. A beamtime's own plan
+words go into `config/naming.json`: `{"label_suffix_words": ["run", "f_ycoarse"]}`. The edge is the one the name
+states when its energy (xraydb) lies within the stack's energies ± 30 eV; otherwise, and for a name without an edge,
+it is the edge the energies cover (K edges first, then L3, L2, M5, M4, N5, N4), and the scan summary's *Edge note*
+says so (*the name says O K (543 eV), the energies cover 680–692 eV: F K used*).
+
+### 2.4 The sample sheet
+
+The sample sheet is optional. Without it the sample names are typed by hand in Reduce and the report has no groups.
+With it, Reduce offers its sample IDs as names on their holder and its groups for every zone, a name picked from it
+brings its group, and the report pages follow its groups (section 9).
+
+It is a CSV of any spreadsheet at the beamtime folder (UTF-8, with or without a byte-order mark, Windows-1252, or latin-1
+with a note; commas, semicolons or tabs). Its header may sit under up to four title lines. Column names are matched
+without regard to case, spaces and punctuation; other columns are ignored:
+
+| Role | Column names recognised | Use |
+|---|---|---|
+| sample (required) | Sample ID, Sample, Sample name, Name, Label, ID | the sample name offered in Reduce (rows without one are skipped) |
+| holder | Holder, Plate, Final plate#, Plate #, Mount | the holder the sample sits on, written as AURORA names the holder |
+| group | Group, Sample group, Series | the report page of the sample |
+| composition | Composition, Formula | shown in Survey |
+| edges | every column whose name contains *edge* (a *y* / *yes* / *x* under *F K edge* reads as F K) | shown in Survey |
+| notes | the first column whose name starts with *Note* or *Comment* | kept with the row |
+
+AURORA uses the sheet chosen with **File > Choose sample sheet…** (kept in the session, one undo step), else the CSV at
+the beamtime folder that has a sample and a holder column (a name containing *sample* first), else the first CSV with
+a sample column. The summary names the sheet, the columns it recognised (*sample = Sample ID, holder = Final plate#,
+group = Sample group*) and every other CSV with the reason it was not used (*CSV not used: notes.csv: no holder
+column*). Holders are compared loosely (*Plate B2*, *plateB2* and *B2* are one holder; *B2/B3* names two); a sheet
+without a holder column offers its samples on every holder. **File > New sample sheet…** writes `samples.csv` at the
+beamtime folder (UTF-8; *Sample ID, Holder, Group, Composition, Edges, Notes*; one row per holder with the holder
+filled in): complete it in a spreadsheet, one row per sample, save it as CSV, then **Reload**.
+
+A minimal sheet, as the demo beamtime writes it (`samples.csv`):
+
+```
+Sample ID,Holder,Group,Composition,Edges,Notes
+1 alpha,holderA,Group 1,NaF,F K,synthetic demo sample, left pad
+2 beta,holderA,Group 2,CaF2-LiF in silica,F K,synthetic demo sample, right pad
+```
+
+### 2.5 The optional files of a beamtime
 
 A beamtime that holds only `raw/<day>/<scan>` opens and works through Reduce, Check, Compare and Report. Every other
 file adds something, and each one is checked when it is read: an entry of the wrong shape is left out, the rest is
@@ -297,9 +386,9 @@ column of a JSON error). `aurora project` prints the same lines.
 |---|---|---|
 | `config/roi_bins.json` | yes | no fixed emission lines: AURORA counts the total fluorescence, or the window drawn in Reduce step 2; **Save as a fixed line…** (4.8) creates the file; Maps draws elemental maps only from its lines |
 | `config/sdd_calibration.json` | yes | the nominal 10 eV per channel for every detector (a detector missing from the file, or with a gain that is not a positive number, keeps the nominal value and is named) |
-| the sample sheet (a CSV at the beamtime folder) | yes | zone labels are typed by hand; the report's groups follow the zones |
+| the sample sheet (a CSV at the beamtime folder, 2.4) | yes | zone labels are typed by hand; the report's groups follow the zones |
 | `config/plate_layout.json` | yes | Survey > **Grid of zones…** (Advanced) offers rows, columns and zone numbers only |
-| `config/naming.json` | yes | scan names lose only the generic plan words at their end (see *Scan names* below) |
+| `config/naming.json` | yes | scan names lose only the generic plan words at their end (see *Scan names* in 2.3) |
 | `processed/`, `references/`, sketches | yes | no sgm_report caches or flags, no reference spectra, no sketch |
 
 **SDD calibration.** AURORA uses `config/sdd_calibration.json` (each detector: `gain` in eV per channel above 0 and
@@ -309,49 +398,7 @@ every CSV say so: *from beside the project (the project has no config/sdd_calibr
 calibration…** copies a chosen file into `config/` (checked first; the previous file is kept as
 `sdd_calibration.backup-<time>.json`). The state reads *none (no config/sdd_calibration.json), nominal 10 eV per
 channel*, *config/sdd_calibration.json, incomplete (sdd2–sdd4 missing: nominal)* or *config/sdd_calibration.json
-(updated 2026-11-04 14:06:43)*.
-
-**Sample sheet.** It is a CSV of any spreadsheet (UTF-8, with or without a byte-order mark, Windows-1252, or latin-1
-with a note; commas, semicolons or tabs). Its header may sit under up to four title lines. Column names are matched
-without regard to case, spaces and punctuation:
-
-| Role | Column names recognised |
-|---|---|
-| sample (required) | Sample ID, Sample, Sample name, Name, Label, ID |
-| holder | Holder, Plate, Final plate#, Plate #, Mount |
-| group | Group, Sample group, Series |
-| composition | Composition, Formula |
-| edges | every column whose name contains *edge* (a *y* / *yes* / *x* under *F K edge* reads as F K) |
-| notes | the first column whose name starts with *Note* or *Comment* |
-
-AURORA uses the sheet chosen with **File > Choose sample sheet…** (kept in the session, one undo step), else the CSV at
-the beamtime folder that has a sample and a holder column (a name containing *sample* first), else the first CSV with
-a sample column. The summary names the sheet, the columns it recognised (*sample = Sample ID, holder = Final plate#,
-group = Sample group*) and every other CSV with the reason it was not used (*CSV not used: notes.csv: no holder
-column*). Holders are compared loosely (*Plate N5*, *holderA* and *N5* are one holder; *N5/N6* names two); a sheet
-without a holder column offers its samples on every holder. **File > New sample sheet…** writes `samples.csv` at the
-beamtime folder (UTF-8; *Sample ID, Holder, Group, Composition, Edges, Notes*; one row per holder with the holder
-filled in): complete it in a spreadsheet, one row per sample, save it as CSV, then **Reload**. Its sample IDs are
-offered as zone labels on their holder; its groups are offered for every zone and order the report.
-
-**Other layouts.** A folder of `raw/` that is not named YYYY-MM-DD but holds scan folders (*raw/Nov05*, *raw/day1*)
-is a day folder; its scans are dated from their `.h5` files. A scan folder whose name does not end in `_survey` or
-`_stack` is recognised from the `plan_name` its `.h5` records. The **Project** summary puts a *Layout note* first when
-it finds no day, holder or scan, and lists the others: a day folder read by its `.h5` dates, scan folders one level
-too deep (*raw/2025-03-14/run2/ holds 3 scan folders one level deeper: open that folder, or move them up next to it*),
-folders that are neither surveys nor stacks, stacks before the first survey, an empty `raw/`. Every such `raw/`
-folder is read-only for AURORA, like a YYYY-MM-DD one.
-
-**Scan names.** A survey starts a holder, and the holder takes the survey's name (the `scan_name` its `.h5` records,
-else the folder name), without the time, the `_survey` suffix and a *plate* word: `holderA` is N5, `Plate_3` stays
-Plate_3, a survey without a name is *holder 09:30*. A stack's sample label is its name without the plan words at its
-end, one after the other: the edge (`_f_k`, `_fe_l23`, `_Fe_L2,3`, `_mnL23`, `_ck`, `_iron_l3`), a step or detector
-word (`_coarse`, `_fine`, `_zone`, `_edge1`, `_tey`, `_pfy`, `_bigstep`, `_smallstep`) and a re-take counter after
-them (`_1`); a sample called *soil_coarse_fraction* keeps its name, and a name is never emptied. A beamtime's own plan
-words go into `config/naming.json`: `{"label_suffix_words": ["run", "f_ycoarse"]}`. The edge is the one the name
-states when its energy (xraydb) lies within the stack's energies ± 30 eV; otherwise, and for a name without an edge,
-it is the edge the energies cover (K edges first, then L3, L2, M5, M4, N5, N4), and the scan summary's *Edge note*
-says so (*the name says O K (543 eV), the energies cover 680–692 eV: F K used*).
+(updated 2025-03-13 14:06:43)*.
 
 ## 3. Survey
 
@@ -367,17 +414,27 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
   legend sits under the map in both modes). Click one to open it in Reduce. **zones**: the zones of the holder with
   their labels.
 - Hovering prints x, y and the value under the cursor.
-- The cards on the right show **Zones of holder N5**, the **Sketch** of the holder (`zones_html/sketches/<holder>.png`
-  when it exists) and the **Samples on holder N5 (sample sheet)**: the rows of the sample sheet that belong to it.
-  Without a sample sheet that card is one line, *No sample sheet: names are typed by hand.*, with **New sample
-  sheet…** and **Choose sample sheet…**; a sheet with no row for the holder says which holders its holder column
-  names.
+- The first view of a holder holds the survey map and every footprint and zone of the holder; when some lie outside
+  the survey map, the line under the map says so (*1 measured area lies outside the survey map*). Right-click the map
+  for **Fit view** (that view again), **Load a sketch…** and **Remove the sketch**.
+- The cards on the right show **Zones of holder holderA** and **Samples on holder holderA (sample sheet)**: the rows of
+  the sample sheet that belong to the holder. Without a sample sheet that card is one line, *No sample sheet: names
+  are typed by hand.*, with a link to 2.4 (*How to add one*), **New sample sheet…** and **Choose sample sheet…**; a
+  sheet with no row for the holder says so and names the holders it lists (*The sample sheet lists no sample on holder
+  holderA (its holders: …)*).
 - The map opens on the channel of sgm_report's summary when there is one, else on the emission line of the edge most
   stacks of the holder measured (when the survey has that fixed line), else on the first fixed line, else on the
   total.
 - Stacks recorded before the first survey form a holder without a map (*stacks before the first survey*): the map
   says *This holder has no survey map: no survey was recorded before these stacks. Reduce works on the stacks
   directly.*
+- The sketch is optional: a drawing or a photo of the holder, shown in the **Sketch** card only for a holder that has
+  one (nothing else in AURORA depends on it). AURORA looks for an image named after the holder (any case; `.png`,
+  `.jpg` or `.jpeg`) in `.aurora/sketches/`, then `sketches/`, then `zones_html/sketches/` (where the browser zone
+  tool of sgm_report kept them). **Load a sketch…**, next to **Holder** and in the map's right-click menu, copies an
+  image to `.aurora/sketches/<holder>.<ext>` (replacing AURORA's earlier copy) and shows it; **Remove the sketch**, in
+  the card and the menu, deletes that copy only, never a file of `sketches/` or `zones_html/`. Neither is offered
+  when the beamtime folder is protected (read-only).
 - **Import zones…** (Advanced) reads a zones_all.json (the browser zone tool's, or another AURORA's export or
   session). For a holder that already has other zones, the **Import zones** dialog asks what to do, per holder, in the
   column **What to do**: **Merge** (the default: the file's zones are added with free numbers, and a zone with the
@@ -427,12 +484,14 @@ offers it. The file is created when the beamtime has none (the previous one is k
 
 `samples` maps plate numbers to names; `cells` holds the plate numbers of the grid top row first; `match` lists words
 of the scan names that choose this group (the sample names count too). The file is optional and only Grid of zones
-reads it; an entry of the wrong shape is left out and named in the **Project** summary (2.3).
+reads it; an entry of the wrong shape is left out and named in the **Project** summary (2.5).
 
-The line under the controls counts the zones and lists the skipped cells (*row 2, col 2 (no pad)*). Zones are
-numbered after the zones of the holder; their group comes from the sample sheet, else from the layout group's name.
-After **Accept**, the line under the map says what was added and skipped (*added 5 zones to holder N5; skipped row 2,
-col 2 (empty on the layout)*).
+The line under the controls counts the zones and lists the skipped cells (*row 2, col 2 (no pad)*). A row with
+nothing to offer is not shown: *layout group* without a group of `config/plate_layout.json` for the holder (the plate
+layout is optional), *first sheet row* without sample-sheet rows for it. Zones are numbered after the zones of the
+holder; their group comes from the sample sheet, else from the layout group's name. After **Accept**, the line under
+the map says what was added and skipped (*added 5 zones to holder holderA; skipped row 2, col 2 (empty on the
+layout)*).
 
 ## 4. Reduce
 
@@ -441,7 +500,7 @@ col 2 (empty on the layout)*).
 Reduce is the zone tool: zones (samples) are drawn on the stack map of one scan, in mm, so that every scan of the
 holder that covers the area attaches to the zone automatically.
 
-In Easy mode the perspective shows the four steps of John Bussey's GUI as numbered cards: **1 · Scans of holder N5**
+In Easy mode the perspective shows the four steps of John Bussey's GUI as numbered cards: **1 · Scans of holder holderA**
 (the complete stacks of the holder chosen in the top bar), **2 · XRF window**, **3 · Region** and **4 · Reduce**, plus
 the **Preview**. Advanced mode shows the same cards without numbers (the third is titled **Stack map**, the fourth
 **Zone**) and every control. Switching never changes a value: a setting made in Advanced stays in force in Easy, and
@@ -683,7 +742,7 @@ listed under the plot.
 **Save ticked → Compare** writes every ticked row without a bad message in John Bussey's file formats (5.3) to
 `processed/reduced/<sample>/`, then adds those folders to Compare. Files that already exist are only overwritten after
 a question (Yes overwrites, No skips those spectra). A row with a problem is reported as not saved. When one sample has
-several ticked scans, the folder name adds the holder and the scan time (`<sample>_N5_0927`).
+several ticked scans, the folder name adds the holder and the scan time (`<sample>_holderA_0927`).
 Labels that differ only in letter case (`1 alpha`, `1 ALPHA`) count as one sample, since Windows and macOS keep
 them in one folder, and two zones of one scan with that name get `_2`, `_3`. The four files of a sample are
 replaced together or not at all: one held by another program (Excel) leaves them as they were, the other samples
@@ -691,8 +750,8 @@ are saved, and one calm message names the file.
 
 ### 5.2 The holder checks (Advanced)
 
-**Run the checks on holder N5** (named after the current holder; **Run the checks on this holder** in the empty panel
-before the first check) sits in the header of **Scans of holder N5**, next to
+**Run the checks on holder holderA** (named after the current holder; **Run the checks on this holder** in the empty
+panel before the first check) sits in the header of **Scans of holder holderA**, next to
 **Run the checks on every holder**, which probes every stack of every holder in one job with progress and
 **Cancel**. The probe reads seven energies of every stack (fast: the brightest pixels only) and fills the table:
 
@@ -1012,7 +1071,7 @@ merge: the plot *cluster mean* shows the mean spectrum of every cluster and the 
 *ticked sum* their summed spectrum; unticked clusters are dimmed on the map.
 
 - **Make zone from ticked clusters**: a new zone of the holder made of the ticked clusters' pixels (one painted square
-  of the pixel pitch on each pixel), named for example *clusters 1+3 · N5 09:27*. It works in Reduce, Check and the
+  of the pixel pitch on each pixel), named for example *clusters 1+3 · holderA 09:27*. It works in Reduce, Check and the
   report like a drawn zone, and **Edit > Undo** removes it.
 - **Send to Compare**: adds the merged mean of the ticked clusters to Compare (signal *fluo*), with its provenance:
   stack, windows per SDD, SDDs, PCA components, k, seed, clusters, pixel count.
@@ -1074,7 +1133,7 @@ findings are not counted; a note, shown with the muted dot, drops no data and is
   - included scans on which the zone has no pixel, and scans not found in the project (left out);
   - zone labels not in the sample sheet, with the closest sample ID (a leading plate number such as `13 ` and the
     case, spaces and punctuation are ignored; a label that starts with the sample ID, for example `4 hematite
-    (NH4)2SiF6` for `hematite`, counts as found);
+    Fe2O3` for `hematite`, counts as found);
   - the same label in one group on several holders;
   - complete stacks covered by no zone;
   - scans that cover a zone but have no settings for it yet (select the scan in Reduce to attach it);
@@ -1100,7 +1159,7 @@ The status line under **Build the report** names the build folder, the pages, sp
 what changed since the previous build, and anything the build had to work around (a locked file).
 
 Each build is written into `<output>/.building-<time>-<pid>-<token>/` and renamed, once complete, to
-`<output>/<YYYY-mm-dd_HHMM>_<scope>/` (scope `all`, a holder list such as `N5` or `N5+N6`, days, groups, plus `_draft`
+`<output>/<YYYY-mm-dd_HHMM>_<scope>/` (scope `all`, a holder list such as `holderA` or `holderA+holderB`, days, groups, plus `_draft`
 for a Draft). A second build in the same minute gets `_2`, `_3`, … A cancelled or failed build leaves nothing behind.
 `<output>/latest.json` names the latest build and lists the last five; earlier build folders are never deleted.
 
@@ -1169,7 +1228,7 @@ aurora <project folder>         the application on that project (also: aurora <f
 aurora project <project>        list days, holders, scans, status and flags (no Qt)
 aurora scan <scan folder>       one scan's metadata and first energy (no Qt; also a scan's .h5 file)
 aurora report <project> [--zones zones_all.json] [--out folder] [--title T] [--groups A B]
-                                [--holders N5 N6] [--days 2026-11-05] [--preset final|draft]
+                                [--holders holderA holderB] [--days 2025-03-14] [--preset final|draft]
                                 [--author NAME] [--no-appendix] [--no-maps] [--dpi 600]
 aurora demo <folder>            a small synthetic beamtime for the tutorials (a new or empty folder only)
 aurora --selftest [--out report.json] [--platform offscreen|native] [--keep] [--no-gui]
@@ -1190,7 +1249,7 @@ self-test…** runs the same command.
 
 `aurora project <folder>` on a loose folder prints real days (the date of each scan's file). Under the header it
 prints the SDD calibration in words, the fixed lines, the sample sheet with its columns, every *CSV not used*, every
-*config problem* and every *layout* note (2.3). `aurora report` on a beamtime never opened in AURORA prints
+*config problem* (2.5) and every *layout* note (2.3). `aurora report` on a beamtime never opened in AURORA prints
 `aurora report: no zones yet in <beamtime> …` and returns 1.
 
 From an installed copy, replace `aurora` by `aurora-cli.exe` on Windows (the console twin of `AURORA.exe`, in the same
@@ -1201,20 +1260,22 @@ traceback. Output is UTF-8 in any console or pipe.
 
 ## 12. Files AURORA reads and writes
 
-Reads (never modified):
+Reads (never modified). Only the scan folders are needed: every other file is optional, and the last column says
+what AURORA does without it.
 
-| Path | Content |
-|---|---|
-| `raw/<day>/<HHMMSS>_<name>_<plan>/` | `.h5` (hexapod waves, stack and scan metadata); per-energy folders `…_<EEE>_<ff>eV/` with `mcc_flyer_0.csv` (ch1 mesh I0, ch2 photodiode, ch4 TEY) and `sdd1..4_0.bin` (uint32, n_pix × 256) |
-| a loose folder of scan folders (`CLS GUI/<scan folders>`) | the same scan folders without `raw/<day>/`; the day of each scan comes from its `.h5` file |
-| `processed/<day>/<scan>/_reduced_cache.npz`, `_count_rate.json`, `summary.json` | sgm_report v2.5 caches; used when present so that the numbers equal the beamtime report |
-| `processed/reduced/<sample>/*_full_reduced.csv`, `*_absorption.csv` | John Bussey-format spectra, read by Compare |
-| `config/roi_bins.json` (optional) | fixed emission windows per line and detector; without it the total fluorescence or a window of Reduce step 2, no elemental maps (2.3) |
-| `config/sdd_calibration.json` (optional; else the one of `SGM_Beamline_Analysis-main/` next to the beamtime, said so) | channel → eV per detector; without it 10 eV per channel, nominal |
-| `config/plate_layout.json` (optional) | holder → groups with rows, cols, cells of plate numbers (top row first) and match words; `samples` maps plate numbers to names; read by Survey > **Grid of zones…** |
-| `config/naming.json` (optional) | `label_suffix_words`: the beamtime's own plan words, removed from the end of scan names |
-| the sample sheet (optional; the CSV chosen with **Choose sample sheet…**, else the rule of 2.3) | zone labels and groups |
-| `zones_html/sketches/<holder>.png` (optional) | holder sketches |
+| Path | Content | Without it |
+|---|---|---|
+| `raw/<day>/<HHMMSS>_<name>_<plan>/` | `.h5` (hexapod waves, stack and scan metadata); per-energy folders `…_<EEE>_<ff>eV/` with `mcc_flyer_0.csv` (ch1 mesh I0, ch2 photodiode, ch4 TEY) and `sdd1..4_0.bin` (uint32, n_pix × 256) | required (or a loose folder) |
+| a loose folder of scan folders (`CLS GUI/<scan folders>`) | the same scan folders without `raw/<day>/`; the day of each scan comes from its `.h5` file | — |
+| `processed/<day>/<scan>/_reduced_cache.npz`, `_count_rate.json`, `summary.json` | sgm_report v2.5 caches; used when present so that the numbers equal the beamtime report | AURORA reduces from `raw/` and runs its own checks; **Propose zones** uses the survey's bright pads |
+| `processed/reduced/<sample>/*_full_reduced.csv`, `*_absorption.csv` | John Bussey-format spectra, read by Compare | Compare starts empty |
+| `config/roi_bins.json` | fixed emission windows per line and detector | total fluorescence, or a window set by hand in Reduce step 2 (**Save as a fixed line…**, 4.8, creates the file); no elemental maps (2.5) |
+| `config/sdd_calibration.json` (else the one of `SGM_Beamline_Analysis-main/` next to the beamtime, said so) | channel → eV per detector | the nominal 10 eV per channel, said so (2.5) |
+| `config/plate_layout.json` | holder → groups with rows, cols, cells of plate numbers (top row first) and match words; `samples` maps plate numbers to names; read by Survey > **Grid of zones…** | Grid of zones takes rows and columns as typed, names from the sample sheet or numbers |
+| `config/naming.json` | `label_suffix_words`: the beamtime's own plan words, removed from the end of scan names | only the generic plan words are removed (2.3) |
+| the sample sheet (the CSV chosen with **Choose sample sheet…**, else the rule of 2.4) | zone labels and groups | names are typed by hand; zones without a group go under *Ungrouped* in the report |
+| `references/` (or the folder of Settings) | reference spectra for Compare and Fit | no references offered |
+| `<holder>.png`, `.jpg` or `.jpeg` in `.aurora/sketches/`, `sketches/` or `zones_html/sketches/` | holder sketches (3. Survey) | no Sketch card |
 
 Writes:
 
@@ -1222,6 +1283,7 @@ Writes:
 |---|---|
 | `<project>/.aurora/session.json` | the session: a header `{"format": "aurora-session", "schema": 2, "app": "AURORA <version>"}`, then the zone tool's keys (holders, zones with id, label, group, comment, rects, erects, paint, erase, polys, per-scan settings `st` and `members`, goodI0) plus the `ui` (view memory, including `preflight_ignored`) and `rules` blocks; per-scan settings may carry `roi` (XRF windows), `sig`, `dsm` and `pin` (fields set by hand); keys AURORA does not know are kept. Written atomically (a temporary file, then a replace) |
 | `<project>/.aurora/session.json.bak` | the previous good session.json, replaced at every save |
+| `<project>/.aurora/sketches/<holder>.<ext>` | the copy made by **Load a sketch…**; **Remove the sketch** deletes it |
 | `<project>/.aurora/backups/session-YYYYmmdd-HHMMSS.json` | snapshots: at most one per 10 min of editing, plus one before every import, proposal, rule application and restore; the last 30 are kept; each carries a `backup` note (reason, time) |
 | `<project>/.aurora/session.corrupt-<time>.json` | a session.json that could not be read, set aside once and never overwritten |
 | `<project>/.aurora/session.lock` | the AURORA that has the project open for editing (process, computer, user, start and last-seen time, refreshed every 2 min); removed when it closes; another AURORA opens the project read-only; taken over when its AURORA has ended or has not been heard from for 10 min |

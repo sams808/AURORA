@@ -1,4 +1,5 @@
-"""The manual zones Sami exported from the HTML tool (zones_all.json) against AURORA's geometry and loaders."""
+"""Zones exported from the browser zone tool (zones_all.json) of a real beamtime against AURORA's geometry and loaders
+(read-only; skipped without a real beamtime or its aurora_expectations.json, see tests/local_paths.py)."""
 import numpy as np
 import pytest
 
@@ -42,40 +43,50 @@ def test_membership_reproduces_the_tool(real_project, zones):
                 if got != mem:
                     mismatches += 1
                     print(f"MISMATCH {hname} zone {z.id} {z.label!r} {sid}: tool {len(mem)} px, aurora {len(got)} px")
-    assert checked >= 200
+    assert checked >= 1
     assert mismatches == 0
 
 
-def test_stack_and_traces_for_a_manual_zone(project, zones):
-    h = zones.holders["N5"]
-    z = next(zz for zz in h.zones if zz.label == "13 alpha_beta")
+def test_membership_count(zones, real_expect):
+    checked = sum(len(z.members) for h in zones.holders.values() for z in h.zones)
+    assert checked >= real_expect["zones_checked_min"]
+
+
+def test_stack_and_traces_for_a_manual_zone(project, zones, real_expect):
+    ex = real_expect
+    h = zones.holders[ex["holder"]]
+    z = next(zz for zz in h.zones if zz.label == ex["zone"]["label"])
     sid = next(iter(z.members))
     scan = project.find(sid[11:])
     sd = StackData.load(project, scan, allow_reduce=False)
-    assert sd.source.startswith("sgm_report cache") and sd.main == "F Kα" and sd.edge == ("F", "K")
-    assert sd.n_energies == 311 and sd.n_pix == 121
+    assert sd.source.startswith("sgm_report cache") and sd.main == ex["line"] and sd.edge == tuple(ex["stack_edge"])
+    assert sd.n_energies == ex["stack_energies"] and sd.n_pix == ex["stack_points"]
     pix = members(z, sd.x, sd.y, sd.pitch)
     assert pix.tolist() == z.members[sid] and len(pix) == z.settings[sid].n
     t = zone_traces(sd, pix, z.settings[sid])
-    assert t.line == "F Kα" and t.n_pix == len(pix)
+    assert t.line == ex["line"] and t.n_pix == len(pix)
     ok = np.isfinite(t.sum)
-    assert ok.sum() >= 300 and np.isclose(np.nanmean(t.sum[(t.E >= t.post[0]) & ok]), 1.0, atol=1e-9)
-    assert np.nanmean(t.sum[(t.E < 685) & ok]) < 0.1 and 1.0 < np.nanmax(t.sum) < 2.0     # pre-edge at 0, white line above the jump
+    assert ok.sum() >= ex["stack_energies"] - 11 and np.isclose(np.nanmean(t.sum[(t.E >= t.post[0]) & ok]), 1.0, atol=1e-9)
+    pre = (t.E < ex["zone"]["pre_edge_below_ev"]) & ok
+    assert np.nanmean(t.sum[pre]) < 0.1 and 1.0 < np.nanmax(t.sum) < 2.0    # pre-edge at 0, white line above the jump
     assert all(d is not None for d in t.det)
     # ticked detectors average to the sum (per-SDD scale = sum scale / n ticked)
     mean_det = np.nanmean([d for d, on in zip(t.det, z.settings[sid].sdd) if on], axis=0)
-    i = ok & (t.E > 700)
+    i = ok & (t.E > ex["zone"]["post_edge_above_ev"])
     assert np.allclose(mean_det[i], t.sum[i], rtol=1e-6, atol=1e-9)
     assert "sdd1" in t.spikes and "tey" in t.spikes
 
 
-def test_survey_of_a_holder(project, zones):
-    h = zones.holders["N5"]
+def test_survey_of_a_holder(project, zones, real_expect):
+    ex = real_expect
+    h = zones.holders[ex["holder"]]
     sv = SurveyData.load(project.find(h.survey), project.roi_bins)
-    assert sv.n > 4000 and "F Kα" in sv.lines and sv.i0_usable
-    g = sv.grid(sv.values("F Kα", per_i0=True, log10=True))
-    assert g.img.shape[0] > 50 and g.img.shape[1] > 90
-    assert 0.19 < sv.pitch[0] < 0.21 and 0.19 < sv.pitch[1] < 0.21
-    se = zones.holders["Se"]
-    sv2 = SurveyData.load(project.find(se.survey), project.roi_bins)
-    assert not sv2.i0_usable                                         # the Se survey at 1995 eV: I0 unusable
+    assert sv.n > ex["survey_min_points"] and ex["line"] in sv.lines and sv.i0_usable
+    g = sv.grid(sv.values(ex["line"], per_i0=True, log10=True))
+    rows, cols = ex["survey_grid_min"]
+    assert g.img.shape[0] > rows and g.img.shape[1] > cols
+    p = ex["survey_pitch_mm"]
+    assert abs(sv.pitch[0] - p) < 0.01 and abs(sv.pitch[1] - p) < 0.01
+    low = zones.holders[ex["low_i0_holder"]]
+    sv2 = SurveyData.load(project.find(low.survey), project.roi_bins)
+    assert not sv2.i0_usable                                         # a survey far above the I0 mesh's useful range

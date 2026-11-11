@@ -32,7 +32,7 @@ LIBRARY_FILE = "library.json"
 
 
 def zone_row_label(zone_label: str, holder: str, sid: str) -> str:
-    """'1 alpha · N5 09:27 sampleA': the zone, the holder, the scan time (HH:MM) and the scan's short label."""
+    """'1 alpha · holderA 09:27 alpha_beta': the zone, the holder, the scan time (HH:MM) and the scan's short label."""
     from aurora.core.names import short_time, split_stack_id, strip_scan_suffix
     scan = split_stack_id(sid)[1]
     short = strip_scan_suffix(scan) if scan else ""

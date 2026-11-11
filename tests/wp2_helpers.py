@@ -9,7 +9,7 @@ import numpy as np
 
 from aurora.core import testdata
 
-STACK_B = "095500_CaF2_f_k_stack"            # a second complete stack of holder N5, on the same grid
+STACK_B = "095500_CaF2_f_k_stack"            # a second complete stack of holder holderA, on the same grid
 
 
 def pump(qapp, n: int = 5) -> None:
@@ -28,7 +28,7 @@ def two_stack_project(root: Path, n_holders: int = 1) -> Path:
     root = testdata.make_fake_project(root, n_holders=n_holders)
     x, y = testdata.snake_grid()
     testdata._write_stack(root / "raw" / testdata.DAY / STACK_B, "CaF2_f_k", testdata.ENERGIES,
-                          len(testdata.ENERGIES), x, y, np.random.default_rng(11), created="Thu Nov  5 09:55:00 2026")
+                          len(testdata.ENERGIES), x, y, np.random.default_rng(11), created="Fri Mar 14 09:55:00 2025")
     return root
 
 

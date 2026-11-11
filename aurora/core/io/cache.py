@@ -1,4 +1,4 @@
-"""Reduced-stack caches: sgm_report.py v2.5's under processed/<day>/<scan>/ (70 of them exist for the Nov 2026 beamtime:
+"""Reduced-stack caches: sgm_report.py v2.5's under processed/<day>/<scan>/ (when sgm_report ran:
 `_reduced_cache.npz` with the per-pixel, per-detector ROI sums, `_spectra_cache.npz`, `_count_rate.json`) and AURORA's
 own `_reduced_cache.npz` under <root>/.aurora/cache/<day>/<scan>/.
 

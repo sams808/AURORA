@@ -774,8 +774,8 @@ def set_enabled(widget: QWidget, on: bool, reason: str = "") -> None:
 # per dialog kind: subfolders of the project tried before the project root (exports go to reports/)
 KIND_SUBDIRS = {
     "export": ("reports",), "compare": ("reports",), "fit": ("reports",), "maps": ("reports",), "report": ("reports",),
-    "zones": ("zones_html",), "reduced": ("processed/reduced", "processed"), "references": ("references",),
-    "config": ("reports",), "csv": ("processed",), "project": (),
+    "zones": (), "reduced": ("processed/reduced", "processed"), "references": ("references",),
+    "config": ("reports",), "csv": ("processed",), "project": (), "sketch": ("sketches",),
 }
 
 

@@ -12,15 +12,15 @@ from wp3_helpers import add_stack
 
 RULE = {"name": "TEY stacks", "filter": {"edge": "F K", "plan": "_TEY"}, "patch": {"sdd": [False] * 4, "tn": "i0pre"}}
 TEY1 = "093500_alpha_beta_f_k_TEY_stack"
-TEY2 = "152000_CaF2_group_f_k_TEY_stack"
+TEY2 = "152000_CaF2_f_k_TEY_stack"
 
 
 @pytest.fixture
 def two_by_two(tmp_path):
     """2 holders x 2 complete stacks (one of each named *_TEY_stack)."""
     root = testdata.make_fake_project(tmp_path / "bt", n_holders=2)
-    add_stack(root, TEY1, "alpha_beta_f_k_TEY", created="Thu Nov  5 09:35:00 2026")
-    add_stack(root, TEY2, "CaF2_group_f_k_TEY", created="Thu Nov  5 15:20:00 2026", seed=12)
+    add_stack(root, TEY1, "alpha_beta_f_k_TEY", created="Fri Mar 14 09:35:00 2025")
+    add_stack(root, TEY2, "CaF2_f_k_TEY", created="Fri Mar 14 15:20:00 2025", seed=12)
     proj = Project.discover(root)
     assert [s.name for s in proj.days[0].holders[0].stacks] == [testdata.STACK, TEY1]
     assert [s.name for s in proj.days[0].holders[1].stacks] == [testdata.STACK2, TEY2]
@@ -36,11 +36,11 @@ def _three_zones(proj) -> ZonesFile:
     zf = ZonesFile(project="T")
     n5 = [_sid(proj, testdata.STACK), _sid(proj, TEY1)]
     n6 = [_sid(proj, testdata.STACK2), _sid(proj, TEY2)]
-    z1 = Zone(id=1, label="a", group="Minerals", settings={s: ScanSettings(stack=s[11:], n=6) for s in n5})
+    z1 = Zone(id=1, label="a", group="Group 1", settings={s: ScanSettings(stack=s[11:], n=6) for s in n5})
     z2 = Zone(id=2, label="b", group="Glass", settings={s: ScanSettings(stack=s[11:], n=4) for s in n5})
-    z3 = Zone(id=1, label="c", group="Minerals", settings={s: ScanSettings(stack=s[11:], n=5) for s in n6})
-    zf.holders["N5"] = HolderZones(holder="N5", day=testdata.DAY, survey=testdata.SURVEY, zones=[z1, z2])
-    zf.holders["N6"] = HolderZones(holder="N6", day=testdata.DAY, survey=testdata.SURVEY2, zones=[z3])
+    z3 = Zone(id=1, label="c", group="Group 1", settings={s: ScanSettings(stack=s[11:], n=5) for s in n6})
+    zf.holders["holderA"] = HolderZones(holder="holderA", day=testdata.DAY, survey=testdata.SURVEY, zones=[z1, z2])
+    zf.holders["holderB"] = HolderZones(holder="holderB", day=testdata.DAY, survey=testdata.SURVEY2, zones=[z3])
     return zf
 
 
@@ -50,8 +50,8 @@ def test_rule_dry_run_and_apply(two_by_two):
     rule = rl.Rule.from_json(RULE)
     rows = rule.dry_run(zf, proj)
     tey = {_sid(proj, TEY1), _sid(proj, TEY2)}
-    assert {(r.holder, r.zone, r.sid) for r in rows} == {("N5", 1, _sid(proj, TEY1)), ("N5", 2, _sid(proj, TEY1)),
-                                                         ("N6", 1, _sid(proj, TEY2))}
+    assert {(r.holder, r.zone, r.sid) for r in rows} == {("holderA", 1, _sid(proj, TEY1)), ("holderA", 2, _sid(proj, TEY1)),
+                                                         ("holderB", 1, _sid(proj, TEY2))}
     assert sorted({r.field for r in rows}) == ["sdd", "tn"] and len(rows) == 6
     assert all(r.old in ([True] * 4, "i0jump") and r.new in ([False] * 4, "i0pre") for r in rows)
     before = copy.deepcopy(zf)
@@ -68,7 +68,7 @@ def test_rule_dry_run_and_apply(two_by_two):
                     assert st == old
     assert rule.dry_run(zf, proj) == []                     # applied: nothing left to change
     # a pinned 'tn' survives re-applying; override replaces it
-    st = zf.holders["N5"].zones[0].settings[_sid(proj, TEY1)]
+    st = zf.holders["holderA"].zones[0].settings[_sid(proj, TEY1)]
     st.tey_norm, st.pinned = "area", ["tn"]
     assert rule.apply(zf, proj) == [] and st.tey_norm == "area"
     assert [r.field for r in rule.apply(zf, proj, override=True)] == ["tn"] and st.tey_norm == "i0pre"
@@ -78,12 +78,12 @@ def test_rule_dry_run_and_apply(two_by_two):
 def test_scopes_filters_and_relative_windows(two_by_two):
     proj = two_by_two
     zf = _three_zones(proj)
-    by_holder = rl.Rule(scope={"kind": "holders", "holders": ["N6"]}, patch={"fn": "area"})
-    assert {(r.holder, r.zone) for r in by_holder.dry_run(zf, proj)} == {("N6", 1)}
+    by_holder = rl.Rule(scope={"kind": "holders", "holders": ["holderB"]}, patch={"fn": "area"})
+    assert {(r.holder, r.zone) for r in by_holder.dry_run(zf, proj)} == {("holderB", 1)}
     by_group = rl.Rule(scope={"kind": "groups", "groups": ["glass"]}, patch={"ds": False})
-    assert {(r.holder, r.zone) for r in by_group.dry_run(zf, proj)} == {("N5", 2)}
-    by_zone = rl.Rule(scope={"kind": "zones", "zones": [["N5", 1]]}, patch={"k": 8})
-    assert {(r.holder, r.zone) for r in by_zone.dry_run(zf, proj)} == {("N5", 1)}
+    assert {(r.holder, r.zone) for r in by_group.dry_run(zf, proj)} == {("holderA", 2)}
+    by_zone = rl.Rule(scope={"kind": "zones", "zones": [["holderA", 1]]}, patch={"k": 8})
+    assert {(r.holder, r.zone) for r in by_zone.dry_run(zf, proj)} == {("holderA", 1)}
     other_edge = rl.Rule(scan_filter={"edge": "O K"}, patch={"fn": "max"})
     assert other_edge.dry_run(zf, proj) == []
     span = rl.Rule(scan_filter={"span": [679, 693]}, patch={"fn": "max"})
@@ -226,7 +226,7 @@ def test_saved_rules_reach_a_stack_attached_later_and_the_dialog(qapp, two_by_tw
         ses.flush(); ses.save()
         # a third stack written afterwards and attached receives the patch
         t3 = "094500_alpha_beta_f_k_TEY_stack"
-        add_stack(proj.root, t3, "alpha_beta_f_k_TEY", created="Thu Nov  5 09:45:00 2026", seed=13)
+        add_stack(proj.root, t3, "alpha_beta_f_k_TEY", created="Fri Mar 14 09:45:00 2025", seed=13)
         proj2 = Project.discover(proj.root)
         ses.set_project(proj2)
         pump(qapp)
@@ -261,21 +261,21 @@ def test_apply_now_over_two_holders_is_one_undo_step(qapp, two_by_two, monkeypat
         t1, s2, t2 = _sid(proj, TEY1), _sid(proj, testdata.STACK2), _sid(proj, TEY2)
         for sid in (t1, s2, t2):
             ses.stack(sid)
-        with ses.edit("a zone on N5"):
+        with ses.edit("a zone on holderA"):
             za = ses.new_zone("a")
             za.rects.append(list(ses.stack_loaded(s1).bbox))
-        ses.set_holder("N6")
+        ses.set_holder("holderB")
         pump(qapp)
-        with ses.edit("a zone on N6"):
+        with ses.edit("a zone on holderB"):
             zc = ses.new_zone("c")
             zc.rects.append(list(ses.stack_loaded(s2).bbox))
-        ses.set_holder("N5")
+        ses.set_holder("holderA")
         pump(qapp)
 
         def tey(holder, sid):
             return ses.zones.holders[holder].zones[0].settings[sid].tey_norm
 
-        assert tey("N5", t1) == "i0jump" and tey("N6", t2) == "i0jump"
+        assert tey("holderA", t1) == "i0jump" and tey("holderB", t2) == "i0jump"
         monkeypatch.setattr(QDialog, "exec", lambda self: 0)
         mode.set_advanced(True)
         d = rd.open_rules()
@@ -285,15 +285,15 @@ def test_apply_now_over_two_holders_is_one_undo_step(qapp, two_by_two, monkeypat
         d.use["tn"].setChecked(True)
         d.tn.setCurrentIndex(d.tn.findData("i0pre"))
         changes = d.apply_now()
-        assert {(c.holder, c.sid) for c in changes} == {("N5", t1), ("N6", t2)}
-        assert tey("N5", t1) == "i0pre" and tey("N6", t2) == "i0pre"
+        assert {(c.holder, c.sid) for c in changes} == {("holderA", t1), ("holderB", t2)}
+        assert tey("holderA", t1) == "i0pre" and tey("holderB", t2) == "i0pre"
         d.deleteLater()
         assert ses.undo()
         pump(qapp)
-        assert tey("N5", t1) == "i0jump" and tey("N6", t2) == "i0jump"
+        assert tey("holderA", t1) == "i0jump" and tey("holderB", t2) == "i0jump"
         assert ses.redo()
         pump(qapp)
-        assert tey("N5", t1) == "i0pre" and tey("N6", t2) == "i0pre"
+        assert tey("holderA", t1) == "i0pre" and tey("holderB", t2) == "i0pre"
     finally:
         mode.set_advanced(False)
         close(win)

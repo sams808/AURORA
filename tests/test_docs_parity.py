@@ -164,7 +164,7 @@ def _dialog_names(win) -> set[str]:
         lambda: ReferencesDialog(tempfile.gettempdir(), "", win),
         lambda: StitchDialog(stacks, win),
         lambda: FigureDialog(win),
-        lambda: ImportDialog(Path("zones_all.json"), [ImportRow(key="N5", holder="N5", existing=1, incoming=2,
+        lambda: ImportDialog(Path("zones_all.json"), [ImportRow(key="holderA", holder="holderA", existing=1, incoming=2,
                                                                 duplicates=1)], win),
         lambda: RestoreDialog(ses, win),
         lambda: RulesDialog(ses, win),
@@ -287,7 +287,7 @@ def test_the_allow_list_is_still_in_the_code():
 def _skip_control(name: str) -> bool:
     """Data on screen rather than a control: scan titles, holders, paths, symbols, recent-project entries."""
     return (len(name) <= 1 or re.match(r"^\d\d:\d\d ", name) is not None or re.search(r"\d{4}-\d\d-\d\d", name) is not None
-            or ":\\" in name or name in {"N5", "no recent projects"} or re.fullmatch(r"\d+ .*", name) is not None)
+            or ":\\" in name or name in {"holderA", "no recent projects"} or re.fullmatch(r"\d+ .*", name) is not None)
 
 
 def flat(text: str) -> str:
@@ -447,3 +447,24 @@ def test_the_screenshot_demo_lies_outside_the_home_folder():
         assert Path.home().name not in base.parts
     finally:
         base.rmdir()
+
+
+def test_the_screenshot_script_refuses_a_path_with_the_account_name(monkeypatch, tmp_path):
+    """BL-04: a demo path that names the account (user name or home folder name) stops the script with exit 2 and the
+    reason, before any window or demo is made; a neutral path passes."""
+    import getpass
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("make_screenshots", ROOT / "docs" / "make_screenshots.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(getpass, "getuser", lambda: "jdoe42")
+    assert mod.account_in_paths([Path("/data/AURORA-docs/demo_beamtime")]) == ""
+    why = mod.account_in_paths([Path("/data/jdoe42/demo_beamtime")])
+    assert "jdoe42" in why and "screenshots would show it" in why
+    inside = tmp_path / "Users" / "JDOE42" / "shots"
+    inside.mkdir(parents=True)
+    monkeypatch.setattr(mod, "demo_root", lambda: inside)
+    called = []
+    import aurora.cli
+    monkeypatch.setattr(aurora.cli, "cmd_demo", lambda *a: called.append(a) or 0)
+    assert mod.main(["--out", str(tmp_path / "out")]) == 2 and not called

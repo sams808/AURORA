@@ -45,7 +45,7 @@ Help > Open the demo beamtime), [installation](aurora/resources/docs/INSTALL.md)
 ```
 py -3.12 -m venv .venv && .venv\Scripts\activate   # own environment: PySide6 >= 6.10 is required (6.9 paints nothing)
 python -m pip install -e ".[dev]"
-python -m pytest                       # synthetic data; the Nov 2026 beamtime tests run when AURORA_REAL_PROJECT is set
+python -m pytest                       # synthetic data; the real-data tests run when AURORA_REAL_PROJECT names a beamtime
 aurora                                 # the application
 aurora <beamtime folder>               # the application on that beamtime
 aurora project <beamtime folder>       # headless listing of days, holders, scans, status and flags

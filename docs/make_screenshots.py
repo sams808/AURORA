@@ -7,11 +7,13 @@ Run from the repo root with the project's Python:
 
 Advanced mode, so every control the manual describes is on screen. Writes a fresh demo folder in a temporary
 directory outside the home folder (its path is on screen; see demo_root) and removes it at the end; the settings go
-to a temporary folder too: nothing else is touched.
+to a temporary folder too: nothing else is touched. Refuses to run (exit 2, with the reason) when a path the shots
+show (the demo, its references and report folders) names the account (account_in_paths).
 """
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import sys
 import tempfile
@@ -42,6 +44,25 @@ def demo_root() -> Path:
     raise SystemExit("no writable folder outside the home folder for the demo: the shots would show the account name")
 
 
+def account_in_paths(paths) -> str:
+    """The reason the shots must not be made ('' when none): a path they show names the account that makes them (its
+    user name or the name of its home folder, compared without case)."""
+    names = set()
+    for get in (getpass.getuser, lambda: Path.home().name):
+        try:
+            n = str(get() or "").strip()
+        except Exception:                                 # no user name on this system: nothing to compare
+            n = ""
+        if len(n) >= 2:
+            names.add(n.casefold())
+    for p in paths:
+        parts = [x.casefold() for x in Path(p).parts]
+        hit = next((n for n in names if n in parts or (len(n) >= 4 and any(n in x for x in parts))), None)
+        if hit:
+            return f"{p} names the account '{hit}': the screenshots would show it (choose another folder)"
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--scheme", choices=["light", "dark"], default="light")
@@ -64,6 +85,14 @@ def main(argv: list[str] | None = None) -> int:
 
     base = demo_root()                                # never under the home folder (its path is on screen)
     demo = base / "demo_beamtime"
+    why = account_in_paths([demo, demo / "references", demo / "reports" / "aurora"])
+    if why:
+        print(f"make_screenshots: {why}", file=sys.stderr)
+        try:
+            base.rmdir()
+        except OSError:
+            pass
+        return 2
     cmd_demo(demo)                                    # raw data, processed/reduced spectra and references
     s = settings()
     s.setValue("appearance", args.scheme)
@@ -89,8 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         if holder_item.child(i).text(0) == testdata.STACK:
             tree.setCurrentItem(holder_item.child(i))
     x0, x1, y0, y1 = sd.bbox
-    z1 = ses.new_zone("1 alpha"); z1.group = "Minerals"; z1.rects.append([x0, (x0 + x1) / 2, y0, y1])
-    z2 = ses.new_zone("2 beta"); z2.group = "Simple Glass"; z2.rects.append([(x0 + x1) / 2, x1, y0, y1])
+    z1 = ses.new_zone("1 alpha"); z1.group = "Group 1"; z1.rects.append([x0, (x0 + x1) / 2, y0, y1])
+    z2 = ses.new_zone("2 beta"); z2.group = "Group 2"; z2.rects.append([(x0 + x1) / 2, x1, y0, y1])
     ses.touch(); ses.select_zone(z1.id)
     win.reduce.scan_list.setCurrentRow(0)
     from aurora.app.session import CheckItem
@@ -109,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     fit.refresh(); fit.target.setCurrentText("mixture 1 [sdd-scaled]")
     for i in range(fit.components.count()):
         it = fit.components.item(i)
-        it.setCheckState(Qt.Checked if it.text() in ("NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "BaY2F8 [sdd-scaled]") else Qt.Unchecked)
+        it.setCheckState(Qt.Checked if it.text() in ("NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "LiF [sdd-scaled]") else Qt.Unchecked)
     fit.bootstrap.setValue(100); fit.run_lcf(); fit.n_comp.setValue(3); fit.run_pca(); fit.run_mcr()
     fit.pk_trace.setCurrentText("NaF [sdd-scaled]"); fit.pk_n.setValue(2); fit.run_peaks()
     mp = win.maps

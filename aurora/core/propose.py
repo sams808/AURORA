@@ -80,8 +80,8 @@ def zones_from_pads(pads: list[Pad], start_id: int = 1, labels: dict[int, str] |
 
 # ----------------------------------------------------------------------------- a grid of zones (plate_layout.json)
 def norm_text(s) -> str:
-    """Lower-case ASCII letters and digits only (sgm_report `norm_text`): 'hematite' -> 'hematite',
-    'holderB_Fe2O3' -> 'n2lawklr'."""
+    """Lower-case ASCII letters and digits only (sgm_report `norm_text`): 'Hématite' -> 'hematite',
+    'holderB_Fe2O3' -> 'holderbfe2o3'."""
     import re
     import unicodedata
     return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower())

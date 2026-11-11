@@ -25,7 +25,7 @@ and a larger text, at once. Long tasks run in the background with a progress str
 
 ## 1. Open a beamtime
 
-**File > Open project…**, or drop the folder that contains `raw/` (for example `my_beamtime`) on the window. A single
+**File > Open project…**, or drop the folder that contains `raw/` (the folder you downloaded from the beamline) on the window. A single
 day folder or a scan folder works too (that day alone: **Show every day** opens the rest), and so does one scan's
 `.h5` file dropped on the window. AURORA also opens the folder John Bussey's GUI used,
 where the scan folders sit side by side (`CLS GUI/`): choose that folder with **Open project…**. Its zones are saved
@@ -52,11 +52,34 @@ backups in `.aurora/backups/`. Caches of reduced stacks and hypercubes live unde
 be deleted at any time. One AURORA at a time edits a project: a second one opens it read-only. Edits that could not
 be saved are never dropped without asking: closing the window offers **Export zones…**, *Discard* or *Cancel*.
 
+### Your own beamtime
+
+1. Download the beamtime from the beamline and open the folder that contains `raw/` (nothing to prepare, nothing to
+   rename).
+2. `raw/` holds one folder per day (`2025-03-14/`), each with the scan folders as the beamline named them:
+   `<HHMMSS>_<name>_survey` and `<HHMMSS>_<name>_<edge>_stack`. A survey starts a holder and gives it its name
+   (`010013_holderA_survey` is holder `holderA`); the stacks recorded after it belong to that holder.
+3. Everything else is optional; each file adds something when it is there:
+
+| File | What it adds | Without it |
+|---|---|---|
+| `config/roi_bins.json` | fixed emission lines (F Kα, O Kα, …) | the total fluorescence, or a window set by hand in Reduce; no elemental maps |
+| `config/sdd_calibration.json` | the energy of each detector channel | the nominal 10 eV per channel |
+| a sample sheet (a CSV with a `Sample ID` column, MANUAL 2.4) | sample names offered in Reduce, groups for the report | names are typed by hand |
+| `config/plate_layout.json` | rows, columns and names for **Grid of zones…** (Advanced) | the grid is typed |
+| `references/` | reference spectra for Compare and Fit | none offered |
+| a sketch of a holder | a picture of the holder in Survey | no sketch card |
+
+4. If Home shows no day, holder or scan, compare the folder with MANUAL 2.3 (day folders named YYYY-MM-DD, scan
+   folders directly inside them). Tutorial 9 walks through a beamtime of your own from the first open to the report.
+
 ## 2. Survey
 
 The plate map of the holder with the stack footprints (one colour and dash per status; click one to open it in
-Reduce) and the zones with their labels. The sketch (`zones_html/sketches/<holder>.png`) and the sample-sheet rows of
-the holder sit on the right. Advanced mode adds the display options (any fixed emission line, total XRF, TEY or I0;
+Reduce) and the zones with their labels; the first view holds every footprint and zone of the holder. The
+sample-sheet rows of the holder sit on the right (one line when there are none). A sketch of the holder is optional:
+**Load a sketch…**, next to the holder, adds a drawing or photo (AURORA keeps a copy in `.aurora/sketches/`), and its
+card appears only for a holder that has one; **Remove the sketch** removes AURORA's copy. Advanced mode adds the display options (any fixed emission line, total XRF, TEY or I0;
 per detector or summed; / I0; log; inverted for high-energy surveys), **Import zones…** (a `zones_all.json` of the
 browser zone tool or another AURORA; merged per holder, duplicates skipped, one undo step), **Export zones…** and
 **Grid of zones…** (a block of pads cut into zones from `config/plate_layout.json` or the sample sheet).
@@ -65,7 +88,7 @@ browser zone tool or another AURORA; merged per holder, duplicates skipped, one 
 
 Easy mode shows John Bussey's four steps as numbered cards:
 
-1. **1 · Scans of holder N5**: pick a scan of the holder (the holder is chosen in the top bar).
+1. **1 · Scans of holder holderA**: pick a scan of the holder (the holder is chosen in the top bar).
 2. **2 · XRF window**: keep the fixed line (*F Kα (fixed bins)*) or drag the window over the emission line; **lo** /
    **hi** are in channels (hi excluded).
 3. **3 · Region**: draw the sample with **rect+** or **lasso+**; a click inside another sample selects it; **New
@@ -98,7 +121,7 @@ In Check, every region sent with **Add to Check** is a row of **Spectra to check
 anything that does not look right, then press **Save ticked → Compare**: the spectra are written in John Bussey's
 format to `processed/reduced/` and appear in Compare.
 
-Advanced mode adds the checks of every scan of the holder (**Run the checks on holder N5**, **Run the checks on every
+Advanced mode adds the checks of every scan of the holder (**Run the checks on holder holderA**, **Run the checks on every
 holder**): the count rate per detector, *saturated* (the output no longer follows the input; fluorescence unusable,
 TEY fine), *high rate* (dead time / pile-up likely) and *I0 invalid* (≤ 0 or below 10 % of the other scans within
 ±150 eV), kept in `.aurora/qc.json`. The I0 panel scores every scan's I0 curve (tick the good ones, or **Auto-select
@@ -160,7 +183,7 @@ Appendix A or B), the resolution, the appendices and the **Scope** tab (groups, 
 headless:
 
 ```
-aurora report <project> [--zones zones_all.json] [--out folder] [--groups A B] [--holders N5] [--preset draft]
+aurora report <project> [--zones zones_all.json] [--out folder] [--groups A B] [--holders holderA] [--preset draft]
 ```
 
 ## 9. Command line

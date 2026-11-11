@@ -50,9 +50,9 @@ def test_rotation_reverses_or_turns_the_labels():
 
 
 def test_groups_and_empty_layout_positions():
-    cells = grid_cells((0, 2, 0, 2), 2, 2, labels=[["x", None], ["y", "z"]], groups="Minerals")
-    assert [(c.label, c.empty, c.group) for c in cells] == [("x", False, "Minerals"), (None, True, "Minerals"),
-                                                          ("y", False, "Minerals"), ("z", False, "Minerals")]
+    cells = grid_cells((0, 2, 0, 2), 2, 2, labels=[["x", None], ["y", "z"]], groups="Group 1")
+    assert [(c.label, c.empty, c.group) for c in cells] == [("x", False, "Group 1"), (None, True, "Group 1"),
+                                                          ("y", False, "Group 1"), ("z", False, "Group 1")]
     zs = zones_from_grid((0, 2, 0, 2), 2, 2, labels=["p", "q"], groups=["G1", "G2", "G3", "G4"])
     assert [(z.label, z.group) for z in zs] == [("p", "G1"), ("q", "G2"), ("zone 3", "G3"), ("zone 4", "G4")]
     assert not any(c.empty for c in grid_cells((0, 2, 0, 2), 2, 2, labels=["p", "q"]))       # short list: no label
@@ -60,24 +60,24 @@ def test_groups_and_empty_layout_positions():
     assert [z.label for z in zones_from_cells(kept, start_id=7)] == ["x", "y", "z"]
 
 
-LAYOUT = {"N5": {"samples": {"1": "alpha_beta", "2": "LaOF", "3": "NdOF", "4": "PrOF", "5": "SmOF", "6": "YOF"},
-                 "groups": [{"id": "RE-O-F 1", "rows": 2, "cols": 3, "cells": [[1, 2, 3], [4, None, 6]],
-                             "match": ["sbof"]},
-                            {"id": "UNL beakers", "rows": 2, "cols": 2, "cells": [[5, 6], [None, None]],
-                             "match": ["unlfk02", "unlf"]},
+LAYOUT = {"holderA": {"samples": {"1": "alpha_beta", "2": "sample2", "3": "sample3", "4": "sample4", "5": "sample5", "6": "sample6"},
+                 "groups": [{"id": "Group A 1", "rows": 2, "cols": 3, "cells": [[1, 2, 3], [4, None, 6]],
+                             "match": ["alphabeta"]},
+                            {"id": "Group B beakers", "rows": 2, "cols": 2, "cells": [[5, 6], [None, None]],
+                             "match": ["gamma", "gam"]},
                             {"id": "names only", "match": ["zzz"], "match_names": False, "names": ["A", "B"]}]},
           "_help": "ignored"}
 
 
 def test_layout_group_of_a_scan():
-    gs = layout_groups(LAYOUT, "N5")
-    assert [g["id"] for g in gs] == ["RE-O-F 1", "UNL beakers", "names only"]
-    assert gs[0]["labels"] == [["alpha_beta", "LaOF", "NdOF"], ["PrOF", None, "YOF"]] and gs[2]["labels"] == ["A", "B"]
-    assert layout_group(LAYOUT, "N5", "alpha_beta")["id"] == "RE-O-F 1"
-    assert layout_group(LAYOUT, "N5", "gamma")["id"] == "UNL beakers"            # the longest word wins
-    assert layout_group(LAYOUT, "N5", "YOF_test")["id"] in ("RE-O-F 1", "UNL beakers")    # a sample name matches
-    assert layout_group(LAYOUT, "N5", "B_sample") is None                                # match_names false, < 3 letters
-    assert layout_group(LAYOUT, "N9", "alpha_beta") is None and layout_groups(LAYOUT, "N9") == []
+    gs = layout_groups(LAYOUT, "holderA")
+    assert [g["id"] for g in gs] == ["Group A 1", "Group B beakers", "names only"]
+    assert gs[0]["labels"] == [["alpha_beta", "sample2", "sample3"], ["sample4", None, "sample6"]] and gs[2]["labels"] == ["A", "B"]
+    assert layout_group(LAYOUT, "holderA", "alpha_beta")["id"] == "Group A 1"
+    assert layout_group(LAYOUT, "holderA", "gamma")["id"] == "Group B beakers"            # the longest word wins
+    assert layout_group(LAYOUT, "holderA", "sample6_test")["id"] in ("Group A 1", "Group B beakers")    # a sample name matches
+    assert layout_group(LAYOUT, "holderA", "B_sample") is None                                # match_names false, < 3 letters
+    assert layout_group(LAYOUT, "holderE", "alpha_beta") is None and layout_groups(LAYOUT, "holderE") == []
 
 
 def test_snap_to_pads_skips_a_cell_without_a_pad_and_lists_it():
@@ -113,7 +113,7 @@ def pump(qapp, n=5):
 
 @pytest.fixture
 def window(qapp, tmp_path):
-    """The demo beamtime (sample sheet for N5) with a plate_layout.json group matching its alpha_beta stack."""
+    """The demo beamtime (sample sheet for holderA) with a plate_layout.json group matching its alpha_beta stack."""
     from aurora.app import mode
     from aurora.app.main import MainWindow
     from aurora.cli import cmd_demo
@@ -157,18 +157,18 @@ def test_layout_prefills_and_accept_is_one_edit(qapp, window, monkeypatch):
     sv, ses = window.survey, window.session
     dlg = sv.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
     pump(qapp)
-    assert dlg.isVisible() and dlg.layout_combo.currentText().startswith("RE-O-F 1")
+    assert dlg.isVisible() and dlg.layout_combo.currentText().startswith("Group A 1")
     assert (dlg.rows.value(), dlg.cols.value()) == (2, 3) and dlg.source() == "layout"
     assert "matches the holder's scans" in dlg.summary.text()
     zones, skipped = sv._grid_preview
-    assert [z.label for z in zones] == ["alpha_beta", "LaOF", "NdOF", "PrOF", "YOF"]
+    assert [z.label for z in zones] == ["alpha_beta", "sample2", "sample3", "sample4", "sample6"]
     assert [c.name for c, why in skipped] == ["row 2, col 2"] and skipped[0][1] == "empty on the layout"
     assert "skipped: row 2, col 2 (empty on the layout)" in dlg.summary.text()
     # the preview is drawn: dashed rectangles in the rect+ colour, the empty cell dotted
     assert len(sv.map._overlays) >= 2 * len(zones) + len(skipped)
     # rotation 180 reverses the assignment
     dlg.rotation.setCurrentIndex(dlg.rotation.findData(180))
-    assert [z.label for z in sv._grid_preview[0]] == ["YOF", "PrOF", "NdOF", "LaOF", "alpha_beta"]
+    assert [z.label for z in sv._grid_preview[0]] == ["sample6", "sample4", "sample3", "sample2", "alpha_beta"]
     dlg.rotation.setCurrentIndex(0)
     # 8 zones without the layout: 2 x 4, zone numbers
     dlg.layout_combo.setCurrentIndex(0)
@@ -195,7 +195,7 @@ def test_layout_prefills_and_accept_is_one_edit(qapp, window, monkeypatch):
     assert sv.zone_table.rowCount() == len(hz.zones) and sv._grid_preview is None and sv.grid_dialog is None
     assert "added 8 zones" in sv.hint.text()
     sv.redraw_map()                                            # any later redraw keeps the note in the hint line
-    assert "added 8 zones to holder N5" in sv.hint.text() and "points at" in sv.hint.text()
+    assert "added 8 zones to holder holderA" in sv.hint.text() and "points at" in sv.hint.text()
     # the next grid continues the numbering
     dlg = sv.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
     assert dlg.start_id() == max(z.id for z in hz.zones) + 1
@@ -205,12 +205,12 @@ def test_layout_prefills_and_accept_is_one_edit(qapp, window, monkeypatch):
 def test_sheet_labels_and_snap_to_pads_in_the_dialog(qapp, window):
     sv = window.survey
     dlg = sv.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
-    dlg.layout_combo.setCurrentIndex(0)                        # no layout group: the sheet rows of N5
+    dlg.layout_combo.setCurrentIndex(0)                        # no layout group: the sheet rows of holderA
     assert dlg.source() == "sheet" and dlg.first_row.isEnabled()
     dlg.rows.setValue(1)
     dlg.cols.setValue(2)
     zones, _skipped = sv._grid_preview
-    assert [(z.label, z.group) for z in zones] == [("1 alpha", "Minerals"), ("2 beta", "Simple Glass")]
+    assert [(z.label, z.group) for z in zones] == [("1 alpha", "Group 1"), ("2 beta", "Group 2")]
     dlg.first_row.setValue(2)
     assert [z.label for z in sv._grid_preview[0]] == ["2 beta", f"zone {dlg.start_id() + 1}"]
     # snap: the left cell has a pad, the right one none
@@ -246,7 +246,7 @@ def test_a_holder_change_closes_the_grid(qapp, tmp_path):
     dlg = win.survey.open_grid_dialog((-0.9, 0.3, -0.5, 0.3))
     assert win.survey._grid_preview is not None and dlg.groups == []          # no plate_layout.json: none offered
     assert dlg.source() == "numbers" and (dlg.rows.value(), dlg.cols.value()) == (2, 2)
-    win.session.set_holder("N6")
+    win.session.set_holder("holderB")
     pump(qapp)
     assert win.survey.grid_dialog is None and win.survey._grid_preview is None and not dlg.isVisible()
     mode.set_advanced(False)

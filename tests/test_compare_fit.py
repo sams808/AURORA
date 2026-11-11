@@ -18,8 +18,8 @@ def _edge(E, e0=690.0, width=1.0, white=0.6, slope=0.002):
 def test_readers(tmp_path):
     E = np.linspace(680, 730, 101)
     # AURORA zone CSV
-    p = tmp_path / "N5_1_alpha_scan.csv"
-    p.write_text("# AURORA zone spectrum\n# zone: 1 alpha (holder N5)\nenergy_eV,I0_zone_sum,I0_used,TEY_raw,TEY_norm,fluo_sum_raw,fluo_sum_norm\n"
+    p = tmp_path / "holderA_1_alpha_scan.csv"
+    p.write_text("# AURORA zone spectrum\n# zone: 1 alpha (holder holderA)\nenergy_eV,I0_zone_sum,I0_used,TEY_raw,TEY_norm,fluo_sum_raw,fluo_sum_norm\n"
                  + "\n".join(f"{e},2,2,{0.1 * i},{0.2 * i},{i},{_edge(E)[i]}" for i, e in enumerate(E)), encoding="utf-8")
     s = load_spectra(p)
     assert [x.signal for x in s] == ["fluo_sum_norm", "fluo_sum_raw", "TEY_norm", "TEY_raw"] and s[0].label == "1 alpha"

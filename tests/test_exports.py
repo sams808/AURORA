@@ -153,7 +153,7 @@ def test_importing_broken_zones_changes_nothing(qapp, tmp_path, monkeypatch, fak
     win.home.set_project(Project.discover(fake_project))
     ses = win.session
     z = ses.new_zone("kept")
-    before = [zz.label for zz in ses.zones.holders["N5"].zones]
+    before = [zz.label for zz in ses.zones.holders["holderA"].zones]
     bad = tmp_path / "zones_all.json"
     bad.write_text("{ not json", encoding="utf-8")
     shown = []
@@ -161,7 +161,7 @@ def test_importing_broken_zones_changes_nothing(qapp, tmp_path, monkeypatch, fak
     monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(bad), "JSON (*.json)")))
     win.survey._import()
     assert len(shown) == 1 and "zones_all.json" in shown[0] and "unchanged" in shown[0]
-    assert [zz.label for zz in ses.zones.holders["N5"].zones] == before and z.label == "kept"
+    assert [zz.label for zz in ses.zones.holders["holderA"].zones] == before and z.label == "kept"
     ses._save_timer.stop()
     win.close()
 

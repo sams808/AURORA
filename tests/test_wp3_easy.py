@@ -41,7 +41,7 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
     assert 0 < len(ws) <= 18, [type(w).__name__ for w in ws]
     titles = rd.step_titles()
     assert [t[:3] for t in titles] == ["1 ·", "2 ·", "3 ·", "4 ·"], titles
-    assert titles[0] == "1 · Scans of holder N5" and titles[1] == "2 · XRF window"
+    assert titles[0] == "1 · Scans of holder holderA" and titles[1] == "2 · XRF window"
     assert titles[2] == "3 · Region" and titles[3] == "4 · Reduce"
     # step 3: navigate / rectangle / lasso, Clear, New sample, Delete, the sample label
     shown = {t for t, b in rd.tool_buttons.items() if b.isVisible()}

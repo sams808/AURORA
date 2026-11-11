@@ -39,6 +39,10 @@ CLAUDE.md
 
 # The real-data folders of this machine for the tests (tests/local_paths.example.json is the template)
 tests/local_paths.json
+# The facts of one real beamtime (tests/real_expectations.example.json is the template) and the blank deny-list:
+# kept with their owner, never published
+aurora_expectations.json
+blank_denylist.txt
 
 # OS / editor
 .DS_Store

@@ -22,12 +22,12 @@ def bbox(proj: Project, name: str) -> tuple[str, tuple[float, float, float, floa
 
 
 def two_holder_zones(proj: Project) -> ZonesFile:
-    """make_fake_zones on N5 plus one zone '1 alpha' (group Minerals) over the complete stack of N6."""
+    """make_fake_zones on holderA plus one zone '1 alpha' (group Group 1) over the complete stack of holderB."""
     zf = testdata.make_fake_zones(proj)
     sid, (x0, x1, y0, y1) = bbox(proj, testdata.STACK2)
-    z = Zone(id=1, label="1 alpha", group="Minerals", rects=[[x0, x1, y0, y1]])
+    z = Zone(id=1, label="1 alpha", group="Group 1", rects=[[x0, x1, y0, y1]])
     z.settings[sid] = ScanSettings(stack=testdata.STACK2, line="total XRF", n=12)
-    zf.holders["N6"] = HolderZones(holder="N6", day=testdata.DAY, survey=testdata.SURVEY2, zones=[z])
+    zf.holders["holderB"] = HolderZones(holder="holderB", day=testdata.DAY, survey=testdata.SURVEY2, zones=[z])
     return zf
 
 

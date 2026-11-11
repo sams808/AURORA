@@ -116,7 +116,7 @@ def drag(map_view, path) -> None:
         vb.mouseDragEvent(FakeDrag(vb, p0, p, start=i == 0, finish=i == len(path) - 1))
 
 
-def add_stack(project_root: Path, folder: str, base: str, dx: float = 0.0, created: str = "Thu Nov  5 09:35:00 2026",
+def add_stack(project_root: Path, folder: str, base: str, dx: float = 0.0, created: str = "Fri Mar 14 09:35:00 2025",
               seed: int = 11) -> Path:
     """One more complete stack in raw/<day> of a fake beamtime (the grid shifted by dx mm)."""
     from aurora.core import testdata

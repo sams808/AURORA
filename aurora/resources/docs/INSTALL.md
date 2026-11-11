@@ -85,9 +85,9 @@ and the quarantine workaround above is exercised. They have not been run on a ph
 ```
 aurora-cli.exe --version
 aurora-cli.exe --selftest --out selftest.json        every core path and perspective on a synthetic beamtime
-aurora-cli.exe project "D:\beamtimes\my_beamtime"   list days, holders and scans
-aurora-cli.exe report "D:\beamtimes\my_beamtime"    build the report from the saved session
-aurora-cli.exe report "D:\beamtimes\my_beamtime" --holders N5 --preset draft --author "A. Name"
+aurora-cli.exe project "D:\beamtimes\my_beamtime"    list days, holders and scans
+aurora-cli.exe report "D:\beamtimes\my_beamtime"     build the report from the saved session
+aurora-cli.exe report "D:\beamtimes\my_beamtime" --holders holderA --preset draft --author "A. Name"
 /Applications/AURORA.app/Contents/MacOS/AURORA --selftest --out ~/Desktop/selftest.json
 ```
 
@@ -211,7 +211,9 @@ AURORA_REAL_PROJECT=<beamtime folder> python -m pytest tests/test_real_data.py t
 ```
 
 The real-data tests are read-only and skip when the folder is absent; without the variable they read it from the
-untracked `tests/local_paths.json` (copy `tests/local_paths.example.json`). The test session sets `QT_QPA_PLATFORM=offscreen`
+untracked `tests/local_paths.json` (copy `tests/local_paths.example.json`). On any beamtime they check its structure;
+the checks of one beamtime's own facts (holder and scan names, counts) read them from an `aurora_expectations.json`
+kept with that beamtime (template `tests/real_expectations.example.json`) and skip without it. The test session sets `QT_QPA_PLATFORM=offscreen`
 and `AURORA_SETTINGS_DIR`, and logs into a temporary folder, so that no real settings or logs are touched.
 
 ## 10. Known limits

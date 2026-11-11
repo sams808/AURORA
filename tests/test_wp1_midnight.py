@@ -7,7 +7,7 @@ import pytest
 from aurora.core import testdata
 from aurora.core.model import Project
 
-DAY1, DAY2 = "2026-11-05", "2026-11-06"
+DAY1, DAY2 = "2025-03-14", "2025-03-15"
 LATE_SURVEY = "233000_holderA_survey"
 AFTER_MIDNIGHT = "000500_NaF_f_k_stack"
 DAY2_SURVEY = "010000_holderB_survey"
@@ -15,7 +15,7 @@ DAY2_STACK = "011502_CaF2_f_k_stack"
 
 
 def midnight_project(root, day2_survey: bool = False, day1_survey: bool = True):
-    """raw/DAY1/23:30 survey of N5, raw/DAY2/00:05 complete stack; optionally a DAY2 01:00 survey of N6 and a stack."""
+    """raw/DAY1/23:30 survey of holderA, raw/DAY2/00:05 complete stack; optionally a DAY2 01:00 survey of holderB and a stack."""
     rng = np.random.default_rng(11)
     x, y = testdata.snake_grid()
     d1, d2 = root / "raw" / DAY1, root / "raw" / DAY2
@@ -23,13 +23,13 @@ def midnight_project(root, day2_survey: bool = False, day1_survey: bool = True):
         testdata._write_survey(d1 / LATE_SURVEY, "holderA", "233000", rng)
     else:
         testdata._write_stack(d1 / "230000_alpha_beta_f_k_stack", "alpha_beta_f_k", testdata.ENERGIES,
-                              len(testdata.ENERGIES), x, y, rng, created="Thu Nov  5 23:00:00 2026")
+                              len(testdata.ENERGIES), x, y, rng, created="Fri Mar 14 23:00:00 2025")
     testdata._write_stack(d2 / AFTER_MIDNIGHT, "NaF_f_k", testdata.ENERGIES, len(testdata.ENERGIES), x, y,
-                          rng, created="Fri Nov  6 00:05:00 2026")
+                          rng, created="Sat Mar 15 00:05:00 2025")
     if day2_survey:
         testdata._write_survey(d2 / DAY2_SURVEY, "holderB", "010000", rng)
         testdata._write_stack(d2 / DAY2_STACK, "CaF2_f_k", testdata.ENERGIES, len(testdata.ENERGIES), x, y,
-                              rng, created="Fri Nov  6 01:15:02 2026")
+                              rng, created="Sat Mar 15 01:15:02 2025")
     (root / "processed").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     return root
@@ -47,31 +47,31 @@ def test_a_stack_after_midnight_joins_the_last_holder_of_the_day_before(qapp, tm
     proj = Project.discover(midnight_project(tmp_path / "bt"))
     assert [d.date for d in proj.days] == [DAY1, DAY2]
     hs = [h for d in proj.days for h in d.holders]
-    assert [h.name for h in hs] == ["N5"] and hs[0].day == DAY1
+    assert [h.name for h in hs] == ["holderA"] and hs[0].day == DAY1
     n5 = hs[0]
     assert [s.name for s in n5.stacks] == [AFTER_MIDNIGHT] and [s.name for s in n5.scans] == [LATE_SURVEY, AFTER_MIDNIGHT]
     st = proj.find(AFTER_MIDNIGHT)
-    assert st.day == DAY2 and st.holder == "N5" and st.continues == DAY1
+    assert st.day == DAY2 and st.holder == "holderA" and st.continues == DAY1
     assert [s.name for s in proj.days[1].continued] == [AFTER_MIDNIGHT] and proj.days[1].holders == []
     assert [s.name for s in proj.scans].count(AFTER_MIDNIGHT) == 1          # listed once, under its holder
     ses = Session()
     ses.set_project(proj)
-    assert list(ses.holder_keys) == ["N5"] and "unknown" not in ses.holder_keys
+    assert list(ses.holder_keys) == ["holderA"] and "unknown" not in ses.holder_keys
     sid = ses.stack_id(st)
-    assert sid == f"{DAY2}_{AFTER_MIDNIGHT}" and [ses.stack_id(s) for s in ses.stacks_of("N5")] == [sid]
-    assert ses.holder_of_stack(sid) == "N5" and ses.stack(sid).n_energies == len(testdata.ENERGIES)
+    assert sid == f"{DAY2}_{AFTER_MIDNIGHT}" and [ses.stack_id(s) for s in ses.stacks_of("holderA")] == [sid]
+    assert ses.holder_of_stack(sid) == "holderA" and ses.stack(sid).n_energies == len(testdata.ENERGIES)
 
 
 def test_a_survey_of_the_next_day_still_starts_a_new_holder(qapp, tmp_path):
     from aurora.app.session import Session
     proj = Project.discover(midnight_project(tmp_path / "bt", day2_survey=True))
     by_day = {d.date: [h.name for h in d.holders] for d in proj.days}
-    assert by_day == {DAY1: ["N5"], DAY2: ["N6"]}
-    assert proj.find(AFTER_MIDNIGHT).holder == "N5" and proj.find(DAY2_STACK).holder == "N6"
+    assert by_day == {DAY1: ["holderA"], DAY2: ["holderB"]}
+    assert proj.find(AFTER_MIDNIGHT).holder == "holderA" and proj.find(DAY2_STACK).holder == "holderB"
     assert not proj.find(DAY2_STACK).continues
     ses = Session()
     ses.set_project(proj)
-    assert list(ses.holder_keys) == ["N5", "N6"] and ses.holder_day("N6") == DAY2
+    assert list(ses.holder_keys) == ["holderA", "holderB"] and ses.holder_day("holderB") == DAY2
 
 
 def test_unknown_only_when_no_survey_came_before(qapp, tmp_path):
@@ -91,10 +91,10 @@ def test_a_retaken_survey_replaces_the_earlier_one_on_the_same_day_only(qapp, tm
     testdata._write_survey(root / "raw" / DAY2 / "000100_holderA_survey", "holderA", "000100", rng)     # next day
     proj = Project.discover(root)
     d1, d2 = proj.days
-    assert [h.name for h in d1.holders] == ["N5"] and d1.holders[0].survey.name == "233500_holderA_survey"
+    assert [h.name for h in d1.holders] == ["holderA"] and d1.holders[0].survey.name == "233500_holderA_survey"
     assert [s.name for s in d1.holders[0].superseded_surveys] == [LATE_SURVEY]
     # a new day's survey starts its own holder (the 00:05 stack then belongs to it, not to the one before)
-    assert [h.name for h in d2.holders] == ["N5"] and [s.name for s in d2.holders[0].stacks] == [AFTER_MIDNIGHT]
+    assert [h.name for h in d2.holders] == ["holderA"] and [s.name for s in d2.holders[0].stacks] == [AFTER_MIDNIGHT]
 
 
 def test_home_marks_the_stack_of_the_next_day(qapp, tmp_path):
@@ -105,14 +105,14 @@ def test_home_marks_the_stack_of_the_next_day(qapp, tmp_path):
     day1, day2 = home.tree.topLevelItem(0), home.tree.topLevelItem(1)
     assert day1.text(0) == DAY1 and day2.text(0) == DAY2
     holder = day1.child(0)
-    assert holder.text(0) == "holder N5"
+    assert holder.text(0) == "holder holderA"
     texts = {holder.child(i).text(0): " ".join(holder.child(i).text(c) for c in range(8))
              for i in range(holder.childCount())}
     assert "(next day)" in texts[AFTER_MIDNIGHT] and "(next day)" not in texts[LATE_SURVEY]
-    assert "continues holder N5" in day2.text(4) and day2.childCount() == 0
+    assert "continues holder holderA" in day2.text(4) and day2.childCount() == 0
     home.tree.setCurrentItem(next(holder.child(i) for i in range(holder.childCount())
                                   if holder.child(i).text(0) == AFTER_MIDNIGHT))
-    assert "continues holder N5" in home.details.toPlainText()
+    assert "continues holder holderA" in home.details.toPlainText()
     home.shutdown()
     home.deleteLater()
     qapp.processEvents()

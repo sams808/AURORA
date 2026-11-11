@@ -96,7 +96,7 @@ class Crumb(QWidget):
         return f" {SEP} ".join(parts) if parts else "no project"
 
     def entry(self, key: str) -> str:
-        """'N5 · 2026-11-05 · 1 stack · 2 zones'."""
+        """'holderA · 2025-03-14 · 1 stack · 2 zones'."""
         day, h = self.session.holder_keys[key]
         hz = self.session.zones.holders.get(key)
         n_z = len(hz.zones) if hz else 0
@@ -548,19 +548,18 @@ class MainWindow(QMainWindow):
 
     def open_demo(self) -> None:
         """Create (once) and open the synthetic demo beamtime in the user's data folder. It is written in a job with
-        the Home progress strip (about a second the first time), then Home opens it."""
+        the Home progress strip (about a second the first time), then Home opens it. A demo written by an earlier
+        version (other names, a stack that stops before the edge) is left as it is: the current one goes next to it."""
         from platformdirs import user_data_dir
-        root = Path(user_data_dir(APP_NAME, appauthor=False)) / "demo_beamtime"
+        from aurora.core.testdata import demo_folder, is_current_demo
+        root = demo_folder(Path(user_data_dir(APP_NAME, appauthor=False)))
 
         def write(cb) -> Path | None:
             from aurora.cli import cmd_demo
             cb(0, 1, "writing the demo beamtime …")
-            if not (root / "raw").is_dir():
+            if not is_current_demo(root):
                 if cmd_demo(root):                          # the folder holds something else: never written into
                     return None
-            elif not (root / "references").is_dir():      # a demo written by an earlier version: add its spectra
-                from aurora.core.testdata import write_demo_extras
-                write_demo_extras(root)
             return root
 
         def written(path: Path | None) -> None:

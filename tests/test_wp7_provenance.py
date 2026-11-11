@@ -16,7 +16,7 @@ from aurora.core.zones import members, zone_traces
 
 
 def test_header_round_trip():
-    meta = {"zone": "13 alpha_beta (holder N5, zone id 13, group Minerals)", "plain": "a: b, c", "number_text": "13",
+    meta = {"zone": "13 alpha_beta (holder holderA, zone id 13, group Group 1)", "plain": "a: b, c", "number_text": "13",
             "bool_text": "true", "null_text": "null", "list_text": "[1, 2]", "quoted": '"x"', "empty": "",
             "spaced": "  padded ", "multi": "line one\nline two", "int": 6, "float": 0.1, "nan": float("nan"),
             "none": None, "bool": False, "list": [680.0, 692.5], "dict": {"sdd1": [60, 74]},
@@ -32,7 +32,7 @@ def test_header_round_trip():
             assert math.isnan(back[k])
         else:
             assert back[k] == v and type(back[k]) is type(v), k
-    assert "# zone: 13 alpha_beta (holder N5, zone id 13, group Minerals)" in lines          # human lines stay plain
+    assert "# zone: 13 alpha_beta (holder holderA, zone id 13, group Group 1)" in lines          # human lines stay plain
     with pytest.raises(ValueError):
         provenance.header_block({"bad: key": 1})
     assert provenance.sidecar_path(Path("a/b.csv")) == Path("a/b.json")
@@ -51,11 +51,11 @@ def demo(tmp_path):
     sid = f"{scan.day}_{scan.name}"
     sd = StackData.load(proj, scan)
     x0, x1, y0, y1 = sd.bbox
-    z4 = Zone(id=4, label="4 delta on F Ka", group="Minerals", rects=[[x0, x1, y0, (y0 + y1) / 2]],
+    z4 = Zone(id=4, label="4 delta on F Ka", group="Group 1", rects=[[x0, x1, y0, (y0 + y1) / 2]],
               paint=[[float(sd.x[-1]), float(sd.y[-1]), sd.pitch[0], sd.pitch[1]]])
     z4.settings[sid] = ScanSettings(stack=scan.name, line="F Kα", n=0, i0_source="good", fluo_norm="area",
                                     sdd=[True, True, False, True])
-    zf.holders["N5"].zones.append(z4)
+    zf.holders["holderA"].zones.append(z4)
     zf.good_i0[sid] = True
     scan.summary = {"sdd_saturated": ["sdd3"]}
     return proj, zf
@@ -84,7 +84,7 @@ def test_every_csv_carries_its_provenance_and_reproduces(demo, tmp_path):
     proj, zf = demo
     res = ReportBuilder(proj, zf, tmp_path / "reports", png_dpi=40, page_png_dpi=0).build()
     assert len(res.csvs) == 3
-    zones = {z.id: z for z in zf.holders["N5"].zones}
+    zones = {z.id: z for z in zf.holders["holderA"].zones}
     for csv in res.csvs:
         text = csv.read_text(encoding="utf-8")
         assert text.startswith("# AURORA ") and text.splitlines()[0] == provenance.first_line()
@@ -103,7 +103,7 @@ def test_every_csv_carries_its_provenance_and_reproduces(demo, tmp_path):
         else:
             assert roi == {d: [5, 200] for d in ("sdd1", "sdd2", "sdd3", "sdd4")}
         assert set(h["spikes_eV"]) >= {"i0", "sdd1", "tey"} or not st.despike
-        assert all(e in testdata.DEMO_STACK_ENERGIES for v in h["spikes_eV"].values() for e in v)
+        assert all(e in testdata.EDGE_ENERGIES for v in h["spikes_eV"].values() for e in v)     # the demo's grid
         # the numbers, recomputed from the header alone
         pix, t = _recompute(proj, h)
         assert pix.size == h["members"]
@@ -144,15 +144,15 @@ def test_verify_passes_unchanged_and_names_the_entry_that_changed(demo, tmp_path
     v = ReportBuilder(proj, zf, tmp_path / "reports").verify(res.manifest)
     assert v.ok and bool(v) and v.checked == 3 and not v.differences and "reproduce" in v.text()
     assert ReportBuilder(proj, zf, tmp_path).verify(res.folder).ok                    # the folder works too
-    z1 = zf.holders["N5"].zones[0]
+    z1 = zf.holders["holderA"].zones[0]
     next(iter(z1.settings.values())).fluo_norm = "max"
     v = ReportBuilder(proj, zf, tmp_path / "reports").verify(res.manifest)
     assert not v.ok and len(v.differences) == 1
-    assert v.differences[0].startswith("N5 · '1 alpha' (zone 1) · 09:27: the CSV differs") and "fluo_norm" in v.differences[0]
+    assert v.differences[0].startswith("holderA · '1 alpha' (zone 1) · 09:27: the CSV differs") and "fluo_norm" in v.differences[0]
     assert "1 alpha" in v.text()
     # a zone removed and one included again are named as well
-    zf.holders["N5"].zones.pop(1)
-    next(iter(zf.holders["N5"].zones[1].settings.values())).include = True
+    zf.holders["holderA"].zones.pop(1)
+    next(iter(zf.holders["holderA"].zones[1].settings.values())).include = True
     v = ReportBuilder(proj, zf, tmp_path / "reports").verify(res.manifest)
     assert any("'2 beta'" in d and "no longer in the report" in d for d in v.differences)
     assert any("'3 gamma'" in d and "not in that build" in d for d in v.differences)
@@ -169,13 +169,13 @@ def test_notes_err_and_masked_energies_reach_the_csv(demo, tmp_path, monkeypatch
         t = real(sd, pix, st, good)
         t.notes = ["1 energy with I0 below 0.2 x its median left out (NaN)"]
         t.err = {"fluo_sum": np.full(len(t.E), 0.01)}
-        t.masked = {"fluo_sum": np.arange(len(t.E)) == 1}
+        t.masked = {"fluo_sum": np.arange(len(t.E)) == 1}                  # the second energy
         return t
     monkeypatch.setattr(core_report, "zone_traces", with_extras)
     res = ReportBuilder(proj, zf, tmp_path / "reports", png_dpi=40, page_png_dpi=0).build()
     h = provenance.read_header(res.csvs[0])
     assert "1 energy with I0 below 0.2 x its median left out (NaN)" in h["notes"]
-    assert h["masked_energies_eV"] == {"fluo_sum": [testdata.DEMO_STACK_ENERGIES[1]]}
+    assert h["masked_energies_eV"] == {"fluo_sum": [testdata.EDGE_ENERGIES[1]]}
     assert h["columns"].endswith("fluo_sum_err")
     from aurora.core.compare import read_csv_table
     _h, cols, data = read_csv_table(res.csvs[0])
@@ -190,20 +190,20 @@ def test_cover_and_csvs_name_the_calibration_and_groups_follow_the_sheet(tmp_pat
     gains = {"sdd1": (10.058, 3.9), "sdd2": (9.398, -3.6), "sdd3": (9.852, -1.3), "sdd4": (10.090, 7.9)}
     (root / "config" / "sdd_calibration.json").write_text(json.dumps(
         {**{d: {"gain": g, "offset": o} for d, (g, o) in gains.items()},
-         "_metadata": {"last_updated": "2026-11-04 14:06:43"}}), encoding="utf-8")
+         "_metadata": {"last_updated": "2025-03-13 14:06:43"}}), encoding="utf-8")
     proj = Project.discover(root)
     zf = testdata.make_fake_zones(proj)
-    zf.holders["N5"].zones[1].group = "Zeta glass"                      # '1 alpha' stays in Minerals
-    sheet = [SheetRow(plate="N5", group=g, sample_id=s, composition="", f_k_edge="", other_edges="", notes="")
-             for g, s in (("Zeta glass", "2 beta"), ("Minerals", "1 alpha"))]
+    zf.holders["holderA"].zones[1].group = "Zeta glass"                      # '1 alpha' stays in Group 1
+    sheet = [SheetRow(plate="holderA", group=g, sample_id=s, composition="", f_k_edge="", other_edges="", notes="")
+             for g, s in (("Zeta glass", "2 beta"), ("Group 1", "1 alpha"))]
     b = ReportBuilder(proj, zf, tmp_path / "reports", sheet_rows=sheet, png_dpi=40, page_png_dpi=0)
     res = b.build()
     cover = " ".join(ln.strip() for ln in b.cover_lines)
-    assert ("SDD calibration: config/sdd_calibration.json (updated 2026-11-04 14:06:43): sdd1 10.058 eV/ch +3.9; "
+    assert ("SDD calibration: config/sdd_calibration.json (updated 2025-03-13 14:06:43): sdd1 10.058 eV/ch +3.9; "
             "sdd2 9.398 eV/ch -3.6; sdd3 9.852 eV/ch -1.3; sdd4 10.090 eV/ch +7.9") in cover
     assert all(len(ln) <= 110 for ln in b.cover_lines)
     start = b.cover_lines.index("Contents") + 1
-    assert [ln.split(":")[0].strip() for ln in b.cover_lines[start:start + 2]] == ["Zeta glass", "Minerals"]
+    assert [ln.split(":")[0].strip() for ln in b.cover_lines[start:start + 2]] == ["Zeta glass", "Group 1"]
     for csv in res.csvs:
         cal = provenance.read_header(csv)["calibration"]
         assert cal.startswith("SDD calibration: config/sdd_calibration.json") and "sdd4 10.090 eV/ch +7.9" in cal

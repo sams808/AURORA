@@ -53,7 +53,7 @@ def test_phase5_ui(qapp, fake_project, tmp_path, monkeypatch):
     assert n_prop >= 0 and "propose" in rd.status_label.text()
     # stitching two copies of the stack (second shifted) through the dialog's bake path
     import copy
-    b = copy.deepcopy(ses.stack_loaded(sid)); b.x = b.x + 3 * b.pitch[0]; b.name = "tile_b"; b.id = "2026-11-05_tile_b"
+    b = copy.deepcopy(ses.stack_loaded(sid)); b.x = b.x + 3 * b.pitch[0]; b.name = "tile_b"; b.id = "2025-03-14_tile_b"
     ses._stacks[b.id] = b
     dlg = StitchDialog({sid: ses.stack_loaded(sid), b.id: b})
     for i in range(dlg.list.count()):

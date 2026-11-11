@@ -96,7 +96,7 @@ class RulesDialog(QDialog):
         self.scope = QComboBox()
         for k, text in SCOPES:
             self.scope.addItem(text, k)
-        self.scope_text = QLineEdit(); self.scope_text.setPlaceholderText("N5, N6  or  Minerals, Simple Glass")
+        self.scope_text = QLineEdit(); self.scope_text.setPlaceholderText("holderA, holderB  or  Group 1, Group 2")
         sr = QHBoxLayout(); sr.addWidget(self.scope); sr.addWidget(self.scope_text, 1)
         form.addRow(labelled("applies to", self.scope, "reduce.rules.scope"), sr)
         explain(self.scope_text, "reduce.rules.scope_text")

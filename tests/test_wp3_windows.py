@@ -129,8 +129,8 @@ def test_the_cache_root_of_every_stack_source():
     whose windows differ from config/roi_bins.json (I49)."""
     from types import SimpleNamespace
     root = Path("C:/beam time") if os.name == "nt" else Path("/beam time")
-    rep = root / "processed" / "2026-11-05" / testdata.STACK / "_reduced_cache.npz"
-    own = root / ".aurora" / "cache" / "2026-11-05" / testdata.STACK / "_reduced_cache.npz"
+    rep = root / "processed" / "2025-03-14" / testdata.STACK / "_reduced_cache.npz"
+    own = root / ".aurora" / "cache" / "2025-03-14" / testdata.STACK / "_reduced_cache.npz"
     for text in (f"sgm_report cache {rep}", f"sgm_report cache with other windows {rep}", f"aurora cache {own}"):
         assert xw._cache_root(SimpleNamespace(source=text)) == root, text
     assert xw._cache_root(SimpleNamespace(source="reduced from raw")) is None
@@ -141,12 +141,12 @@ def test_roi_round_trips_through_the_session_file(tmp_path):
     zf = ZonesFile(project="T")
     z = Zone(id=1, label="a", rects=[[0, 1, 0, 1]], polys=[[[0, 0], [1, 0], [0, 1]]])
     z.settings["d_s"] = ScanSettings(roi={"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]})
-    zf.holders["N5"] = HolderZones(holder="N5", day="d", survey="s", zones=[z])
+    zf.holders["holderA"] = HolderZones(holder="holderA", day="d", survey="s", zones=[z])
     p = tmp_path / "session.json"
     zf.save(p)
-    back = ZonesFile.load(p).holders["N5"].zones[0]
+    back = ZonesFile.load(p).holders["holderA"].zones[0]
     assert back.settings["d_s"].roi == z.settings["d_s"].roi and back.polys == z.polys
-    assert json.loads(p.read_text(encoding="utf-8"))["holders"]["N5"]["zones"][0]["st"]["d_s"]["roi"]["sdd3"] == [62, 76]
+    assert json.loads(p.read_text(encoding="utf-8"))["holders"]["holderA"]["zones"][0]["st"]["d_s"]["roi"]["sdd3"] == [62, 76]
 
 
 def test_demo_preset_f_ka_reproduces_the_cached_line(tmp_path):
@@ -433,19 +433,19 @@ def test_a_roi_bins_line_the_stack_lacks_is_read_from_the_raw_spectra(qapp, fake
         close(win)
 
 
-def test_real_windows_reproduce_the_sgm_report_bins(real_project):
+def test_real_windows_reproduce_the_sgm_report_bins(real_project, real_expect):
     """Read-only, on the real beamtime: the roi_bins F Kα windows read from the raw spectra give exactly the F Kα line of
     sgm_report's reduced cache (an independent implementation) at every energy the cache kept. Memory only: no root,
     nothing written."""
     from aurora.core.io.safety import is_protected
-    proj = Project.discover(real_project / "raw" / "2026-11-05")
+    proj = Project.discover(real_project / "raw" / real_expect["day"])
     assert is_protected(proj.root)
-    w = xw.bins_windows(proj.roi_bins, "F Kα")
-    scan = proj.find("111037_sampleE_f_k_stack")
+    w = xw.bins_windows(proj.roi_bins, real_expect["line"])
+    scan = proj.find(real_expect["window_scan"])
     sd = StackData.load(proj, scan, allow_reduce=False)
     pix = np.arange(sd.n_pix)
     s = xw.window_sums(scan, pix, w, n_pix=sd.n_pix)
-    ref = sd.sum_over(pix)["det"]["F Kα"]
+    ref = sd.sum_over(pix)["det"][real_expect["line"]]
     ok = np.isfinite(ref).all(axis=1)
     assert ok.sum() >= sd.n_energies - 1
     np.testing.assert_array_equal(s[ok], ref[ok])

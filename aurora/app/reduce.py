@@ -593,7 +593,7 @@ class ReducePerspective(QWidget):
         QTimer.singleShot(0, self.fit_cards)
 
     def step_titles(self) -> list[str]:
-        """The titles of the numbered step cards as shown ('1 · Scans of holder N5', ...), Easy mode."""
+        """The titles of the numbered step cards as shown ('1 · Scans of holder holderA', ...), Easy mode."""
         out = []
         for lab, card in zip(self._badges, (self.scans_card, self.window_card, self.map_card, self.zone_card)):
             out.append(f"{lab.text()} {card.title.text()}" if not lab.isHidden() else card.title.text())
