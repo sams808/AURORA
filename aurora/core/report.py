@@ -1335,7 +1335,7 @@ class ReportBuilder:
                 ax.set_title(f"holder {es[0].holder} · {es[0].day}" + (f" · survey {surv.name}" if surv else ""), fontsize=8)
                 if surv is not None:
                     try:
-                        sv = SurveyData.load(surv, self.project.roi_bins)
+                        sv = SurveyData.load(surv, self.project.roi_bins, keep_spectra=False)
                         ch = next((l for l in sv.lines if l == es[0].stack.main), "total")
                         g = sv.grid(sv.values(ch, per_i0=True, log10=True))
                         dx, dy = g.dx, g.dy
@@ -1482,7 +1482,7 @@ class ReportBuilder:
             "spikes_eV": spikes, "skipped_energies_eV": skipped, "masked_energies_eV": masked,
             "notes": list(t.notes) + [n for n in sd.notes if n not in t.notes],
             "zone_geometry": {"rects": e.zone.rects, "erects": e.zone.erects, "paint": e.zone.paint,
-                              "erase": e.zone.erase, "polys": e.zone.polys},
+                              "erase": e.zone.erase, "polys": e.zone.polys, "epolys": e.zone.epolys},
             "members": int(e.members.size),
             "flags": list(e.flags),
             "calibration": cal.describe(self.project.root) if cal else "none",

@@ -26,7 +26,7 @@ def demo(qapp, tmp_path):
 
 
 TODAY = ["load_all_btn", "scan_list", "new_zone_btn", "del_zone_btn", "propose_btn", "stitch_btn", "zone_list",
-         "brush_n", "target_new", "map_line", "map_sdd", "map_mode", "map_energy", "map_i0", "map_log", "map",
+         "target_new", "map_line", "map_sdd", "map_mode", "map_energy", "map_i0", "map_log", "map",
          "z_label", "z_group", "z_comment", "send_btn", "cards_area"]
 
 
@@ -38,16 +38,21 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
     pump(qapp, 5)
     rd = win.reduce
     ws = interactive(win.pages["reduce"])
-    assert 0 < len(ws) <= 18, [type(w).__name__ for w in ws]
+    # 18 before the zone tool bar; it adds Draw, Erase, Brush and Undo to Move, Rectangle, Lasso and Clear (owner's
+    # request 3: an easy way to draw and erase, in Easy too)
+    assert 0 < len(ws) <= 22, [type(w).__name__ for w in ws]
     titles = rd.step_titles()
     assert [t[:3] for t in titles] == ["1 ·", "2 ·", "3 ·", "4 ·"], titles
     assert titles[0] == "1 · Scans of holder holderA" and titles[1] == "2 · XRF window"
     assert titles[2] == "3 · Region" and titles[3] == "4 · Reduce"
-    # step 3: navigate / rectangle / lasso, Clear, New sample, Delete, the sample label
-    shown = {t for t, b in rd.tool_buttons.items() if b.isVisible()}
-    assert shown == {"navigate", "rect+", "lasso+"}
-    for w in (rd.clear_btn, rd.new_zone_btn, rd.del_zone_btn, rd.z_label, rd.region_caption):
+    # step 3: the zone tool bar (Draw / Erase, Move, Rectangle, Brush, Lasso, Undo, Clear), New sample, Delete, the label
+    bar = rd.toolbar
+    shown = {s for s, b in bar.shape_buttons.items() if b.isVisible()}
+    assert shown == {"navigate", "rect", "brush", "lasso"} and not bar.new_each.isVisible()
+    for w in (bar.draw_btn, bar.erase_btn, bar.undo_btn, rd.clear_btn, rd.new_zone_btn, rd.del_zone_btn, rd.z_label,
+              rd.region_caption):
         assert w.isVisible()
+    assert not rd.brush_n.isVisible()                       # the brush size shows with the brush only
     assert rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 points of ")
     # step 4: the read-only line and the primary 'Add to Check'; the preview keeps one toggle
     assert rd.step4_line.isVisible() and rd.add_check_btn.isVisible() and rd.add_check_btn.objectName() == "primary"
@@ -69,7 +74,11 @@ def test_advanced_shows_every_control_of_the_old_layout(qapp, demo):
     pump(qapp, 5)
     rd = win.reduce
     hidden = [n for n in TODAY if not getattr(rd, n).isVisible()]
-    hidden += [t for t, b in rd.tool_buttons.items() if not b.isVisible()]
+    hidden += [s for s, b in rd.toolbar.shape_buttons.items() if not b.isVisible()]
+    rd.set_tool("brush+")
+    pump(qapp)
+    hidden += [] if rd.brush_n.isVisible() else ["brush_n"]
+    rd.set_tool("rect+")
     hidden += [n for n in ("show_sdd", "show_sum", "show_tey", "show_i0", "show_spikes", "all_scans")
                if not getattr(rd.preview, n).isVisible()]
     assert not hidden, hidden

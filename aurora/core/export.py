@@ -79,7 +79,7 @@ def zone_pixels(zone: Zone, stack) -> np.ndarray:
 def roi_polygon(zone: Zone, pitch: tuple[float, float] | None = None) -> list[list[float]] | None:
     """The zone as John's _polygon_roi.json: the vertices of its one polygon, or the corners of its one rectangle
     widened by AURORA's 0.45-pitch tolerance (so his strict test takes the same pixels). None for any other zone."""
-    simple = not (zone.erects or zone.paint or zone.erase)
+    simple = not (zone.erects or zone.paint or zone.erase or zone.epolys)
     if simple and len(zone.polys) == 1 and not zone.rects:
         return [[float(a), float(b)] for a, b in zone.polys[0]]
     if simple and len(zone.rects) == 1 and not zone.polys:

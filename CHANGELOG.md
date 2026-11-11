@@ -88,8 +88,8 @@ installs on Windows and macOS.
   an AURORA that crashed is taken over.
 - Zones attach to every complete stack of their holder from the stage coordinates, without Load all: a second stack
   over the same samples gets its settings at once and no longer drops out of the report.
-- Undo and redo for every zone, settings and good-I0 edit (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z), naming the edit. A
-  brush stroke, one Propose zones, one import, one "Untick all" over spectra of several holders and one save of the
+- Undo and redo for every zone, settings and good-I0 edit (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z), naming the edit. One
+  stroke on a map, one Propose zones, one import, one "Untick all" over spectra of several holders and one save of the
   settings rules each undo in one step; Edit > History… in Advanced mode. Delete no longer asks for a confirmation.
 - Zones are never lost: atomic saves, `session.json.bak`, timestamped backups in `.aurora/backups` (at most one per
   10 min, also after a move to a time zone further west, and one before every import, proposal, rule and restore),
@@ -112,6 +112,53 @@ installs on Windows and macOS.
   AURORA opens read-only instead of being overwritten. Export zones… still writes the zone tool's version 1. A
   `session.json` or `zones_all.json` saved with a UTF-8 byte-order mark (Notepad, PowerShell 5) opens normally.
 
+### Drawing and erasing zones, with a live preview
+- One tool bar on the Survey's plate map and on Reduce's stack map, in Easy and Advanced: **Draw** / **Erase**,
+  **Move**, **Rectangle**, **Brush** (with its size, in Easy too), **Lasso**, **Polygon** (Advanced), **Undo**,
+  **Clear**, and in Advanced **every stroke starts a new zone**. The buttons no longer carry John Bussey's tool names
+  (rect+, rect-, brush+, brush-, lasso+, polygon+); the manual names them once.
+- Every drag or click on a zone map is one stroke, written in one edit and undone in one step: Ctrl+Z undoes a whole
+  brush stroke, and two quick strokes are two steps. The right button, or Shift held when the drag starts, uses the
+  other mode with the same shape; a right click still opens the zone menu. Esc or Ctrl+Z during a drag cancels it, and
+  so does another scan or holder picked meanwhile. A drag may start in the margin beside the map, on its axis: it
+  starts where the button went down (it started a whole axis width to the right, so a rectangle round the scan missed
+  its first column). The tool bar's Undo names the step it undoes in its tooltip.
+- While a stroke moves, the map highlights the points it adds (in the zone's colour) or removes (crossed), the brush
+  shows its square, and a line on the map says what the release will do (*adds 12 points to zone 3 'NaF'*, *new zone
+  4: 12 points*, *erases 5 points from zone 3*); between strokes it says what a drag does, while the pointer is over
+  the map.
+- A stroke over no measured point, or an erase that removes nothing, is not written, and the map says why; no stroke
+  creates an empty zone, and a click outside the scan no longer adds an empty point rectangle. A brush away from
+  every point paints nothing (it painted the nearest edge pixel from any distance), and a fast brush stroke leaves no
+  gap.
+- The zone a stroke goes to: an erase goes to the selected zone, or to the zone under it; a draw stroke that neither
+  overlaps nor touches the selected zone starts a new zone ("draw one sample, then the next"); Ctrl held at the
+  release adds it to the selected zone.
+- Erasing with the lasso or the polygon keeps the outline exactly (zone key `epolys`, drawn dashed; the HTML zone tool
+  gets erase squares; an AURORA older than 0.4 keeps the key but does not subtract it). Drawing over an erased area
+  takes it back on the scan it is drawn on: the newest stroke wins.
+- Survey: zones are drawn and erased on the plate map. The page opens in Move: a click inside a zone selects it, a
+  click on a stack outside the zones opens it in Reduce, and a double-click inside a zone opens the stack under it
+  with the zone selected. The zone menu offers *Open … in Reduce* for every stack the zone covers, the hover line
+  names the zone, and N, Delete, Alt+Up / Alt+Down and F work there too. The zones table shows two zones at the
+  smallest window and selects the zone a stroke creates.
+- Survey: a **Zone preview** shows the zone's XRF emission from its survey points (counts per point; the window of the
+  map's channel shaded and named, the other lines ticked; the curves named under the plot) and its XAS on a stack it
+  covers, live while drawing; a stack not loaded is read once the stroke is written, with Cancel. Its empty states
+  say what to do.
+- Reduce: the preview follows the stroke while it is drawn (at most every 0.15 s; on a scan where that is slow,
+  without the de-spike, then at the release), and the region caption counts the change (*(+12 while drawing)*). An
+  empty preview says why: no scan, no zone, an empty zone, a zone outside this scan (naming the scans it covers). The
+  display toggles are one **Show ▾** menu and the readout is the line under the plots; at the smallest window the
+  page scrolls rather than squeezing the three panels.
+- Step 2: **spectrum of** offers *survey, inside the zone* (John Bussey's "XRF from survey, only inside region").
+- Keys of both maps: **D** / **E** / **X** set or switch Draw and Erase; **R**, **B**, **L** and **P** keep the mode,
+  so **E** then **R** erases with a rectangle (**E** alone was the former rect-); **B**, **Shift+B** and **+** / **−**
+  work in Easy mode too.
+- Faster: the coherent de-spike is vectorised (the same values, bit for bit); zone traces are cached and shared by
+  Reduce, Check and the Zone preview; a hidden Check or Survey waits until it is shown; a zone edit on a large holder
+  takes about 0.1 s instead of 2 to 6 s, and the selected zone's pixel outlines are one item.
+
 ### Reduce
 - In Easy mode Reduce follows John Bussey's four steps: 1 · Scan, 2 · XRF window, 3 · Region, 4 · Reduce, with a
   read-only line of the settings used and **Add to Check**. Step 4 states the reduction ("zone mean (John Bussey's
@@ -127,9 +174,10 @@ installs on Windows and macOS.
 - Changing lo / hi or dragging a window in Easy mode (or in Advanced mode with "same range" ticked) moves all four
   windows by as many channels, so each detector keeps its own offsets. Without `roi_bins.json`, step 2 offers John
   Bussey's default window 60:83 for an F K stack and says that the total XRF holds every emission line.
-- Map tools: a click selects a zone (the smallest one wins), Shift+click adds a pixel, stray drags are ignored; new
-  **lasso+** and **polygon+** tools (pixel centres inside, John Bussey's rule); right-click menus on zones and on the
-  map; **Load polygon…** (in Easy mode too) / **Save polygon…** read and write John Bussey's `_polygon_roi.json`.
+- Map clicks: a click selects a zone (the smallest one wins), Shift+click applies the tool to one pixel, stray drags
+  are ignored; the **Lasso** and the **Polygon** take the pixels whose centre is inside (John Bussey's rule);
+  right-click menus on zones and on the map; **Load polygon…** (in Easy mode too) / **Save polygon…** read and write
+  John Bussey's `_polygon_roi.json`.
 - A sample label picked from the list renames the sample at once, and a sample still called "zone N" is named as such
   when sent to Check and when saved. Ctrl+Z / Ctrl+Y in the sample, group and comment boxes reach Edit > Undo / Redo
   when the box has nothing of its own to undo.
@@ -145,8 +193,9 @@ installs on Windows and macOS.
 - Easy mode never hides a setting silently: the chip **advanced settings in use** names what differs from the Easy
   defaults, including a flagged SDD that is still on, with **Reset to Easy defaults**; the de-spike rule of an older
   session is named as such, not as an Advanced-mode setting.
-- Keyboard shortcuts: V, R, E, B, Shift+B, L, P (tools), + / − (brush size), N, Delete, Alt+Up / Alt+Down (samples),
-  [ / ] (scans) and F (fit the view), listed in Help > Keyboard shortcuts.
+- Keyboard shortcuts: the zone keys of both maps (see Drawing and erasing zones), N, Delete, Alt+Up / Alt+Down
+  (samples), [ / ] (scans), F (fit the view) and Ctrl+Shift+C / Ctrl+Shift+V (the scan settings), listed in Help >
+  Keyboard shortcuts.
 
 ### Check
 - In Easy mode Check is John Bussey's "Check scans" step: the spectra sent from Reduce, his sanity messages as ok /

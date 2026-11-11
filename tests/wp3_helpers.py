@@ -1,5 +1,6 @@
 """Shared helpers of the WP3 (Reduce) tests: a window on a project with a stack loaded synchronously, fake pyqtgraph
-mouse events for the map, and extra stacks written into a fake beamtime."""
+mouse events for the map, real QTest drags on a map's viewport (qdrag), and extra stacks written into a fake
+beamtime."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,11 +50,15 @@ class FakeClick:
 
     def __init__(self, vb, x: float, y: float, button=Qt.LeftButton, modifiers=Qt.NoModifier, double: bool = False):
         self._pos = vb.mapFromView(QPointF(x, y))
+        self._scene = vb.mapViewToScene(QPointF(x, y))
         self._button, self._mods, self._double = button, modifiers, double
         self.accepted = False
 
     def pos(self):
         return self._pos
+
+    def scenePos(self):
+        return self._scene
 
     def button(self):
         return self._button
@@ -77,16 +82,27 @@ class FakeClick:
 class FakeDrag:
     """A pyqtgraph MouseDragEvent stand-in: from p0 to p (mm), start / move / finish."""
 
-    def __init__(self, vb, p0, p, start=False, finish=False, button=Qt.LeftButton):
+    def __init__(self, vb, p0, p, start=False, finish=False, button=Qt.LeftButton, modifiers=Qt.NoModifier):
         self._down = vb.mapFromView(QPointF(*p0))
         self._pos = vb.mapFromView(QPointF(*p))
-        self._start, self._finish, self._button = start, finish, button
+        self._scene_down = vb.mapViewToScene(QPointF(*p0))
+        self._scene = vb.mapViewToScene(QPointF(*p))
+        self._start, self._finish, self._button, self._mods = start, finish, button, modifiers
+
+    def modifiers(self):
+        return self._mods
 
     def pos(self):
         return self._pos
 
     def buttonDownPos(self, _b=None):
         return self._down
+
+    def scenePos(self):
+        return self._scene
+
+    def buttonDownScenePos(self, _b=None):
+        return self._scene_down
 
     def isStart(self) -> bool:
         return self._start
@@ -108,12 +124,54 @@ def click(map_view, x, y, **kw) -> None:
     map_view.vb.mouseClickEvent(FakeClick(map_view.vb, x, y, **kw))
 
 
-def drag(map_view, path) -> None:
+def drag(map_view, path, button=Qt.LeftButton, modifiers=Qt.NoModifier) -> None:
     """A drag along the points of `path` (mm): start, moves, finish."""
     vb = map_view.vb
     p0 = path[0]
     for i, p in enumerate(path):
-        vb.mouseDragEvent(FakeDrag(vb, p0, p, start=i == 0, finish=i == len(path) - 1))
+        vb.mouseDragEvent(FakeDrag(vb, p0, p, start=i == 0, finish=i == len(path) - 1, button=button,
+                                   modifiers=modifiers))
+
+
+def view_to_viewport(map_view, x: float, y: float):
+    """A point of the map in mm, in the pixels of the map's viewport (where QTest sends mouse events)."""
+    return map_view.mapFromScene(map_view.vb.mapViewToScene(QPointF(x, y)))
+
+
+def qdrag(qapp, map_view, pts, button=Qt.LeftButton, modifiers=Qt.NoModifier, release=True, release_modifiers=None,
+          delay: int = 15) -> None:
+    """A real mouse drag on the map's viewport (QTest press, a move to each point, release), along `pts` in mm.
+    `modifiers` are held from the press on (Shift at the start inverts the mode); `release_modifiers` (default: the
+    same) at the release (Ctrl there forces the selected zone). release=False leaves the button down. Each event
+    waits `delay` ms first: pyqtgraph drops mouse moves less than 10 ms apart (its mouseRateLimit), as it does for a
+    real mouse."""
+    from PySide6.QtTest import QTest
+    vp = map_view.viewport()
+    QTest.mousePress(vp, button, modifiers, view_to_viewport(map_view, *pts[0]))
+    qapp.processEvents()
+    for x, y in pts[1:]:
+        QTest.qWait(delay)
+        QTest.mouseEvent(QTest.MouseAction.MouseMove, vp, Qt.NoButton, modifiers, view_to_viewport(map_view, x, y))
+        qapp.processEvents()
+    if release:
+        qrelease(qapp, map_view, pts[-1], button, modifiers if release_modifiers is None else release_modifiers, delay)
+
+
+def qrelease(qapp, map_view, pt, button=Qt.LeftButton, modifiers=Qt.NoModifier, delay: int = 15) -> None:
+    """Release the mouse button of a qdrag(..., release=False) at `pt` (mm)."""
+    from PySide6.QtTest import QTest
+    QTest.qWait(delay)
+    QTest.mouseRelease(map_view.viewport(), button, modifiers, view_to_viewport(map_view, *pt))
+    qapp.processEvents()
+
+
+def qmove(qapp, map_view, pt, modifiers=Qt.NoModifier, delay: int = 15) -> None:
+    """One more mouse move of a drag in progress, to `pt` (mm)."""
+    from PySide6.QtTest import QTest
+    QTest.qWait(delay)
+    QTest.mouseEvent(QTest.MouseAction.MouseMove, map_view.viewport(), Qt.NoButton, modifiers,
+                     view_to_viewport(map_view, *pt))
+    qapp.processEvents()
 
 
 def add_stack(project_root: Path, folder: str, base: str, dx: float = 0.0, created: str = "Fri Mar 14 09:35:00 2025",

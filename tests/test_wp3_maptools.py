@@ -67,11 +67,19 @@ def test_a_click_selects_and_never_adds(qapp, win):
     click(rd.map, cx, cy, modifiers=Qt.ShiftModifier)
     pump(qapp)
     assert len(z2.rects) == 2 and z2.rects[-1][0] == z2.rects[-1][1] and len(z1.rects) == 1
-    # a click outside every zone adds a pixel to the selected zone
+    # a click outside the scan writes nothing (no measured point there) and says why
     ses.select_zone(z1.id)
     x0, x1, y0, y1 = sd.bbox
+    n = ses.undo_stack.count()
     click(rd.map, x1 + 0.6, y1 + 0.6)
-    assert len(z1.rects) == 2
+    assert len(z1.rects) == 1 and ses.undo_stack.count() == n and "outside scan" in rd.status_label.text()
+    # a click on a pixel outside every zone, next to the selected zone, adds that pixel to it
+    with ses.edit("zone 2 keeps its last column"):
+        z2.rects[0][0] = x1 - 0.01
+    taken = set(members(z1, sd.x, sd.y, sd.pitch).tolist()) | set(members(z2, sd.x, sd.y, sd.pitch).tolist())
+    free = next(i for i in range(sd.n_pix) if i not in taken)
+    click(rd.map, float(sd.x[free]), float(sd.y[free]))
+    assert len(z1.rects) == 2 and free in members(z1, sd.x, sd.y, sd.pitch)
     # with rect-, a plain click inside the selected zone erases that pixel
     rd.set_tool("rect-")
     click(rd.map, float(sd.x[0]), float(sd.y[0]))
@@ -293,32 +301,35 @@ def test_reduce_shortcuts(qapp, win):
     rd = win.reduce
     reg = {a.text(): a for a in shortcuts.registered(win) if shortcuts.section_of(a) == "Reduce"}
     keys = {t: a.shortcut().toString() for t, a in reg.items()}
-    assert keys["Navigate tool"] == "V" and keys["Rectangle tool (rect+)"] == "R" and keys["Brush tool (brush+)"] == "B"
-    assert keys["Erase-brush tool (brush-)"] == "Shift+B" and keys["Lasso tool (lasso+)"] == "L"
-    assert keys["Polygon tool (polygon+)"] == "P" and keys["New sample"] == "N" and keys["Delete the sample"] == "Del"
+    assert keys["Move (pan and zoom)"] == "V" and keys["Rectangle"] == "R" and keys["Brush"] == "B"
+    assert keys["Brush in Erase mode"] == "Shift+B" and keys["Lasso"] == "L" and keys["Polygon"] == "P"
+    assert keys["Draw mode"] == "D" and keys["Erase mode"] == "E" and keys["Switch between Draw and Erase"] == "X"
+    assert keys["New sample"] == "N" and keys["Delete the sample"] == "Del"
     assert keys["Previous sample"] == "Alt+Up" and keys["Next scan"] == "]" and keys["Fit the view"] == "F"
     win.activateWindow()
     rd.map.setFocus()
-    QTest.keyClick(win, Qt.Key_L)
-    pump(qapp)
-    assert rd.map.vb.tool == "lasso+" and rd.tool_buttons["lasso+"].isChecked()
-    QTest.keyClick(win, Qt.Key_B)                         # Easy: the brush is an Advanced tool
-    pump(qapp)
-    assert rd.map.vb.tool == "lasso+"
-    mode.set_advanced(True)
-    pump(qapp)
-    QTest.keyClick(win, Qt.Key_B)
-    pump(qapp)
-    assert rd.map.vb.tool == "brush+" and rd.tool_buttons["brush+"].isChecked()
-    QTest.keyClick(win, Qt.Key_B, Qt.ShiftModifier)
-    pump(qapp)
-    assert rd.map.vb.tool == "brush-"
+
+    def key(k, mods=Qt.NoModifier):
+        QTest.keyClick(win, k, mods)
+        pump(qapp)
+        return rd.map.vb.tool
+    assert key(Qt.Key_L) == "lasso+" and rd.toolbar.shape_button("lasso").isChecked()
+    assert key(Qt.Key_B) == "brush+" and rd.brush_n.isVisible()          # the brush is in Easy too
+    assert key(Qt.Key_E) == "brush-" and rd.toolbar.erase_btn.isChecked()  # E: Erase mode, the shape kept
+    assert key(Qt.Key_R) == "rect-"                       # R keeps the mode: E then R is the former rect-
+    assert key(Qt.Key_X) == "rect+" and key(Qt.Key_X) == "rect-"
+    assert key(Qt.Key_D) == "rect+"
+    assert key(Qt.Key_B, Qt.ShiftModifier) == "brush-"
     n = rd.brush_n.value()
     reg["Larger brush"].trigger()
     assert rd.brush_n.value() == n + 1
-    QTest.keyClick(win, Qt.Key_V)
+    reg["Smaller brush"].trigger()
+    assert rd.brush_n.value() == n
+    assert key(Qt.Key_P) == "brush-"                      # Easy: no polygon
+    mode.set_advanced(True)
     pump(qapp)
-    assert rd.map.vb.tool == "navigate"
+    assert key(Qt.Key_P) == "polygon-" and key(Qt.Key_D) == "polygon+"
+    assert key(Qt.Key_V) == "navigate"
     QTest.keyClick(win, Qt.Key_N)
     pump(qapp)
     assert win.session.zone() is not None

@@ -1,5 +1,8 @@
-"""Reduce perspective: the zone tool. Stack map with rectangle / brush / lasso / polygon zone editing, the XRF windows
-of step 2, the zone card, per-scan settings with copy and rules, preview.
+"""Reduce perspective: the zone tool. Stack map with the zone tool bar (Draw / Erase x Move / Rectangle / Brush / Lasso /
+Polygon, zone_tools.ZoneToolBar, the Survey's too), the XRF windows of step 2, the zone card, per-scan settings with
+copy and rules, preview. The preview follows a stroke while it is drawn (preview_draft, throttled by
+zone_tools.PreviewThrottle) and keeps a usable height at the smallest window (the page scrolls rather than squeeze
+it).
 
 Easy mode shows John Bussey's four numbered steps: '1 ·' the scans of the holder, '2 ·' the XRF window, '3 ·' the
 region (navigate / rectangle / lasso, Clear, New sample, Delete, the sample label), '4 ·' a read-only line of the
@@ -13,18 +16,20 @@ import json
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QKeySequence
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QToolButton, QVBoxLayout, QWidget)
+                               QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav, shortcuts
 from aurora.app.help_text import explain, explain_all, labelled
-from aurora.app.mapview import TOOLS, MapView, scale_label
+from aurora.app.mapview import TOOLS, MapView, scale_label, split_tool
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import TOKENS, curve, min_height, on_theme_changed, refill_tones, set_item_tone
+from aurora.app.trace_cache import zone_traces_cached
+from aurora.app.zone_tools import PreviewThrottle, ZoneEditor, ZoneToolBar, fast_settings, register_shortcuts, zone_name
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, fit_height, overlay_host,
                                 page_scroll, pair, set_enabled)
@@ -34,7 +39,7 @@ from aurora.core.io.config import ScanSettings, Zone
 from aurora.core.model import ScanInfo
 from aurora.core.names import pretty_edge, short_time, split_stack_id
 from aurora.core.spectra import NORM_MODES
-from aurora.core.zones import geometry, members, set_geometry, shape_text, zone_bbox, zone_traces
+from aurora.core.zones import Stroke, geometry, members, set_geometry, shape_text, zone_bbox
 
 NO_PROJECT = "open a project first"
 GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy geometry'
@@ -43,6 +48,8 @@ GEOMETRY_MARK = "aurora_zone_geometry"           # the clipboard JSON of 'Copy g
 # the step-4 line names)
 CHIP_FIELDS = tuple(f for f in ScanSettings.SETTINGS_FIELDS if f not in ("line", "roi", "despike_mode", "ipfy_mode"))
 COPY_FIELDS_SETTING = "reduce/copy_fields"
+PREVIEW_NO_SCAN = "Pick a scan in step 1"
+PREVIEW_NO_ZONE = "Draw a zone on the map (drag) to see its spectrum here"
 
 
 def popup(menu: QMenu, pos) -> QMenu:
@@ -369,26 +376,15 @@ class ReducePerspective(QWidget):
 
         # ---- centre: 3 · the region: tools, sample row, zone list | stack map, caption
         self.map_card = centre = Card("Stack map", help_anchor="42-stack-map")
-        tools_box = QWidget()
-        tools = FlowLayout(tools_box, spacing=6)
-        self.tool_group = QButtonGroup(self)
-        self.tool_buttons: dict[str, QToolButton] = {}
-        for t in ("navigate", "rect+", "lasso+", "polygon+", "rect-", "brush+", "brush-"):
-            b = QToolButton(); b.setText(t); b.setCheckable(True); b.setChecked(t == "rect+")
-            explain(b, f"reduce.tool.{t}")
-            self.tool_group.addButton(b, TOOLS.index(t)); tools.addWidget(b)
-            self.tool_buttons[t] = b
-        self.tool_group.idClicked.connect(lambda i: self.set_tool(TOOLS[i]))
-        # brush size and 'rect+ starts a new zone' (Advanced): two items of the tool row, so each wraps on its own at a
-        # large Text size (in one box they made the centre column 370 px wide at Larger text)
-        self.brush_n = QSpinBox(); self.brush_n.setRange(1, 9); self.brush_n.setValue(1)
-        self.brush_n.setSuffix(unit_suffix("pixels"))
-        self.brush_box = pair(labelled("brush", self.brush_n, "reduce.brush"), self.brush_n)
-        self.target_new = QCheckBox("rect+ starts a new zone")
-        tools.addWidget(self.brush_box); tools.addWidget(self.target_new)
-        self.clear_btn = QPushButton("Clear"); self.clear_btn.clicked.connect(self.clear_zone)
-        tools.addWidget(self.clear_btn)
-        centre.body.addWidget(tools_box)
+        # the zone tools, the Survey's bar: [Draw | Erase] x Move / Rectangle / Brush / Lasso (+ Polygon in Advanced),
+        # the brush size, Undo, Clear, and in Advanced 'every stroke starts a new zone'
+        self.toolbar = ZoneToolBar(session, default="rect+")
+        self.toolbar.tool_changed.connect(self.set_tool)
+        self.brush_n = self.toolbar.brush_size
+        self.target_new = self.toolbar.new_each
+        self.clear_btn = self.toolbar.clear_btn
+        self.clear_btn.clicked.connect(self.clear_zone)
+        centre.body.addWidget(self.toolbar)
         zone_row = QWidget()
         zr = FlowLayout(zone_row, spacing=6)
         self.new_zone_btn = QPushButton("New sample"); self.new_zone_btn.clicked.connect(self._new_zone)
@@ -426,6 +422,20 @@ class ReducePerspective(QWidget):
         self.map.setAccessibleName("stack map")
         self.map.set_zone_tools(True)
         self.map.set_tool("rect+")
+        # every drag or click on the map is a stroke, written by the zone editor in one edit (one undo step); the
+        # legacy signals below edit the zone only when code emits them (scripts, the self-test), never twice
+        self.editor = ZoneEditor(session, self.map, self._map_points, "Reduce", self)
+        self.editor.new_each = lambda: self.target_new.isChecked() and is_advanced()
+        self.editor.message.connect(self.status_label.setText)
+        # the preview follows the stroke: at most every INTERVAL_MS, without de-spike on a slow scan, then at release
+        self.throttle = PreviewThrottle(self.preview_draft, self)
+        self.editor.throttle = self.throttle
+        self.throttle.state_changed.connect(self.editor.refresh_hint)
+        self.editor.draft_changed.connect(self._draft_changed)
+        self._drafted = False                           # the preview shows a stroke in progress
+        self._draft_st: dict = {}                       # (stroke serial, sid) -> the settings a new zone would get
+        self.editor.set_brush(self.brush_n.value())
+        self.brush_n.valueChanged.connect(self.editor.set_brush)
         self.map.rect_drawn.connect(self._rect)
         self.map.brush_at.connect(self._brush)
         self.map.polygon_drawn.connect(self._polygon)
@@ -511,6 +521,7 @@ class ReducePerspective(QWidget):
         pc.body.addWidget(self.preview, 1)
         right.addWidget(pc)
         min_height(self.cards_area, 120)                # one scan card row and its line row at every Text size
+        right.setCollapsible(2, False)                  # the preview keeps its minimum (preview.THREE_PANELS_PX)
         right.setStretchFactor(0, 0); right.setStretchFactor(1, 2); right.setStretchFactor(2, 3)
         right.setSizes([190, 230, 420])
         split.addWidget(right)
@@ -534,12 +545,12 @@ class ReducePerspective(QWidget):
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="reduce",
                                       parent=self.body)
-        self.zone_state = EmptyState("No sample yet: drag a rectangle over the stack with rect+.",
+        self.zone_state = EmptyState("No sample yet: choose Draw and drag over the stack.",
                                      [("Propose zones", lambda: self.propose_zones(), True)], icon="reduce", parent=pc)
         explain_all([(self.load_all_btn, "reduce.load_all"), (self.scan_list, "reduce.scans"),
                      (self.new_zone_btn, "reduce.new_zone"), (self.del_zone_btn, "reduce.delete_zone"),
                      (self.propose_btn, "reduce.propose"), (self.stitch_btn, "reduce.stitch"),
-                     (self.target_new, "reduce.target_new"), (self.map_sdd, "reduce.map_sdd"),
+                     (self.map_sdd, "reduce.map_sdd"),
                      (self.map_mode, "reduce.map_mode"), (self.map_energy, "reduce.map_energy"),
                      (self.map_i0, "reduce.map_i0"), (self.map_log, "reduce.map_log"), (self.send_btn, "reduce.send"),
                      (self.clear_btn, "reduce.clear"), (self.load_poly_btn, "reduce.load_polygon"),
@@ -561,9 +572,8 @@ class ReducePerspective(QWidget):
         on_theme_changed(self, lambda _s: (self.redraw_map(), refill_tones(self.scan_list)))
         self._shortcuts()
         # Easy mode: John Bussey's four steps (scan, XRF window, region, reduce); everything else is Advanced
-        mark_advanced(self.load_all_btn, self.tool_buttons["rect-"], self.tool_buttons["polygon+"],
-                      self.tool_buttons["brush+"], self.tool_buttons["brush-"], self.brush_box, self.target_new,
-                      self.show_row, self.propose_btn, self.stitch_btn, self.save_poly_btn, self.group_box,
+        mark_advanced(self.load_all_btn, self.show_row,
+                      self.propose_btn, self.stitch_btn, self.save_poly_btn, self.group_box,
                       self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
         mark_easy(self.step4_line, self.add_check_btn, *self._badges)
         on_mode_changed(self, self._mode_changed)
@@ -603,6 +613,7 @@ class ReducePerspective(QWidget):
         self.map_card.set_title("Stack map" if adv else "Region")
         self.zone_card.set_title("Zone" if adv else "Reduce")
         h = max(self.right_split.height(), 600)          # Easy: step 4 is short, the preview takes the rest
+        # the splitter keeps every pane at its minimum (the preview's plots: preview.THREE_PANELS_PX); the page scrolls
         self.right_split.setSizes([int(0.3 * h), int(0.27 * h), int(0.43 * h)] if adv else [170, 0, h - 170])
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self.fit_cards)
@@ -611,16 +622,8 @@ class ReducePerspective(QWidget):
     def _shortcuts(self) -> None:
         """Reduce shortcuts (Help > Keyboard shortcuts lists them under 'Reduce')."""
         add = lambda text, key, fn: shortcuts.add(self, text, key, fn, section="Reduce")   # noqa: E731
-        a = self.shortcut_actions = {
-            "navigate": add("Navigate tool", "V", lambda: self.set_tool("navigate")),
-            "rect+": add("Rectangle tool (rect+)", "R", lambda: self.set_tool("rect+")),
-            "rect-": add("Remove-rectangle tool (rect-)", "E", lambda: self.set_tool("rect-")),
-            "brush+": add("Brush tool (brush+)", "B", lambda: self.set_tool("brush+")),
-            "brush-": add("Erase-brush tool (brush-)", "Shift+B", lambda: self.set_tool("brush-")),
-            "lasso+": add("Lasso tool (lasso+)", "L", lambda: self.set_tool("lasso+")),
-            "polygon+": add("Polygon tool (polygon+)", "P", lambda: self.set_tool("polygon+")),
-            "bigger": add("Larger brush", "+", lambda: self.brush_n.setValue(self.brush_n.value() + 1)),
-            "smaller": add("Smaller brush", "-", lambda: self.brush_n.setValue(self.brush_n.value() - 1)),
+        a = self.shortcut_actions = register_shortcuts(self, self.toolbar, "Reduce")     # V R B L P D E X Shift+B + -
+        a.update({
             "new": add("New sample", "N", self._new_zone),
             "delete": add("Delete the sample", "Delete", self._delete_zone),
             "prev_zone": add("Previous sample", "Alt+Up", lambda: self.step_zone(-1)),
@@ -630,19 +633,16 @@ class ReducePerspective(QWidget):
             "fit": add("Fit the view", "F", lambda: self.map.autorange()),
             "copy": add("Copy the scan settings", "Ctrl+Shift+C", lambda: self.copy_card(self.current_card())),
             "paste": add("Paste the scan settings", "Ctrl+Shift+V", lambda: self.paste_card(self.current_card())),
-        }
+        })
         a["delete"].setShortcuts(shortcuts.delete_keys())          # Backspace too on macOS
-        mark_advanced_action(self, a["rect-"], a["brush+"], a["brush-"], a["polygon+"], a["bigger"], a["smaller"],
-                             a["copy"], a["paste"])
+        mark_advanced_action(self, a["copy"], a["paste"])
 
     def set_tool(self, tool: str) -> None:
-        """Switch the map tool and its button (shortcuts and the tool buttons)."""
+        """Switch the map tool ('rect+', 'lasso-', 'navigate', ...) and the tool bar (shortcuts, the bar, tests)."""
         if tool not in TOOLS:
             return
-        self.map.set_tool(tool)
-        b = self.tool_buttons.get(tool)
-        if b is not None and not b.isChecked():
-            b.setChecked(True)
+        self.editor.set_tool(tool, self.brush_n.value())
+        self.toolbar.set_tool(tool)
 
     def step_zone(self, d: int) -> None:
         n = self.zone_list.count()
@@ -665,7 +665,8 @@ class ReducePerspective(QWidget):
         loaded = [s for s in ses.stacks_of() if ses.stack_loaded(ses.stack_id(s)) is not None] if has else []
         set_enabled(self.new_zone_btn, has and h is not None, NO_PROJECT if not has else "this project has no holder")
         set_enabled(self.del_zone_btn, z is not None, NO_PROJECT if not has else "select a zone first")
-        set_enabled(self.clear_btn, z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys),
+        set_enabled(self.clear_btn, z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys or
+                                                           z.epolys),
                     NO_PROJECT if not has else ("select a zone first" if z is None else "the zone is empty"))
         set_enabled(self.send_btn, z is not None and self.library is not None and bool(z.settings),
                     NO_PROJECT if not has else ("select a zone first" if z is None else "load a scan that covers the zone"))
@@ -674,7 +675,7 @@ class ReducePerspective(QWidget):
         set_enabled(self.stitch_btn, len(loaded) >= 2,
                     NO_PROJECT if not has else "load at least two stacks of the holder first (Load all)")
         set_enabled(self.load_poly_btn, has and h is not None, NO_PROJECT)
-        one_poly = z is not None and len(z.polys) == 1 and not (z.rects or z.paint or z.erects or z.erase)
+        one_poly = z is not None and len(z.polys) == 1 and not (z.rects or z.paint or z.erects or z.erase or z.epolys)
         set_enabled(self.save_poly_btn, one_poly,
                     NO_PROJECT if not has else ("select a zone first" if z is None else
                                                 "John Bussey's file holds one polygon: the zone must be exactly one polygon"))
@@ -806,6 +807,7 @@ class ReducePerspective(QWidget):
             self.map.set_points(sd.x, sd.y, sd.pitch)
         else:
             self.map.set_points(None, None, None)
+        self.editor.idle()
         self.map_line.blockSignals(False)
         self.map_energy.blockSignals(False)
         self._show_window_step()
@@ -1026,6 +1028,7 @@ class ReducePerspective(QWidget):
             text = f"Region: {shape_text(z)} · {k} of {m} points of {sd.name}"
         self.region_caption.setText(text)
         self.window_card.set_region(members(z, sd.x, sd.y, sd.pitch) if (sd is not None and z is not None) else None)
+        self.window_card.set_zone(z)
 
     def _hover(self, x: float, y: float) -> None:
         sd = self.current_stack()
@@ -1037,73 +1040,42 @@ class ReducePerspective(QWidget):
                 txt += f" · px {hit[0]}"
         self.status_label.setText(txt)
 
+    def _map_points(self):
+        """(x, y, pitch, name) of the stack shown, for the zone editor; None without one. The name is the one of the
+        scan list ('09:27 alpha_beta'), short enough for the map's hint."""
+        sd = self.current_stack()
+        if sd is None:
+            return None
+        scan = self.session.scan_of(sd.id)
+        name = f"{scan.time} {scan.label}".strip() if scan is not None and (scan.time or scan.label) else sd.name
+        return sd.x, sd.y, sd.pitch, name
+
     def _makes_new_zone(self, add: bool) -> bool:
-        """Whether an adding tool starts a new zone: no zone selected, or 'rect+ starts a new zone' ticked."""
+        """Whether an adding tool starts a new zone: no zone selected, or 'every stroke starts a new zone' ticked (the rule
+        of the legacy signals; strokes follow ZoneEditor.target_for)."""
         return add and (self.session.zone() is None or self.target_new.isChecked())
 
+    def _legacy(self, stroke: Stroke) -> None:
+        """A legacy map signal emitted by code: one edit through the zone editor, as before (a stroke of the mouse
+        is written by the editor itself and emits these signals with map.stroke_emitting() True)."""
+        if not self.map.stroke_emitting():
+            self.editor.commit(stroke, legacy=True)
+
     def _rect(self, x0: float, x1: float, y0: float, y1: float) -> None:
-        tool = self.map.vb.tool
-        if self.session.holder() is None:
-            self.status_label.setText(NO_PROJECT)
+        shape, erase = split_tool(self.map.vb.tool)
+        if self.map.stroke_emitting() or shape in ("navigate", "brush"):
             return
-        if tool in ("rect+", "lasso+", "polygon+"):
-            new = self._makes_new_zone(True)
-            z = self.session.zone()
-            with self.session.edit("add a rectangle to a new zone" if new else f"add a rectangle to zone {z.id}"):
-                if new:
-                    z = self.session.new_zone()
-                if z is not None:
-                    z.rects.append([x0, x1, y0, y1])
-        elif tool == "rect-":
-            z = self.session.zone()
-            if z is None:
-                self.status_label.setText("select a zone first")
-                return
-            with self.session.edit(f"remove a rectangle from zone {z.id}"):
-                z.erects.append([x0, x1, y0, y1])
+        self._legacy(Stroke(shape="rect", erase=erase, start=(x0, y0), rect=(x0, x1, y0, y1)))
 
     def _polygon(self, pts) -> None:
         """A lasso or polygon closed on the map: added to the current zone (a new zone when none is selected)."""
-        if self.session.holder() is None:
-            self.status_label.setText(NO_PROJECT)
-            return
         if len(pts) < 3:
             return
-        new = self._makes_new_zone(True)
-        z = self.session.zone()
-        with self.session.edit("add a polygon to a new zone" if new else f"add a polygon to zone {z.id}"):
-            if new:
-                z = self.session.new_zone()
-            if z is not None:
-                z.polys.append([[float(p[0]), float(p[1])] for p in pts])
+        self._legacy(Stroke(shape="polygon", path=[[float(p[0]), float(p[1])] for p in pts],
+                            start=(float(pts[0][0]), float(pts[0][1]))))
 
     def _brush(self, x: float, y: float, add: bool) -> None:
-        sd = self.current_stack()
-        if sd is None:
-            return
-        new = self._makes_new_zone(add)
-        z = self.session.zone()
-        if z is None and not new:
-            self.status_label.setText("select a zone first")
-            return
-        best = int(np.argmin((sd.x - x) ** 2 + (sd.y - y) ** 2))
-        cx, cy = float(sd.x[best]), float(sd.y[best])
-        px, py = sd.pitch
-        n = self.brush_n.value()
-        verb = "paint" if add else "erase"
-        with self.session.edit(f"{verb} pixels in a new zone" if new else f"{verb} pixels in zone {z.id}"):
-            if new:
-                z = self.session.new_zone()
-                if z is None:
-                    return
-            key = z.paint if add else z.erase
-            for i in range(-((n - 1) // 2), n // 2 + 1):
-                for j in range(-((n - 1) // 2), n // 2 + 1):
-                    sx, sy = round(cx + i * px, 3), round(cy + j * py, 3)
-                    if not any(abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6 for s in key):
-                        key.append([sx, sy, px, py])
-                    if add:
-                        z.erase = [s for s in z.erase if not (abs(s[0] - sx) < 1e-6 and abs(s[1] - sy) < 1e-6)]
+        self._legacy(Stroke(shape="brush", erase=not add, start=(x, y), path=[[x, y]], brush_n=self.brush_n.value()))
 
     def _zone_clicked(self, zid: int) -> None:
         if zid != self.session.current_zone:
@@ -1115,7 +1087,7 @@ class ReducePerspective(QWidget):
         if z is None:
             return
         with self.session.edit(f"clear zone {z.id}"):
-            z.rects, z.erects, z.paint, z.erase, z.polys = [], [], [], [], []
+            z.rects, z.erects, z.paint, z.erase, z.polys, z.epolys = [], [], [], [], [], []
         self.status_label.setText(f"zone {z.id} cleared: draw its region again")
 
     # ------------------------------------------------------------------ right-click menus
@@ -1389,6 +1361,7 @@ class ReducePerspective(QWidget):
 
     def _zones_changed(self) -> None:
         self._fill_zone_list()
+        self._fill_zone_info(self.session.zone())
         self._show_choice()
         self.redraw_map()
         z = self.session.zone()
@@ -1435,14 +1408,22 @@ class ReducePerspective(QWidget):
         self.z_group.addItems(sorted({r.group for r in self.session.sheet_rows if r.group}))
         if z is None:
             self.z_label.setEditText(""); self.z_group.setEditText(""); self.z_comment.setText("")
-            self.z_info.setText("no zone selected: draw a rectangle with rect+ to create one")
         else:
             self.z_label.setEditText(z.label); self.z_group.setEditText(z.group); self.z_comment.setText(z.comment)
-            self.z_info.setText(f"zone {z.id}: {plural(len(z.rects), 'rect')}, {plural(len(z.polys), 'polygon')}, "
-                                f"{plural(len(z.erects), 'erase rect')}, {len(z.paint)} painted px, {len(z.erase)} erased px "
-                                f"· covered by {plural(len(z.members), 'loaded scan')}")
+        self._fill_zone_info(z)
         for w in (self.z_label, self.z_group, self.z_comment):
             w.blockSignals(False)
+
+    def _fill_zone_info(self, z: Zone | None) -> None:
+        """The zone card's info line (Advanced): what the zone is drawn of. Refreshed on every edit too: a stroke that
+        creates its zone selects it before its shape is written."""
+        if z is None:
+            self.z_info.setText("no zone selected: choose Draw and drag on the map to create one")
+        else:
+            self.z_info.setText(f"zone {z.id}: {plural(len(z.rects), 'rect')}, {plural(len(z.polys), 'polygon')}, "
+                                f"{plural(len(z.erects), 'erase rect')}, {plural(len(z.epolys), 'erase outline')}, "
+                                f"{len(z.paint)} painted px, {len(z.erase)} erased px "
+                                f"· covered by {plural(len(z.members), 'loaded scan')}")
 
     def _zone_edited(self) -> None:
         z = self.session.zone()
@@ -1737,7 +1718,7 @@ class ReducePerspective(QWidget):
                 continue
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
-            t = zone_traces(sd, pix, st, good)
+            t = zone_traces_cached(sd, pix, st, good)
             if t is None:
                 continue
             label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {short_time(sid) or sd.name}"
@@ -1756,10 +1737,92 @@ class ReducePerspective(QWidget):
         return self.session.ensure_good_i0(self, self.update_preview if redraw else (lambda: None), taskbar=self.taskbar)
 
     # ------------------------------------------------------------------ preview
+    def _draft_changed(self, draft) -> None:
+        """A stroke moved (draft) or ended (None): the throttled live preview, or back to the zone as written."""
+        if draft is not None:
+            self.throttle.request(draft)
+            return
+        self.throttle.cancel()
+        if self._drafted:
+            self._drafted = False
+            if not self.editor.last_committed:          # nothing written: the zone as it was (a commit redrew it)
+                self.update_preview()
+                self._caption()
+
+    def _draft_settings(self, draft, sd) -> ScanSettings | None:
+        """The settings the stroke's zone has, or would get, on the stack (the Easy rules and the saved rules for a
+        new zone), computed once per stroke."""
+        owner = draft.target
+        st = owner.settings.get(sd.id) if owner is not None else None
+        if st is not None:
+            return st
+        key = (draft.stroke.serial, sd.id)
+        if key not in self._draft_st:
+            scan = self.session.scan_of(sd.id)
+            self._draft_st = {key: self.session.default_settings(scan, sd) if scan is not None else None}
+        return self._draft_st[key]
+
+    def preview_draft(self, draft, fast: bool = False) -> None:
+        """The live preview of a stroke in progress (the throttle calls it): the traces of its provisional points on the
+        current stack only, through the shared trace cache, drawn in place (PreviewPlot.update_traces); fast: without
+        the de-spike. The region caption counts what the stroke changes."""
+        sd = self.current_stack()
+        if sd is None or draft is None:
+            return
+        self._drafted = True
+        pix = np.asarray(draft.members_after, int)
+        name = short_time(sd.id) or sd.name
+        st = self._draft_settings(draft, sd)
+        note = ""
+        if st is not None:
+            if fast:
+                st = fast_settings(st)
+            if st.roi and not xw.stack_window_ready(sd, st.roi):
+                import copy
+                st = copy.deepcopy(st)
+                st.roi = None                           # the fixed bins until the windows are read (at release)
+                note = f"reading the XRF windows of {sd.name} …"
+        if st is None or not pix.size:
+            self.preview.set_traces([], waiting=PREVIEW_NO_ZONE)
+        elif st.i0_source == "good" and self.session.good_i0_missing():
+            pass                                        # the good-I0 scans are read at release (update_preview)
+        else:
+            good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
+            t = zone_traces_cached(sd, pix, st, good)
+            if t is None:
+                self.preview.set_traces([], waiting=PREVIEW_NO_ZONE)
+            else:
+                self.preview.update_traces([(name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text})])
+        k, dk = int(pix.size), int(pix.size) - int(draft.members_before.size)
+        self.region_caption.setText(f"Region: {shape_text(draft.zone)} · {k} of {sd.n_pix} points of {sd.name}"
+                                    + (f" ({dk:+d} while drawing)" if dk else "") + (f" · {note}" if note else ""))
+        self.window_card.set_region(pix)
+        self.window_card.set_zone(draft.zone)
+
+    def preview_message(self, z, sd) -> str:
+        """Why the preview shows no trace (the sentences of the spec): no scan, no zone, an empty zone, a zone outside
+        this scan (naming the scans it covers)."""
+        from aurora.app.zone_tools import zone_drawn
+        if sd is None:
+            return PREVIEW_NO_SCAN
+        if z is None:
+            return PREVIEW_NO_ZONE
+        if not zone_drawn(z):
+            return f"{zone_name(z)} is empty: drag on the map to draw it"
+        if sd.id not in z.settings:
+            name = short_time(sd.id) or sd.name
+            others = [short_time(s) or split_stack_id(s)[1] for s in z.settings]
+            if others:
+                return (f"{zone_name(z)} holds no pixel of {name}: it lies outside this scan. Scans it covers: "
+                        f"{', '.join(others)} (pick one in step 1)")
+            return f"{zone_name(z)} holds no pixel of {name}: it lies outside this scan"
+        return ""
+
     def update_preview(self) -> None:
         z = self.session.zone()
         if z is None:
-            self.preview.set_traces([])
+            self.preview.set_traces([], waiting=PREVIEW_NO_SCAN if self.current_stack() is None and
+                                    self.session.project is not None else PREVIEW_NO_ZONE)
             return
         sids = []
         if self.preview.all_scans.isChecked():
@@ -1782,7 +1845,14 @@ class ReducePerspective(QWidget):
                 continue                                # drawn when they are read
             pix = members(z, sd.x, sd.y, sd.pitch)
             good = self.session.good_curve_for(sd.E) if st.i0_source == "good" else None
-            t = zone_traces(sd, pix, st, good)
+            t = zone_traces_cached(sd, pix, st, good)
             if t is not None:
                 traces.append((short_time(sid) or sd.name, t, {"edge_ev": sd.edge_ev, "edge": sd.edge_text}))
+        if not traces and not waiting:
+            sd = self.current_stack()
+            st = z.settings.get(sd.id) if sd is not None else None
+            if st is not None and st.roi and not xw.stack_window_ready(sd, st.roi):
+                waiting = f"reading the XRF windows of {sd.name} …"
+            else:
+                waiting = self.preview_message(z, sd)
         self.preview.set_traces(traces, waiting=waiting)

@@ -28,8 +28,8 @@ every algorithm is testable with plain pytest. A perspective may compute nothing
 | `model.py` | `ScanInfo`, `Holder`, `Day`, `Project.discover()`: the folder → object tree the whole app hangs on |
 | `testdata.py` | `make_fake_project()`: a synthetic beamtime (survey, complete / aborted / test stacks) used by tests, `--distcheck` and `aurora demo` |
 | `stack.py` | `StackData.load()`: from the sgm_report cache, else the AURORA cache, else reduced from raw; sum over a window, map values, bbox |
-| `survey.py` | `SurveyData`: the survey's values per channel and its grid |
-| `zones.py` | the zone tool's maths, ported function for function from the browser tool: grid pitch, membership, running median, de-spike, normalise, `zone_traces`, I0 score, good-I0 curve |
+| `survey.py` | `SurveyData`: the survey's values per channel and its grid; the per-point spectra (`per_point`, `zone_spectrum`, kept for the current and the previous holder) |
+| `zones.py` | the zone tool's maths, ported function for function from the browser tool: grid pitch, membership, running median, de-spike, normalise, `zone_traces`, I0 score, good-I0 curve; the strokes of the zone maps (`Stroke`, `apply_stroke`, `stroke_zone`, `brush_squares`, `interpolate_path`, `reconcile_add`: a stroke over an erased area wins) and the erased outlines (`Zone.epolys`) |
 | `qc.py` | count-rate probe, saturation and high-rate detection, I0 validity, SDD consistency, spike summary, I0 candidates, `mcc_curves` (the I0 explorer) |
 | `compare.py` | `Spectrum`, `TraceRequest`, CSV readers for every known layout, normalisations (larch / legacy / TEY line), processing, offsets, derivative, difference, peaks, wide export, config save/load |
 | `fit.py` | LCF (SLSQP with the sum-to-one constraint, NNLS, bootstrap), PCA (SVD), MCR-ALS (NNLS alternating), ITFA (fixed rows), peak decomposition (`curve_fit`, peaks + arctan step + background) |
@@ -65,8 +65,11 @@ return partial data with a reason instead of raising, and the reason is printed 
 | `settings.py`, `settings_dialog.py` | QSettings with the `AURORA_SETTINGS_DIR` escape hatch; the defaults dictionary |
 | `widgets.py` | `Card`, `Chip`, `Worker` (QThread with result / error signals) |
 | `session.py` | `Session`: the project, holders, zones, loaded stacks (`StackData` by id), good-I0 choices, autosave, zones import/export, virtual (stitched) stacks |
-| `mapview.py` | pyqtgraph image with mm axes, rect / brush tools, overlays, data-driven range |
-| `preview.py` | the three-panel preview plot |
+| `mapview.py` | pyqtgraph image with mm axes, overlays, data-driven range; every gesture is a `Stroke` (`stroke_started` / `stroke_changed` / `stroke_finished` / `stroke_cancelled`; right button or Shift: the other mode; Esc cancels); the map hint, the stroke highlights and the brush square |
+| `zone_tools.py` | the zone tools both maps share: `ZoneToolBar` (Draw / Erase x Move / Rectangle / Brush / Lasso / Polygon), `ZoneEditor` (the zone a stroke goes to, its draft, one `session.edit(merge=False)` per stroke), `PreviewThrottle` (the live preview: 60 ms, then every 150 ms, without de-spike or at release when slow), the keys, the zone menu |
+| `zone_preview.py` | the Survey's Zone preview: the zone's XRF emission from its survey points, its XAS on a covered stack |
+| `trace_cache.py` | an LRU of zone traces shared by Reduce, Check and the Zone preview |
+| `preview.py` | the three-panel preview plot (curves moved in place while a stroke is drawn, the Show menu, compact mode) |
 | `home.py`, `survey.py`, `reduce.py`, `check.py`, `library.py`, `compare.py`, `fit.py`, `maps.py`, `report.py` | the perspectives |
 | `dialogs.py` | `ReferencesDialog`, `StitchDialog` |
 | `about.py` | versions text and the About dialog |
@@ -177,7 +180,7 @@ Keys:
 |---|---|
 | file | `format` ('aurora-session'), `schema` (2), `app` ('AURORA x.y.z') — session.json only; `version` (1, the zone tool's), `exported` (ISO time of the write), `project`, `built`, `notes`, `goodI0` ({stack id: bool}), `holders` ({holder key: holder}), `ui` (view memory, Session.ui_value; the Easy check queue as `check_queue` and `check_seen`, [[holder key, zone id, stack id], ...]), `rules` (batch-settings rules) |
 | holder | `holder`, `day`, `survey`, `zones` |
-| zone | `id`, `label`, `group`, `comment`, `rects` and `erects` ([x0, x1, y0, y1] mm), `paint` and `erase` ([cx, cy, pitch x, pitch y] mm), `polys` ([[x, y], …] mm, written when used), `st` ({stack id: settings}), `members` ({stack id: pixel indices}) |
+| zone | `id`, `label`, `group`, `comment`, `rects` and `erects` ([x0, x1, y0, y1] mm), `paint` and `erase` ([cx, cy, pitch x, pitch y] mm), `polys` and `epolys` (drawn and erased outlines, [[x, y], …] mm, written when used), `st` ({stack id: settings}), `members` ({stack id: pixel indices}) |
 | settings (`st`) | `inc`, `n`, `sdd` (4 bools), `line`, `fn` and `tn` (raw, i0, i0pre, i0jump, area, max), `tey`, `ds`, `k`, `i0src` (own, good), `pre`, `post` (null = automatic), `stack`; written only when set: `roi` ({sdd: [lo, hi)} channels), `sig` (pfy, ipfy), `ipm`, `dsm` (classic, coherent), `pin` |
 
 Holder keys are the holder name, or `<name>_<day>` when a name repeats in the project; a key already used by the

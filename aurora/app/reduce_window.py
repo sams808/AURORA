@@ -1,4 +1,5 @@
-"""Reduce step 2, the XRF window (John Bussey's step 2): the emission spectrum of the stack, the survey or the region
+"""Reduce step 2, the XRF window (John Bussey's step 2): the emission spectrum of the stack, the survey, the region,
+or the survey points inside the region (John Bussey's 'XRF from survey, only inside region'; set_zone gives the zone)
 (log y), one draggable window per SDD in the series colours with their dashes, lo / hi spin boxes in channels with
 the eV equivalent, and the presets (every fixed line of roi_bins.json, the line of the edge, John Bussey's default
 60:83 when no fixed line or calibration gives the edge's line, custom). Without a calibration the line of the edge
@@ -31,7 +32,8 @@ from aurora.app.widgets import Card, FlowLayout, pair, set_plot_hint
 from aurora.core import xrf_windows as xw
 from aurora.core.constants import DETS, N_CH
 
-SOURCES = (("stack", "the whole stack"), ("survey", "survey"), ("region", "inside the region"))   # short: Linux fonts
+SOURCES = (("stack", "the whole stack"), ("survey", "survey"), ("region", "inside the region"),     # short: Linux fonts
+           ("survey_zone", "survey, inside the zone"))
 CUSTOM = "custom"
 SAVE_LINE = "Save as a fixed line…"
 NO_FIXED_LINES = ("No fixed emission lines for this beamtime: AURORA uses the total fluorescence. To follow one "
@@ -50,6 +52,7 @@ class XrfWindowCard(Card):
         self._sd = None
         self._scan = None
         self._pix = None
+        self._zone = None                    # the zone (or a stroke's provisional zone) for 'survey, inside the zone'
         self._labels: list[str] = []
         self._windows: dict[str, list[int]] = {d: list(xw.TOTAL_BOUNDS) for d in DETS}
         self._line = xw.TOTAL_LABEL
@@ -113,6 +116,8 @@ class XrfWindowCard(Card):
         self.adv_box = QWidget()
         al = FlowLayout(self.adv_box, spacing=6)
         self.source = QComboBox()
+        self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)    # the column stays narrow
+        self.source.setMinimumContentsLength(12)
         for k, text in SOURCES:
             self.source.addItem(text, k)
         al.addWidget(pair(labelled("spectrum of", self.source, "reduce.window.source"), self.source))
@@ -479,7 +484,7 @@ class XrfWindowCard(Card):
             self.status.setText("")
             self._draw()
             return
-        if src == "survey":
+        if src in ("survey", "survey_zone"):
             try:
                 sv = self.session.survey()
             except Exception as err:                   # an unreadable survey: say so, keep the card usable
@@ -488,6 +493,8 @@ class XrfWindowCard(Card):
             if sv is not None:
                 self._spectrum = np.asarray(sv.spec, float)
                 self.status.setText(f"survey {sv.name} at {sv.energy:.1f} eV")
+                if src == "survey_zone":
+                    self._survey_zone(sv)
             self._draw()
             return
         em = xw.cached_stack_emission(sd)
@@ -524,6 +531,30 @@ class XrfWindowCard(Card):
             self.status.setText(f"{sd.name}: all {sd.n_energies} energies, {sd.n_pix} points"
                                 + (f" · {em.notes[0]}" if em.notes else ""))
         self._draw()
+
+    def _survey_zone(self, sv) -> None:
+        """'survey, inside the zone': the survey's XRF summed over the survey points inside the zone (the whole
+        survey, and why, when there are none)."""
+        from aurora.core.zones import members
+        z = self._zone
+        whole = f"survey {sv.name} at {sv.energy:.1f} eV"
+        if z is None:
+            self.status.setText(f"no zone selected: the whole {whole}")
+            return
+        pix = members(z, sv.x, sv.y, sv.pitch)
+        if not pix.size:
+            self.status.setText(f"the zone holds no survey point: the whole {whole}")
+        elif not (sv.has_spectra or sv.reload_spectra()):
+            self.status.setText(f"the survey's per-point spectra could not be read again: the whole {whole}")
+        else:
+            self._spectrum = sv.zone_spectrum(pix)
+            self.status.setText(f"{whole}, inside the zone ({len(pix)} points)")
+
+    def set_zone(self, zone) -> None:
+        """The selected zone, or a stroke's provisional zone, for 'survey, inside the zone'."""
+        self._zone = zone
+        if self.source.currentData() == "survey_zone" and self._sd is not None:
+            self.refresh_spectrum()
 
     def set_region(self, pix) -> None:
         """The current region's members on the stack (for 'inside the region')."""

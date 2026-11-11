@@ -131,3 +131,143 @@ def test_first_energy_read(project, real_expect):
     pd = read_point_dir(p)
     assert e == real_expect["stack_range_ev"][0] and pd.n_pix == real_expect["stack_points"] and pd.complete
     assert pd.mcc.shape[1] == 8
+
+
+def test_real_zone_commit_timing(real_project, monkeypatch):
+    """One stroke written with every listener connected (Reduce shown, Check and Survey hidden) on the holder with the
+    largest survey and its largest stack: the median over 6 strokes is 400 ms or less (it was 2.5-6 s before the
+    vectorised de-spike, the shared trace cache and the deferred hidden views), x3 with AURORA_TIMING_LOOSE=1. Never
+    writes into the beamtime (Session.save is a no-op here, and the folder is protected)."""
+    import os
+    import time
+
+    pytest.importorskip("pyqtgraph")
+    from aurora.app.main import MainWindow, create_app
+    from aurora.app.session import Session
+    from aurora.core.zones import Stroke, members
+    monkeypatch.setattr(Session, "save", lambda self: None)
+    qapp = create_app(["aurora-tests"])
+    win = MainWindow()
+    win.resize(1200, 760)
+    win.show()
+    try:
+        win.home.set_project(Project.discover(real_project))
+        qapp.processEvents()
+        win.jobs.wait_idle(120000)
+        ses = win.session
+
+        def size(key):
+            h = ses.holder_keys[key][1]
+            return (h.survey.n_points if h.survey is not None else 0), len(h.stacks)
+        ses.set_holder(max(ses.holder_keys, key=size))
+        qapp.processEvents()
+        sid = ses.stack_id(max(ses.holder().stacks, key=lambda s: s.n_points or 0))
+        sd = ses.stack(sid)
+        win.reduce._attach(sd)
+        ses.touch()
+        ses.select_stack(sid)
+        win.show_perspective("reduce")
+        for _ in range(10):
+            qapp.processEvents()
+        win.jobs.wait_idle(60000)
+        if ses.current_stack != sid:
+            ses.select_stack(sid)
+        rd = win.reduce
+        x0, x1, y0, y1 = sd.bbox
+        zid = rd.editor.commit(Stroke(shape="rect", rect=(x0, (x0 + x1) / 2, y0, (y0 + y1) / 2)))
+        assert zid is not None
+        z = ses.zone(zid)
+        pix = members(z, sd.x, sd.y, sd.pitch)
+        box = (float(sd.x[pix].min()), float(np.median(sd.x[pix])), float(sd.y[pix].min()), float(np.median(sd.y[pix])))
+        times = []
+        for i in range(6):                                  # erase, then draw back, the same box: each one writes
+            n = ses.undo_stack.count()
+            t = time.perf_counter()
+            rd.editor.commit(Stroke(shape="rect", rect=box, erase=i % 2 == 0, serial=10 + i))
+            times.append(time.perf_counter() - t)
+            qapp.processEvents()
+            assert ses.undo_stack.count() == n + 1
+        limit = 0.4 * (3 if os.environ.get("AURORA_TIMING_LOOSE") == "1" else 1)
+        assert float(np.median(times)) <= limit, [round(1000 * v) for v in times]
+    finally:
+        win.session._save_timer.stop()
+        win.session.project = None
+        win.close()
+
+
+def test_real_zone_preview_timings(real_project, monkeypatch):
+    """The live preview of a stroke on the holder with the largest survey and its largest stack (the stack loaded),
+    medians over 5 strokes of different sizes (the trace cache cleared, so each one computes): the Survey's Zone
+    preview of a draft 80 ms or less, Reduce's preview of a draft 60 ms or less without the de-spike and 120 ms or
+    less with the coherent de-spike of Easy mode; x3 with AURORA_TIMING_LOOSE=1. Never writes into the beamtime."""
+    import os
+    import time
+
+    pytest.importorskip("pyqtgraph")
+    from aurora.app import trace_cache
+    from aurora.app.main import MainWindow, create_app
+    from aurora.app.session import Session
+    from aurora.core.zones import Stroke
+    monkeypatch.setattr(Session, "save", lambda self: None)
+    qapp = create_app(["aurora-tests"])
+    win = MainWindow()
+    win.resize(1200, 760)
+    win.show()
+    try:
+        win.home.set_project(Project.discover(real_project))
+        qapp.processEvents()
+        win.jobs.wait_idle(120000)
+        ses = win.session
+
+        def size(key):
+            h = ses.holder_keys[key][1]
+            return (h.survey.n_points if h.survey is not None else 0), len(h.stacks)
+        ses.set_holder(max(ses.holder_keys, key=size))
+        qapp.processEvents()
+        sid = ses.stack_id(max(ses.holder().stacks, key=lambda s: s.n_points or 0))
+        sd = ses.stack(sid)
+        win.reduce._attach(sd)
+        ses.touch()
+        ses.select_stack(sid)
+        win.show_perspective("survey")
+        for _ in range(10):
+            qapp.processEvents()
+        win.jobs.wait_idle(60000)
+        if ses.current_stack != sid:
+            ses.select_stack(sid)
+        x0, x1, y0, y1 = sd.bbox
+        loose = 3 if os.environ.get("AURORA_TIMING_LOOSE") == "1" else 1
+
+        def strokes():
+            for i, f in enumerate((0.5, 0.6, 0.7, 0.8, 0.9)):
+                yield Stroke(shape="rect", rect=(x0, x0 + f * (x1 - x0), y0, y0 + f * (y1 - y0)), serial=100 + i)
+
+        def median_ms(editor, run) -> float:
+            times = []
+            for st in strokes():
+                d = editor.make_draft(st)
+                assert not d.empty and d.members_after.size
+                trace_cache.clear()
+                t = time.perf_counter()
+                run(d)
+                times.append(1000 * (time.perf_counter() - t))
+                qapp.processEvents()
+            return float(np.median(times)), [round(v) for v in times]
+
+        sv, rd = win.survey, win.reduce
+        n = ses.undo_stack.count()
+        ms, all_ms = median_ms(sv.editor, lambda d: sv.preview_draft(d))
+        assert sv.zone_preview.emission.data is not None and sv.zone_preview.xas_sum() is not None
+        assert ms <= 80 * loose, all_ms
+        win.show_perspective("reduce")
+        for _ in range(10):
+            qapp.processEvents()
+        ms, all_ms = median_ms(rd.editor, lambda d: rd.preview_draft(d, fast=True))
+        assert rd.preview._traces and ms <= 60 * loose, all_ms
+        ms, all_ms = median_ms(rd.editor, lambda d: rd.preview_draft(d, fast=False))
+        assert rd.preview._traces[0][1].settings.despike and ms <= 120 * loose, all_ms
+        assert ses.undo_stack.count() == n                          # previews never write
+    finally:
+        win.session._save_timer.stop()
+        win.session.project = None
+        win.close()

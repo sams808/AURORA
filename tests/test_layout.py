@@ -176,3 +176,49 @@ def test_nothing_clipped_at_the_larger_text_size(qapp, demo):
         win.set_text_size("normal")
         mode.set_advanced(False)
     assert not problems, "\n".join(problems)
+
+
+@pytest.mark.parametrize("size", SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
+@pytest.mark.parametrize("advanced", [False, True], ids=["easy", "advanced"])
+def test_preview_height_at_minimum_size(qapp, tmp_path, size, advanced):
+    """The zone previews keep a usable height down to the smallest window, in both modes: Reduce's plots at least
+    MIN_PLOT_PX (180 px; THREE_PANELS_PX with the three panels, the page scrolls) with the fluorescence panel at least
+    MIN_TOP_PX (110 px), never squeezed below their minimum, the controls above them one row; the Survey's Zone
+    preview with its XRF emission and its XAS at least 120 px each, the card whole on screen (the column scrolls
+    below it, if anything)."""
+    from PySide6.QtCore import QPoint
+    from aurora.app.preview import MIN_PLOT_PX, MIN_TOP_PX
+    from aurora.app.zone_preview import MIN_PANEL_PX
+    from aurora.core.model import Project
+    from wp3_helpers import close, open_window, pump, qdrag
+    from zone_helpers import sample_box, survey_project
+    mode.set_advanced(advanced)
+    win, sid = open_window(qapp, Project.discover(survey_project(tmp_path / "bt")), size=size)
+    try:
+        sd = win.session.stack_loaded(sid)
+        win.show_perspective("survey")
+        pump(qapp, 5)
+        sv = win.survey
+        sv.set_tool("rect+")
+        x0, x1, y0, y1 = sample_box(sd)
+        qdrag(qapp, sv.map, [(x0, y0), ((x0 + x1) / 2, (y0 + y1) / 2), (x1, y1)])
+        pump(qapp, 10)
+        zp = sv.zone_preview
+        assert zp.xas.isVisible() and zp.emission.isVisible()
+        assert zp.emission.plot.height() >= MIN_PANEL_PX and zp.xas.gl.height() >= MIN_PANEL_PX
+        bottom = zp.mapTo(sv.right_scroll.viewport(), QPoint(0, zp.height())).y()
+        assert bottom <= sv.right_scroll.viewport().height() + 1, (bottom, sv.right_scroll.viewport().height())
+        assert sv.map.height() >= 300 and sv.right_scroll.width() >= 400
+        win.show_perspective("reduce")
+        pump(qapp, 10)
+        rd = win.reduce
+        pv = rd.preview
+        assert pv.gl.height() >= MIN_PLOT_PX and pv.top.height() >= MIN_TOP_PX - 0.5, (pv.gl.height(), pv.top.height())
+        assert pv.readout.y() > pv.gl.y()                               # the readout under the plots
+        if advanced:
+            assert pv.show_btn.isVisible() and pv.all_scans.isVisible()
+            assert abs(pv.show_btn.geometry().center().y() - pv.all_scans.geometry().center().y()) <= 4   # one row
+        assert rd.preview_card.height() >= rd.preview_card.minimumSizeHint().height() - 2   # never squeezed
+    finally:
+        mode.set_advanced(False)
+        close(win)

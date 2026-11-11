@@ -50,13 +50,13 @@ headless listing and the tree agree.
 1. In Reduce, step **1 · Scans of holder holderA** lists the complete stack; it is selected.
 2. Step **2 · XRF window** shows the emission spectrum with the preset *F Kα (fixed bins)*: **lo** 60 and **hi** 74
    channels on SDD1 (hi excluded). Keep it.
-3. Step **3 · Region**: select **rect+** (or **lasso+** and draw around the area) and drag over the left half of the
-   map. The caption reads *Region: 1 rectangle · 6 of 12 points of 092758_alpha_beta_f_k_stack*. Pick the sample
+3. Step **3 · Region**: with **Draw** and **Rectangle** chosen (or **Lasso**, and draw around the area), drag over the
+   left half of the map. The caption reads *Region: 1 rectangle · 6 of 12 points of 092758_alpha_beta_f_k_stack*. Pick the sample
    label `1 alpha` (offered from the sample sheet) in the **sample** box above the map.
 4. Press **Ctrl+Z**: the label goes back to *zone 1* (**Edit > Undo** names each step); press it again and the zone
    disappears; **Ctrl+Y** twice brings both back. The top bar shows *unsaved*, then *saved* with the time.
-5. **New sample**, **rect+**, drag over the right half; label `2 beta`. A click inside the first zone selects it
-   again.
+5. **New sample**, then drag over the right half; label `2 beta`. A click inside the first zone selects it again.
+   (Without **New sample**, a stroke that does not touch the selected zone starts a new zone by itself.)
 6. Step **4 · Reduce** states the settings in force (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · fluorescence /
    I0, edge jump = 1 · de-spike k = 6 (John Bussey's default: off) · SDD1-4*). Select zone 1 and press **Add to Check**; do the same for zone 2.
 7. *Advanced*: switch with **Ctrl+Shift+A**. The cards lose their numbers; the **Zone** card shows **group**, filled
@@ -64,8 +64,8 @@ headless listing and the tree agree.
    line F Kα, fluorescence */ I0, edge jump = 1*, **de-spike** with k = 6, I0 own. Untick **SDD3** and watch the
    preview's sum change; switch back to Easy mode: the chip *advanced settings in use* appears, its tooltip names *SDD3
    off*, and **Reset to Easy defaults** ticks it again.
-8. *Advanced*: try **brush-** with brush 1 and click a pixel inside zone 1: it is erased from the zone (the info line
-   counts it); a click in another zone selects it instead. On the scan card, **Copy to…** > *Copy to this scan in every
+8. Choose **Erase** and **Brush** (size 1) and click a pixel inside zone 1: it is erased from the zone (a right-drag
+   erases too, in Draw mode); a click in another zone selects it instead. *Advanced*: On the scan card, **Copy to…** > *Copy to this scan in every
    zone of the holder*: zone 2 takes the same detectors. Then **Rules…**: **Add** a rule with **edge** `F K` that
    writes the TEY normalisation */ I0, pre-edge = 0*, look at the table of what would change, **Apply now**, and
    **Edit > Undo**.

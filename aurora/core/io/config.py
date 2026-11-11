@@ -858,11 +858,12 @@ class Zone:
     settings: dict[str, ScanSettings] = field(default_factory=dict)     # '<day>_<scan>' -> settings
     members: dict[str, list[int]] = field(default_factory=dict)         # '<day>_<scan>' -> pixel indices
     polys: list[list[list[float]]] = field(default_factory=list)       # polygons [[x, y], ...] mm (AURORA)
+    epolys: list[list[list[float]]] = field(default_factory=list)      # erase polygons (lasso / polygon erase, AURORA)
     extra: dict = field(default_factory=dict)                           # keys this version does not know
     _seen: frozenset = field(default=frozenset(), compare=False, repr=False)
 
     BASE_KEYS = ("id", "label", "group", "comment", "rects", "erects", "paint", "erase", "st", "members")
-    ADDED_KEYS = ("polys",)
+    ADDED_KEYS = ("polys", "epolys")
 
     @classmethod
     def from_json(cls, d: dict) -> "Zone":
@@ -879,6 +880,8 @@ class Zone:
             return [_numbers(r, n, f"{z}: {what}") for r in _of(d.get(key), list, f"{z}: '{key}'", [])]
         polys = [[_numbers(p, 2, f"{z}: a polygon vertex") for p in _of(poly, list, f"{z}: a polygon", None)]
                  for poly in _of(d.get("polys"), list, f"{z}: 'polys'", [])]
+        epolys = [[_numbers(p, 2, f"{z}: an erase polygon vertex") for p in _of(poly, list, f"{z}: an erase polygon", None)]
+                  for poly in _of(d.get("epolys"), list, f"{z}: 'epolys'", [])]
         return cls(id=zid, label=str(d.get("label", "")), group=str(d.get("group", "")),
                    comment=str(d.get("comment", "")), rects=rows("rects", 4, "a rectangle"),
                    erects=rows("erects", 4, "an erase rectangle"),
@@ -888,7 +891,7 @@ class Zone:
                              for k, v in _of(d.get("st"), dict, f"{z}: 'st'", {}).items()},
                    members={k: [int(i) for i in _of(v, list, f"{z}: the members of {k}", None)]
                             for k, v in _of(d.get("members"), dict, f"{z}: 'members'", {}).items()},
-                   polys=polys,
+                   polys=polys, epolys=epolys,
                    extra=_unknown(d, cls.BASE_KEYS + cls.ADDED_KEYS),
                    _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
@@ -898,6 +901,8 @@ class Zone:
                "st": {k: v.to_json() for k, v in self.settings.items()}, "members": self.members}
         if self.polys or "polys" in self._seen:
             out["polys"] = self.polys
+        if self.epolys or "epolys" in self._seen:
+            out["epolys"] = self.epolys
         for key, value in self.extra.items():
             out.setdefault(key, value)
         return out

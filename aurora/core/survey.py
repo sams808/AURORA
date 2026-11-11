@@ -1,4 +1,5 @@
-"""A survey (one-energy plate map): per-pixel I0, TEY, total XRF and one ROI per fixed line and detector.
+"""A survey (one-energy plate map): per-pixel I0, TEY, total XRF and one ROI per fixed line and detector, and the
+per-point XRF spectra (kept for the emission of a zone, John Bussey's "XRF from survey, only inside region").
 
 Port of build_zone_tool.read_survey and the zone tool's survey map options (channel, per SDD or sum, / I0, log,
 invert, percentile clip).
@@ -37,6 +38,8 @@ class SurveyData:
     pitch: tuple[float, float] = (0.2, 0.2)
     i0_usable: bool = True
     notes: list[str] = field(default_factory=list)
+    per_point: np.ndarray | None = None  # (n, 4, 256) float32 per-point spectra; None when not kept or released
+    source: object = None               # the ScanInfo it was read from (reload_spectra)
 
     @property
     def n(self) -> int:
@@ -46,8 +49,14 @@ class SurveyData:
     def channels(self) -> list[str]:
         return list(self.lines) + ["total", "TEY", "I0"]
 
+    @property
+    def has_spectra(self) -> bool:
+        return self.per_point is not None
+
     @classmethod
-    def load(cls, scan: ScanInfo, bins: RoiBins | None) -> "SurveyData":
+    def load(cls, scan: ScanInfo, bins: RoiBins | None, keep_spectra: bool = True) -> "SurveyData":
+        """Read a survey. keep_spectra: keep the per-point spectra (n x 4 x 256 float32, 25 MB for 6 000 points) for
+        zone_spectrum; they are read in the same pass either way."""
         h5 = scan.h5 or find_h5(scan.path)
         if h5 is None:
             raise FileNotFoundError(f"{scan.path}: no .h5 file")
@@ -68,7 +77,9 @@ class SurveyData:
         spec = np.stack([s[:n].sum(axis=0) for s in pd.sdd]).astype(np.float32)
         i0 = pd.mcc[:n, I0_COL].astype(float); tey = pd.mcc[:n, TEY_COL].astype(float)
         sv = cls(name=scan.name, holder=scan.holder, energy=scan.e_min, x=x, y=y, i0=i0, tey=tey, roi=roi, total=total,
-                 spec=spec, lines=lines)
+                 spec=spec, lines=lines, source=scan)
+        if keep_spectra:
+            sv.per_point = _per_point(pd.sdd, n)
         sv.pitch = grid_pitch(x, y)
         # I0 usable for the map when > 95 % of the points are positive and the median is above 0.2 (zone tool rule)
         pos = float(np.mean(i0 > 0)) if n else 0.0
@@ -108,3 +119,41 @@ class SurveyData:
 
     def grid(self, vals: np.ndarray) -> Grid:
         return to_grid(self.x, self.y, vals)
+
+    # ------------------------------------------------------------------ per-point spectra
+    def zone_spectrum(self, pix) -> np.ndarray:
+        """(4, 256) XRF counts per SDD summed over the survey points `pix` (indices; repeats count once): a 0/1 mask
+        times the per-point spectra, the same time for any zone size. Divide by the number of points for a mean per
+        point. ValueError when the spectra were not kept or were released (reload_spectra)."""
+        if self.per_point is None:
+            raise ValueError(f"{self.name}: the per-point spectra are not in memory (reload_spectra)")
+        n = self.per_point.shape[0]
+        mask = np.zeros(n, np.float32)
+        pix = np.asarray(pix, int)
+        mask[pix[(pix >= 0) & (pix < n)]] = 1.0
+        return (mask @ self.per_point.reshape(n, -1)).reshape(self.per_point.shape[1:]).astype(float)
+
+    def release_spectra(self) -> None:
+        """Drop the per-point spectra (memory); the maps stay."""
+        self.per_point = None
+
+    def reload_spectra(self) -> bool:
+        """Read the per-point spectra again from the survey's folder; False when it cannot be read."""
+        if self.per_point is not None:
+            return True
+        if self.source is None:
+            return False
+        try:
+            pd = read_point_dir(self.source.path)
+        except (OSError, ValueError) as err:
+            log.warning("%s: per-point spectra not read again (%s)", self.name, err)
+            return False
+        if pd.n_pix < self.n:
+            return False
+        self.per_point = _per_point(pd.sdd, self.n)
+        return True
+
+
+def _per_point(sdd, n: int) -> np.ndarray:
+    """(n, 4, 256) float32 from the four (n_raw, 256) SDD arrays."""
+    return np.stack([np.asarray(a[:n], np.float32) for a in sdd], axis=1)
