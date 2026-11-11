@@ -503,6 +503,15 @@ def _wrap(text: str, width: int = 118) -> list[str]:
     return textwrap.wrap(text, width=width, break_long_words=False, break_on_hyphens=False) or [""]
 
 
+def where_sentence(t) -> str:
+    """'Home, Open project…' -> 'Home, Open project…' (no full stop after the ellipsis), and '(Advanced mode)' once:
+    not after a place that already says Advanced (persona M25)."""
+    where = t.where.rstrip()
+    adv = " (Advanced mode)" if t.advanced and "Advanced" not in where else ""
+    end = "" if (where + adv).endswith(("…", ".", "?", "!")) else "."
+    return f"{where}{adv}{end}"
+
+
 def render_markdown() -> str:
     """The text of aurora/resources/docs/GLOSSARY.md (generated: edit this module, then --write)."""
     lines = ["# AURORA glossary", ""]
@@ -516,7 +525,7 @@ def render_markdown() -> str:
             lines += _wrap(t.plain)
             lines.append("")
             lines += _wrap(f"*Why it matters:* {t.why}")
-            lines += _wrap(f"*In AURORA:* {t.where}" + (" (Advanced mode)." if t.advanced else "."))
+            lines += _wrap(f"*In AURORA:* {where_sentence(t)}")
             if t.aliases:
                 lines += _wrap(f"*Also called:* {', '.join(t.aliases)}.")
             if t.detail:

@@ -44,7 +44,11 @@ and a larger text, at once. Long tasks run in the background with a progress str
 
 1. **Home**: click **Open the demo beamtime** (or **Open project…** and the folder that contains `raw`). The
    *Getting started* row at the top of Home, and the *Next* link of the top bar, say what to do next at every step.
-2. **Survey**: the map of the holder. The rectangles are the measured areas (stacks); click one to open it.
+2. **Survey**: the map of the holder. The rectangles are the measured areas (stacks). Draw around your sample
+   (**Draw**, then drag) and watch its spectrum in the *Zone preview*, or click a measured area to open it in Reduce.
+   For the next sample press **New sample** (N), or simply draw beside the first one: a stroke that does not go over
+   the selected sample starts a new one (hold Ctrl to add it to the selected sample instead). A click on a row of the
+   sample sheet names the next sample you draw.
 3. **Reduce**: step **2 · Which X-rays to count** is preset for your element: keep it. In step **3 · Outline the
    sample**, drag around your sample on the map; it takes its name from the sample sheet when the stack's name holds
    it, otherwise pick or type its name in **sample name** (or in the field *Name this sample:* that **Add to Check**
@@ -85,8 +89,11 @@ of scans opens too). The tree lists the days, the holders and their scans; a cli
 
 The map of one holder at one energy, brighter where more X-rays came back (the colour scale reads *low* to *high*).
 The rectangles are the measured areas (stacks). Choose **Draw**, then drag around a sample: the *Zone preview* shows
-its X-rays and its spectrum while you drag. **Erase** takes part of an outline away; in **Move**, a click on a
-rectangle opens that stack in Reduce. A hand-drawn sketch of the holder is optional: **Load a sketch…** adds one.
+its X-rays and its spectrum while you drag. Each sample is drawn as the pixels it holds, filled. **New sample** (N),
+Esc or a click on the bare map in **Move** starts the next sample; a stroke beside the selected sample starts one
+too. **Erase** takes part of an outline away (a click erases one pixel); in **Move**, a click on a rectangle opens
+that stack in Reduce. A hand-drawn sketch of the holder is optional: **Load a sketch…** adds one, and a click on it
+shows it at full size.
 
 ### Reduce in Easy mode
 
@@ -122,7 +129,9 @@ is the share of that reference, and the R-factor says how close the mix comes.
 ![Report in Easy mode](img/easy_report.png)
 
 **Build the report** writes a PDF with one page per sample group, its figures and CSV files, into a new dated folder
-each time; the *Check before building* list names what to look at first.
+each time; the *Check before building* list names what to look at first. **Add the Compare plot as the first
+figure** (ticked while Compare shows rows) puts the spectra you compared on a page of their own. The first build asks
+once for the name printed on your reports (your computer account's name is offered; blank prints none).
 
 ## 1. Open a beamtime
 
@@ -202,8 +211,8 @@ Easy mode shows the four steps as numbered cards, in plain words:
    inside (his rule). Zones are in mm, so every scan of the holder that covers the area attaches to the zone
    automatically, loaded or not.
 4. **4 · Send to Check**: one sentence says how the spectrum is made (the exact settings are in its tooltip); press
-   **Add to Check**, then follow **Go to Check ›**. **Load polygon…** reads a polygon saved by John Bussey's GUI
-   (`_polygon_roi.json`) into a new sample. Name the sample before saving it in Check: a sample still called *zone 1*
+   **Add to Check**, then follow **Go to Check ›**. **Load polygon…** (Advanced mode) reads a polygon saved by John
+   Bussey's GUI (`_polygon_roi.json`) into a new sample. Name the sample before saving it in Check: a sample still called *zone 1*
    is saved under that name.
 
 Made a mistake? **Ctrl+Z** undoes the last zone or settings change (**Edit > Undo** names it), **Ctrl+Y** redoes it;

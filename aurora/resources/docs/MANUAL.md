@@ -90,13 +90,13 @@ in Report, and the same chip over the Compare library).
 | Perspective | Easy mode | Advanced mode adds |
 |---|---|---|
 | Home | the scan tree, the project summary and the scan analysis summary | the Kind column, the folder, kind and label rows, the sgm_report notes, the full table of h5 attributes, the SDD geometry, the full error of a failed open |
-| Survey | the holder, the plate map with footprints and zones, the zone tool bar (**Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**), the **Zone preview** (scan, **Open in Reduce**), the footprint legend, the sample-sheet rows, the sketch when the holder has one, **Load a sketch…** | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…**; **Polygon** and **every stroke starts a new zone** in the tool bar; **Show** in the **Zone preview** |
-| Reduce | the four numbered steps: **Scans of holder holderA**, **Which X-rays to count** (preset, from, to, the caption), **Outline the sample** (the zone tool bar: **Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**; **New sample**, **Delete sample**, the sample name, the colour caption), **Send to Check** (one sentence of how the spectrum is made, **Add to Check**, **Go to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **Polygon** and **every stroke starts a new zone** in the tool bar, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview's **Show** menu |
+| Survey | the holder, the plate map with footprints and zones, the zone tool bar (**Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**, **New sample**), the **Zone preview** (scan, **Open in Reduce**), the footprint legend, the sample-sheet rows, the sketch when the holder has one, **Load a sketch…** | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…**; **Polygon** and **every stroke starts a new zone** in the tool bar; **Show** in the **Zone preview** |
+| Reduce | the four numbered steps: **Scans of holder holderA**, **Which X-rays to count** (preset, from, to, the caption), **Outline the sample** (the zone tool bar: **Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**; **New sample**, **Delete sample**, the sample name, the colour caption), **Send to Check** (one sentence of how the spectrum is made, **Add to Check**, **Go to Check**); the **Preview** with **all scans of the sample** | **Load all**, **Load polygon…**; **Polygon** and **every stroke starts a new zone** in the tool bar, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview's **Show** menu |
 | Check | **Spectra to check** (what AURORA ticked and what to look for, **Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder holderA** (**Run the checks on holder holderA**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
 | Fit | the **LCF** tab (**Mix of references (LCF)**) with its fixed options stated and the meaning of a coefficient; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
 | Maps | not shown (**Ctrl+7** says *Maps is part of Advanced mode (Ctrl+Shift+A)*) | the whole perspective |
-| Report | **Options** (title, output, author, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab, the page **zoom** |
+| Report | **Options** (title, output, author, **Add the Compare plot as the first figure**, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab, the page **zoom** |
 | Menus | every entry except those on the right | **File > Restore zones from a backup…**, **File > Re-reduce the stack with the project ROI bins**, **Edit > History…** (and **View > Go to > Maps**) |
 | Settings | appearance, text size, report author, the last project at start, advanced mode, the update check, the getting-started guide | the de-spike threshold, the two default normalisations, the map colour map, the reference spectra folder |
 
@@ -140,7 +140,8 @@ program, no permission) gives one calm dialog that names it.
   **Next holder** (**Ctrl+PgDown**), **Go to** (**Ctrl+1** … **Ctrl+8**; Maps only in Advanced mode), **Full screen**
   (**F11**; Control-Command-F on macOS, where F11 shows the desktop).
 - **Help**: **User guide**, **Glossary** (every word AURORA uses, in plain language, 1.5), **Manual**, **Tutorials**,
-  **Installation and sharing**; **Help on this page** (**F1**);
+  **Installation and sharing**; **Quick start** (the user guide's quick start for non-specialists: the steps of
+  *Getting started* on Home, explained); **Help on this page** (**F1**);
   **Keyboard shortcuts** (**Ctrl+/**, generated from the window, so it always lists every shortcut); **What's this?**
   (**Shift+F1**, then click a control to read what it does); **Open the demo beamtime**; **Run self-test…** (checks
   every part of this installation on a synthetic beamtime in the background, with its progress and **Cancel** in the
@@ -423,8 +424,8 @@ A minimal sheet, as the demo beamtime writes it (`samples.csv`):
 
 ```
 Sample ID,Holder,Group,Composition,Edges,Notes
-1 alpha,holderA,Group 1,NaF,F K,synthetic demo sample, left pad
-2 beta,holderA,Group 2,CaF2-LiF in silica,F K,synthetic demo sample, right pad
+1 alpha,holderA,Group 1,NaF,F K,synthetic demo sample on the left pad
+2 beta,holderA,Group 2,CaF2-LiF in silica,F K,synthetic demo sample on the right pad
 ```
 
 ### 2.5 The optional files of a beamtime
@@ -480,16 +481,22 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
   scale for high-energy surveys where samples are darker than the plate. **clip** trims the colour range at both
   ends (0.5 % by default). All Advanced.
 - **footprints**: the stacks of the holder, one colour and dash per status (complete, aborted, in progress, test; the
-  legend sits under the map in both modes). **zones**: the zones of the holder with their labels.
+  legend sits under the map in both modes). Each footprint's label (its time and sample name; in Easy mode the
+  sample part of the name, *09:27 alpha_beta*) sits inside the footprint at its bottom left and is never wider than
+  it: shortened to the time, or left out, when the footprint is narrow at the zoom of the moment (the hover line names
+  the scan). **zones**: the zones of the holder with their labels.
 - Zones are drawn and erased on the plate map with the same tool bar as Reduce's stack map (4.2): **Draw** or
-  **Erase**, then **Rectangle**, **Brush** or **Lasso** (**Polygon** in Advanced), and drag; **Undo** and **Clear** are
-  beside them. The page opens with **Move**, so a click never changes a zone: in **Move** a click inside a zone
-  selects it, a click on a complete footprint outside every zone opens that stack in Reduce, and a double-click inside
+  **Erase**, then **Rectangle**, **Brush** or **Lasso** (**Polygon** in Advanced), and drag; **Undo**, **Clear** and
+  **New sample** (the next stroke starts the next sample) are beside them. The page opens with **Move**, so a click
+  never changes a zone; while **Move** is the tool neither **Draw** nor **Erase** is lit. In **Move** a click inside a
+  zone selects it, a click on the bare map deselects, a click on a complete footprint outside every zone opens that
+  stack in Reduce, and a double-click inside
   a zone over a complete footprint opens that stack in Reduce with the zone selected. A zone drawn here attaches to
   every stack of the holder it covers, loaded or not (4.3). A rectangle or lasso may start in the margin beside the
   map, to be sure of the edge points; another holder or a Reload during a drag cancels the drag. While **Grid of
   zones…** is armed the tool bar is off.
-- Right-click on a zone: **Rename…**, **Duplicate**, **Delete**, **Copy geometry**, **Zoom to zone**, and *Open … in
+- Right-click on a zone: **Rename…** (*Name this sample*: the holder's sample-sheet names not used yet, or a name
+  typed; a sheet name brings its group), **Duplicate**, **Delete**, **Copy geometry**, **Zoom to zone**, and *Open … in
   Reduce* for each complete stack it covers (the scan named). Right-click on the map outside the zones: **Fit view**
   (the first view again), **Load a sketch…** and **Remove the sketch**.
 - Hovering prints x, y, the footprint and the zone under the cursor. The line under the map says what the colour
@@ -500,8 +507,11 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
   the survey map, the line under the map says so (*1 measured area lies outside the survey map*).
 - The cards on the right show **Zones of holder holderA** (Easy: **Samples outlined on this holder**, with *No samples
   outlined on this holder yet …* while it has none), the **Zone preview**, the **Sketch** when the holder has one, and
-  **Samples on holder holderA (sample sheet)**: the rows of the sample sheet that belong to the holder. At the
-  smallest window the column scrolls rather than squeezing the preview. Without a sample sheet the samples card is one
+  **Samples on holder holderA (sample sheet)**: the rows of the sample sheet that belong to the holder, with their
+  *Notes* (where a sample sits, *left pad*), each card four rows high at least. A click on a sheet row selects that
+  sample's outline when the holder has one of that name; otherwise it arms **Draw** and the next sample drawn takes
+  the row's name and group (one undo step). At the smallest window the column scrolls rather than squeezing the
+  preview. Without a sample sheet the samples card is one
   line, *No sample sheet: names are typed by hand.*, with a link to 2.4 (*How to add one*), **New sample sheet…** and
   **Choose sample sheet…**; a sheet with no row for the holder says so and names the holders it lists (*The sample
   sheet lists no sample on holder holderA (its holders: …)*).
@@ -532,13 +542,16 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
     when covered, else the earliest. A loaded stack previews live; one not loaded is read once the stroke is written
     (progress and **Cancel** in the card), then drawn. **Open in Reduce** opens that stack in Reduce with the zone
     selected. In Advanced, **Show** chooses the curves, as in Reduce's preview (4.7);
-  - one line that a screen reader reads too: *1 alpha: 30 survey points · F Kα window 60–73 ch · on 09:27: 12 of 12
-    pixels* (Advanced names the zone: *zone 1 '1 alpha': …*; when the detectors' windows differ, the window is the
-    one *on detector 1 (SDD1)*).
+  - one line that a screen reader reads too: Easy *1 alpha: 30 pixels · F Kα window 600–740 eV · on 09:27: 12 of 12
+    pixels*; Advanced names the zone, its survey points and the channels: *zone 1 '1 alpha': 30 survey points · F Kα
+    window 60–73 ch · …* (when the detectors' windows differ, the window is the one *on detector 1 (SDD1)*).
   Easy mode names the sample (its label, *sample 3* while it has none): without a sample selected it reads *Select a
   sample, or draw one on the map (Draw, then drag)*; an empty one *1 alpha is empty: drag on the map to draw it*; one
   off the plate *1 alpha holds no survey pixel: it lies outside the holder map*; one over no stack *1 alpha covers no
-  measured area of holder holderA: draw it over a rectangle of the map*. Advanced mode says *Select a zone, or draw one
+  measured area of holder holderA: draw it over a rectangle of the map*, and one over a stack that gives no spectrum
+  *3 gamma lies on 10:14 gamma, which stopped early (20 of 66 energies): no spectrum can be made from it. Only complete
+  stacks give spectra.* (the same sentence in Reduce and the report). Without a project the card is empty. Advanced
+  mode says *Select a zone, or draw one
   on the map (Draw, then drag)*, *zone 3 is empty: drag on the map to draw it*, *zone 3 holds no survey point: it lies
   outside the plate map* and *zone 3 covers no scan of holder holderA: draw it over a scan footprint (dashed
   outlines)*.
@@ -651,20 +664,33 @@ appear at the end of the list.
   strokes are two steps.
 - The zone a stroke goes to: an erase goes to the selected zone, or with none selected to the zone under its start
   (which becomes selected). A draw stroke starts a new zone when none is selected; otherwise it adds to the selected
-  zone, except a stroke that neither overlaps nor touches it, which starts a new zone ("draw one sample, then the
-  next"); hold **Ctrl** at the release to add it to the selected zone anyway (a sample in two parts).
+  zone when it goes over one of its points (or over a part erased from it), and a stroke beside it starts a new zone:
+  neighbouring grains always touch, so touching is not enough ("draw one sample, then the next"). A brush stroke or a
+  click that touches the selected zone (within one pitch) paints on it. Hold **Ctrl** at the release to add a stroke
+  to the selected zone anyway (a sample in two parts). **New sample** (**N**), **Esc** on the Survey, or a click on
+  the bare map in **Move** on the Survey deselect, so the next stroke starts a new sample. In Easy mode a stroke that
+  grew a sample says in the status line *Added to sample 1. To start another sample, press New sample (N).*, and a
+  click that started a one-pixel sample says so (*A click adds the pixel under it to a new sample 2 (1 pixel). Ctrl+Z
+  undoes.*); the status line also says on how many complete stacks a sample lies (*sample 2 lies on no complete
+  stack: only complete stacks give spectra*).
 - While a stroke moves, the map highlights the points it would add (in the zone's colour) or remove (crossed), and a
   line over the top-left of the map says what the release will do: *adds 12 points to zone 3 'NaF'*, *new zone 4: 12
-  points*, *erases 5 points from zone 3*. Between strokes it says what a drag does (*Drag to draw a zone ·
-  right-drag erases · Ctrl+Z undoes*). A stroke that would write nothing is not written, and the line says why:
-  *outside scan 09:27 alpha_beta: draw over its pixels* (Reduce), *no measured point there: draw over the coloured
-  map* (Survey), *nothing of zone 3 there to erase*, *nothing to erase here: no zone under the pointer*. No stroke
-  creates an empty zone (**New sample** does).
+  points*, *erases 5 points from zone 3* (Easy mode says sample and pixels: *adds 12 pixels to NaF*, *new sample 4: 12
+  pixels*; on the Survey an erase adds what the stack keeps, *· on 09:27 the sample keeps 4 of 6 pixels*). Between
+  strokes it says what a drag does (*Drag to draw a zone · right-drag erases · Ctrl+Z undoes*; Easy *Drag around a
+  sample to outline it · …*). A stroke that would write nothing is not written, and the line says why: *outside scan
+  09:27 alpha_beta: draw over its pixels* (Reduce), *no measured point there: draw over the coloured map* (Survey),
+  *nothing of zone 3 there to erase*, *nothing to erase here: no zone under the pointer*, and for an erase drag
+  shorter than half a pixel *Too small to be a drag: click a pixel to erase just that one.* No stroke creates an
+  empty zone (**New sample** does).
+- Each zone is drawn as the pixels it holds, filled in its colour with one outline round them, so an erased part
+  shows as a gap (its erase shape dashed); a zone with no pixel on the map shown is drawn as its shapes.
 
 ![Reduce, a rectangle being erased from a zone](img/reduce_erase.png)
 
 - Drawing over an erased area takes it back on the scan it is drawn on (the newest stroke wins). An erased lasso or
-  polygon is kept as an outline, drawn dashed in the erase colour (*minus 1 erased outline* in the caption).
+  polygon is kept as an outline, drawn dashed in the erase colour; the region caption counts every erased part
+  (*Region: 1 rectangle, 1 part erased · 4 of 12 pixels*).
 - Clicks: a click inside a zone other than the selected one selects it (where zones overlap, the smallest one); a
   click outside every zone, or a **Shift**+click, applies the tool to the pixel under the pointer (Draw adds it, Erase
   removes it from the selected zone). A drag shorter than half a pixel pitch is a stray drag and is ignored.
@@ -693,7 +719,7 @@ appear at the end of the list.
 holder*
 (number, label, group, number of attached scans) beside it. Selecting a zone shows its outline on the map and its
 card on the right. **Propose zones**, **Stitch…**, **Load polygon…** and **Save polygon…** are in the zone card
-(Advanced; **Load polygon…** in Easy mode too, as John Bussey's step 3 had it).
+(Advanced).
 **Load polygon…** reads a polygon ROI saved by John Bussey's GUI (`<sample>_polygon_roi.json`, at least
 three [x, y] vertices in mm) into a new sample named after the file; **Save polygon…** writes the selected sample in
 that format when it is exactly one polygon.
@@ -731,15 +757,18 @@ undo step, and the session is backed up just before.
   pixels and added over detectors 1, 2 and 4 (detector 3 saturated: left out), divided by the beam intensity (I0), and scaled so that the
   rise at the edge is 1. Single-point spikes are removed. An electron-yield spectrum (TEY) is made the same way.* An
   inverse yield starts *The spectrum is an inverse yield (IPFY): …*; a scan with every detector saturated says that only
-  the electron yield is usable. The exact settings are in its tooltip (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as
-  the earlier SGM XAS GUI) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (off by default in the earlier SGM XAS
-  GUI) · SDD1-4 (SDD3 saturated, left out) · PFY F Kα*: the saved files hold the zone mean, John Bussey's reduction). **Add to Check**
+  the electron yield is usable. The exact settings are in its tooltip (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · mean of the
+  outlined pixels · fluorescence / I0, edge jump = 1 · de-spike k = 6 · SDD1-4 (SDD3 saturated, left out) · PFY F Kα*;
+  Advanced mode adds the comparisons with John Bussey's GUI: *zone mean (as the earlier SGM XAS GUI)*, *de-spike k = 6
+  (off by default in the earlier SGM XAS GUI)*: the saved files hold the zone mean, John Bussey's reduction). **Add to Check**
   (**Ctrl+Return**) queues the selected sample on the current scan for Check (disabled while the outline holds no
-  pixel); the status line counts what waits (*1 alpha on 09:27 added to Check (1 waiting)*) and the link **Go to
-  Check** appears next to the button. Settings that do not exist yet are made from the Easy defaults.
-  A sample still called *zone 1* gets a field *Name this sample:* under the map with the focus (John Bussey's GUI
-  asked for a label): **Enter** names it (one undo step, the sample sheet's group comes with a name the sheet knows),
-  **Esc** keeps *zone 1*, under which it is then saved. **Load polygon…** (4.3) sits next to **Add to Check**. A flagged SDD that is still in the sum is named
+  pixel, or saying why: the sample lies on another scan, or on a stack that stopped early); the status line counts
+  what waits (*1 alpha on 09:27 added to Check (1 waiting)*) and the link **Go to Check** appears next to the button.
+  Settings that do not exist yet are made from the Easy defaults.
+  A sample still called *zone 1* gets a field *Name this sample (Enter; Esc keeps 'zone 1'):* under the map with the
+  focus (John Bussey's GUI asked for a label); typing offers the sample sheet's names not used yet: **Enter** names it
+  (one undo step, the sample sheet's group comes with a name the sheet knows), **Esc** keeps *zone 1*, under which it
+  is then saved. **Load polygon…** (4.3) is in Advanced mode. A flagged SDD that is still in the sum is named
   (*SDD1 flagged saturated, still in the sum*), and so is an I0 flagged invalid that is still used.
 - When a sample's settings differ from the Easy defaults (set in Advanced, or by a rule), Easy mode shows the chip
   *advanced settings in use*; its tooltip lists the fields (*fluorescence normalisation: / I0, maximum = 1; SDD3
@@ -800,9 +829,9 @@ A plate measured as several overlapping stacks (tiles) becomes one stack with **
 
 ### 4.7 Preview
 
-Three linked panels for the current zone and selected scan, each with its title: *Fluorescence of the sample (each
-detector and their sum)* (*Inverse yield (IPFY) of the sample* for an inverse yield), *Electron yield (TEY): the
-surface* and *Beam intensity (I0) during the scan*, in arbitrary units (*arb. units*). The legend sits in a line of
+Three linked panels for the current zone and selected scan, each with its title: *Fluorescence (each detector and
+the sum)* (*Inverse yield (IPFY) of the sample* for an inverse yield), *Electron yield (TEY): the surface* and *Beam
+intensity (I0) during the scan*, in arbitrary units (*arb. units*). The legend sits in a line of
 its own under the fluorescence panel, never over the curves, in as many columns as the width holds (*SDD1* … *SDD4*,
 *sum*, a detector left out of the sum marked *(left out)*, a red dot for *repaired points (spikes)* while the
 fluorescence panel shows some). **all scans of the sample** overlays every included scan; Easy mode keeps only this
@@ -861,10 +890,12 @@ oxygen, not to the edge element (fluorine): the spectrum is an inverse yield (IP
 - Four draggable windows, one per detector, in the series colours and dashes. **same range for all detectors**
   (Advanced, on by default): dragging one, or a change of **from** or **to**, moves all four by as many channels (windows that differ per detector, such as a line's fixed bins, keep their offsets; Easy mode always works so, and the line below the boxes names the four windows); ticking it gives all four the shown window; untick it to set each detector apart (**for** chooses the
   detector the boxes edit).
-- **from** and **to** in detector channels; to is excluded, John Bussey's convention (60 and 83 sum channels 60 to
-  82). The line below gives the eV equivalent from the calibration: Easy mode *All four detectors: 600–740 eV
-  (channels 60 to 73, 10 eV per channel, not calibrated)*, Advanced *SDD1: channels 60:74 = 600–740 eV (10 eV/ch
-  nominal)*.
+- **from** and **to** in detector channels, both counted: *from 60 to 73* sums the channels 60 to 73, the notation of
+  every AURORA text (*60–73*). The files keep John Bussey's convention, where the end is excluded (`[60, 74]` in
+  `roi_bins.json`). The line below gives the eV equivalent from the calibration: Easy mode *All four detectors:
+  600–740 eV (channels 60–73, 10 eV per channel, not calibrated)*, or, for a line whose windows differ per detector,
+  *Detector 1 (SDD1): 600–740 eV (channels 60–73, …) · detectors 2–4 use the same band on their own scale (61–74,
+  62–75, 63–76)*; Advanced *SDD1: channels 60–73 = 600–740 eV (10 eV/ch nominal)*.
 - The chosen window goes into the settings of the selected sample's scans of the same edge (one edit) and is used by
   new samples of the holder. A fixed line keeps the stack's reduced bins; custom windows (and the line of the edge)
   are summed from the raw spectra, per detector and energy, and cached under `.aurora/cache/<day>/<scan>/_xrf_windows/`.
@@ -898,8 +929,8 @@ four detectors on a zone and the I0 explorer. On a short window in Advanced mode
 ### 5.1 Spectra to check
 
 The card **Spectra to check** holds one row per sample and scan. In Easy mode two lines above the table say what
-AURORA ticked (*AURORA ticked Looks OK where its own checks found no problem; untick any spectrum that looks wrong to
-you.*) and what to look for (one rise at the edge, then a roughly level curve; four detector curves of the same shape;
+AURORA ticked (*AURORA ticked Looks OK where its own checks found no ✗ bad problem (a ! check row is worth a look
+before you save); untick any spectrum that looks wrong to you.*) and what to look for (one rise at the edge, then a roughly level curve; four detector curves of the same shape;
 no single point far off the curve; a flat or very noisy curve means the outline missed the sample).
 
 | Column | Meaning |
@@ -909,7 +940,7 @@ no single point far off the curve; a flat or very noisy curve means the outline 
 | Pixels | pixels of the scan inside the outline, of all its pixels (*6 of 12*) |
 | Bad energies | energies repaired or left out: a spike (replaced by the value of its neighbours), a beam intensity below 20 % of its median, a missing map |
 | Messages | chips *✓ ok*, *! check*, *✗ bad* (hover a chip for its messages), then the most important message |
-| Looks OK | the spectrum is saved by **Save ticked → Compare** and goes into the report (it is the scan's *include* tick) |
+| Looks OK | the spectrum is saved by **Save ticked → Compare** and goes into the report (it is the scan's *include* tick); *saved 05:54* once its files exist in `processed/reduced/` (also when an earlier session saved them; the guide on Home counts them) |
 
 The messages are the checks of John Bussey's GUI, ported, in plain words with the expert term in parentheses (the
 same text in both modes; Advanced mode adds where a flag came from, *(sgm_report)* or *(AURORA check)*): the outline
@@ -920,7 +951,10 @@ sum on the scan card in Advanced mode);
 N missing energy points; I0 zero or missing at N energies; I0 varying by more than a factor 3 over the scan; TEY
 without finite values; more than 10 % of the points flagged bad. AURORA adds the scan's flags with their source (SDD
 saturated, high count rate, I0 invalid; from sgm_report or from AURORA's own check) and a note when spikes were found
-within three energy steps of the edge. The thresholds (fewer than 3 points, a factor 3, more than 10 %) are those of
+within three energy steps of the edge. A fluorescence signal that falls across the edge is a check (*the fluorescence
+signal falls across the edge instead of rising*); an electron yield (TEY) that falls, common on insulating samples
+such as glasses, is a note that names it (*the electron-yield (TEY) signal shows no clear edge on this sample …: the
+fluorescence spectrum is the one to use*). The thresholds (fewer than 3 points, a factor 3, more than 10 %) are those of
 John Bussey's GUI.
 
 The Messages column shows the first ✗ bad message, else the first ! check one, else the inverse-yield note
@@ -1332,13 +1366,19 @@ three cards: **Options**, **Check before building** and **Pages**.
   **Browse…**). Each build goes into its own folder inside it, so nothing earlier is overwritten (9.3). A folder that
   cannot be written (read-only, protected) gives one calm message that names it and points to **Browse…**.
 - A muted line names the author: *Author: A. Name, from Settings* or *Author: A. Name, from the system account*, or *No
-  author line (Settings > report author)*; Easy mode: *Author: A. Name (from your computer account; change it in
-  Settings > report author)*.
+  author line (Settings > report author)*; Easy mode: *Author: A. Name (Settings > report author)*, and before the
+  first build *Author: asked at the first build (your computer account's name, A. Name, is offered; blank prints
+  none)*.
+- **Add the Compare plot as the first figure**: the spectra ticked Show in Compare, as plotted there (scaled, offset,
+  labelled, with the caption that says how), on a page after the cover and in `figures/compare.png`. Ticked by itself
+  while Compare shows rows, until you change it; disabled while Compare shows none.
 - Easy mode states what the report contains, read-only, for example *The report will hold one page per sample group
   (all groups, every holder) with the spectra ticked Looks OK, then each detector separately (Appendix A), the holder
   maps with your outlines (Appendix B) and the quality notes (Appendix C). Figures at print quality (600 dpi). Compare
-  and Fit results are not in it: use Export… in Compare and Fit.* (Advanced: *The report covers every holder and all
-  groups, with Appendix A (the four detectors) and Appendix B (plate maps); Final preset, figures at 600 dpi.*)
+  and Fit results are not in it: tick the box above for the Compare plot, or use Export… in Compare and Fit.* (with
+  the box ticked: *The report will hold the Compare plot, then one page per sample group …*). (Advanced: *The report
+  covers every holder and all groups, with Appendix A (the four detectors) and Appendix B (plate maps); Final preset,
+  figures at 600 dpi.*)
 - When the output folder cannot be written (a protected or read-only folder), **Build the report** is disabled and
   the card says *The report folder cannot be written: choose another with Browse…*. A choice made in
   Advanced mode stays in force and is named there (*chosen in Advanced mode*).
@@ -1348,14 +1388,16 @@ three cards: **Options**, **Check before building** and **Pages**.
   - *Draft*: the current holder only, no Appendix A or B, figures at 110 dpi. Appendix C (the quality notes) is always
     printed. After choosing a preset, the options can still be changed one by one.
 - **Build the report** runs in the background with progress and **Cancel**. A build works on a snapshot of the zones,
-  so editing zones during a build cannot change the report. When neither Settings nor the system account gives an
-  author, the first build asks once (blank or Cancel builds without an author line; a name typed there is kept in
-  Settings).
+  so editing zones during a build cannot change the report. Unless Settings > report author holds a name, the first
+  build asks once for the name printed on your reports, filled in with the computer account's full name (a shared
+  lab computer would otherwise print its owner's name); a name typed there is kept in Settings, blank or Cancel gives
+  no author line.
 
 ### 9.2 Check before building
 
 **Check before building** runs by itself whenever the zones or the scope change while the Report perspective is shown.
-Its first line counts what the next build contains, for example *14 zones · 31 spectra · 3 warnings · 1 note* (ignored
+Its first line counts what the next build contains, for example *14 zones · 31 spectra · 3 warnings · 1 note* (Easy
+mode: *14 samples · …*; ignored
 findings are not counted; a note, shown with the muted dot, drops no data and is counted apart). Three tabs:
 
 - **Findings** (the number of open findings in the tab title). Each row has an icon, the Finding, an **Ignore** tick

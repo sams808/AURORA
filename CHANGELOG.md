@@ -28,6 +28,18 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
   "zone N" opens a field "Name this sample:" (Enter names it, Esc keeps "zone N").
 - A session saved on another computer says so when it opens (session.json keeps a short hash of the computer, never
   its name).
+- After two newcomers tried it (second round): a grain drawn beside the selected sample starts a new sample (touching
+  is not adding; Ctrl adds, a brush paints on), the Survey has **New sample**, Esc and a click on the bare map
+  deselect, and a stroke that grew a sample says how to start the next one; each sample is drawn as the pixels it
+  holds, so an erase shows; Easy says sample and pixels everywhere; footprint labels stay inside their footprints;
+  a click on a sample-sheet row (now with its notes) names the next sample, and Rename offers the sheet's names;
+  Reduce's stack map colours from 0, its scan list leads with the sample's name; a sample on a stack that stopped
+  early gets one sentence everywhere; the top bar's Next link reads on the navy bar and links follow a theme switch;
+  a read-only beamtime opens without a box; a working folder asks before it adopts outlines saved earlier and keeps
+  the holder; Check marks rows already saved, names the electron yield when it falls, and the guide counts saved
+  spectra from the files; Compare names every curve and says they are offset; the report can start with the
+  Compare plot, draws Appendix B as the pixels each sample holds, wraps its captions and reads in plain words; the
+  first report asks once for the name to print; Help > Quick start.
 - A beamtime with only `raw/<day>/<scan>` opens and works: every configuration file is optional, and a file of the
   wrong shape never stops a project; Home and `aurora project` say what was left out and why. The project's own
   `config/sdd_calibration.json` is used before the CLS toolkit's file next to the beamtime (named when used); File >

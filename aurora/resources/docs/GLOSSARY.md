@@ -33,7 +33,7 @@ MCR-ALS, ITFA](#pca-mcr-als-itfa) · [Report](#report) · [Appendix A, B and C](
 The measurements of one visit to the beamline, kept in one folder that contains a folder named `raw`.
 
 *Why it matters:* It is what you open in AURORA; your outlines, spectra and reports are kept with it.
-*In AURORA:* Home, Open project….
+*In AURORA:* Home, Open project…
 *Also called:* project, beamtime folder.
 
 ### SGM beamline
@@ -192,7 +192,7 @@ The average beam-intensity curve of the scans of a holder marked good, used for 
 trusted.
 
 *Why it matters:* It keeps a scan with a broken beam reading usable.
-*In AURORA:* Check (Advanced), I0 of the holder's scans (per-pixel mean) (Advanced mode).
+*In AURORA:* Check (Advanced), I0 of the holder's scans (per-pixel mean).
 *Also called:* good I0, good-I0.
 
 ### TEY (total electron yield)
@@ -257,7 +257,7 @@ A detector that receives more X-rays than it can count: its curve flattens and s
 The number of X-rays a detector counts per second, in thousands (kcps).
 
 *Why it matters:* A very high rate means a detector may miss counts (dead time) or saturate.
-*In AURORA:* Check (Advanced), Scans of holder … (Advanced mode).
+*In AURORA:* Check (Advanced), Scans of holder …
 *Also called:* kcps, high rate, dead time, pile-up.
 
 ### Emission spectrum (XRF)
@@ -399,7 +399,7 @@ The squared differences between fit and data, divided by the noise and by the nu
 parameters. Near 1, the fit is as good as the noise allows.
 
 *Why it matters:* It ranks fits and scales the uncertainties.
-*In AURORA:* Fit (Advanced detail) (Advanced mode).
+*In AURORA:* Fit (Advanced detail).
 *Also called:* χ², χ²ν, chi-square.
 
 ### Bootstrap (±)
@@ -414,7 +414,7 @@ Methods for a set of spectra: PCA counts how many distinct shapes it contains; M
 amounts in each spectrum; ITFA refines them with some amounts known.
 
 *Why it matters:* They need no reference spectra.
-*In AURORA:* Fit, the Advanced tabs (Advanced mode).
+*In AURORA:* Fit, the Advanced tabs.
 *Also called:* PCA, MCR, MCR-ALS, ITFA.
 
 ## The report and the application
@@ -458,4 +458,4 @@ A folder where AURORA keeps your outlines, spectra and reports when the beamtime
 locked drive, a read-only share).
 
 *Why it matters:* Your work is kept even when the data are read-only.
-*In AURORA:* the read-only banner, Choose a working folder….
+*In AURORA:* the read-only banner, Choose a working folder…
