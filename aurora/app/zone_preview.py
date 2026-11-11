@@ -33,8 +33,8 @@ from aurora.core.constants import DETS, N_CH
 
 TITLE = "Zone preview"
 MIN_PANEL_PX = 140              # the emission and the XAS panel each get at least this (px at the Text size): their
-EMISSION_PX = 154               # data areas keep 48 px (the XAS's sparse axis) and 80 px (the emission, under its
-                                # title) for their ticks
+EMISSION_PX = 150               # data areas keep 48 px (the XAS's sparse axis) and 80 px (the emission, under its
+                                # title: EmissionPlot._fit_title) for their ticks
 HEADROOM = 0.18                 # the emission's y range reaches this share of its decades above the highest count
 OPEN_TEXT = "Open in Reduce"
 NOT_LOADED = " (not loaded)"
@@ -125,6 +125,7 @@ class EmissionPlot(QWidget):
     def set_spectrum(self, per_point, n: int, title: str = "") -> None:
         """per_point: (4, 256) mean counts per point (None: nothing to draw)."""
         self.plot.setTitle(title)
+        self._fit_title()
         self.line.setVisible(per_point is not None)
         self.line.setCurrentWidget(self.legend)
         if per_point is None:
@@ -217,6 +218,15 @@ class EmissionPlot(QWidget):
 
     def _restyle(self) -> None:
         self.sum_curve.setPen(mk_pen(pc("sum"), 2.0))
+        self._fit_title()                               # the title's font follows the Text size
+
+    def _fit_title(self) -> None:
+        """The title row as tall as its text: pyqtgraph gives a title a fixed 30 px row, which leaves the short
+        emission plot (EMISSION_PX) less than 80 px of data area under 'XRF at 720.0 eV · 15 survey points'."""
+        pi = self.plot.getPlotItem()
+        tl = pi.titleLabel
+        if tl.text:
+            pi.layout.setRowFixedHeight(0, max(float(tl.minimumHeight()), 1.0))
 
     # ------------------------------------------------------------------ hover
     def _names_that_fit(self, ticks, centre) -> set[str]:
