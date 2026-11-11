@@ -6,30 +6,43 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from aurora.core.names import element_symbols
+from aurora.core.names import element_names, element_symbols
 
 EXTS = (".csv", ".txt", ".dat", ".nor", ".xmu")
-ELEMENT_WORDS = {"fluorine": "F", "oxygen": "O", "carbon": "C", "nitrogen": "N", "sodium": "Na", "calcium": "Ca",
-                 "selenium": "Se", "uranium": "U", "copper": "Cu", "iron": "Fe", "aluminium": "Al", "aluminum": "Al",
-                 "silicon": "Si", "magnesium": "Mg", "potassium": "K", "barium": "Ba", "zirconium": "Zr"}
+# a shell as reference file names write it: K, L3, L23, L2,3, L3L2, M5, M45, N45 ...
+_SHELL = r"[Kk]|[LlMmNn](?:\d(?:,?\d|[LlMmNn]\d)?)?"
 
 
 @dataclass
 class RefEntry:
     path: Path
     label: str
-    edge: str = ""          # 'F K', 'Se L3', ... guessed from the file or folder name, '' when unknown
+    edge: str = ""          # 'F K', 'Se L3', 'Fe L2,3', ... guessed from the file or folder name, '' when unknown
+
+
+def _edge_text(el: str, shell: str) -> str:
+    """'Fe', 'l23' -> 'Fe L2,3'; 'Se', 'l3l2' -> 'Se L3,2'; 'F', 'k' -> 'F K'."""
+    s = shell.upper().replace(",", "")
+    s = re.sub(r"^([KLMN])(\d)[KLMN]?(\d)$", r"\1\2,\3", s)
+    return f"{el} {s}"
 
 
 def guess_edge(name: str) -> str:
-    """'NaF_F_K_edge.csv' -> 'F K'; 'CaF2-fluorine-k.txt' -> 'F K'; 'ref_Se_L3.csv' -> 'Se L3'."""
+    """'NaF_F_K_edge.csv' -> 'F K'; 'CaF2-fluorine-k.txt' -> 'F K'; 'ref_Se_L3.csv' -> 'Se L3'; 'hematite_fe_l23' ->
+    'Fe L2,3'; 'manganese_L3' -> 'Mn L3'; 'cobalt-L3' -> 'Co L3'. Element names are xraydb's (H..U), with the
+    spellings aluminium and sulphur."""
     nm = name.replace("-", "_").replace(" ", "_")
-    m = re.search(r"(?i)(?:^|_)([A-Za-z]{1,2})_([KLMN]\d?)(?:_|$|\.)", nm)
+    end = r"(?=_|$|\.)"
+    m = re.search(rf"(?:^|_)([A-Za-z]{{1,2}})_({_SHELL}){end}", nm)
     if m and m.group(1).capitalize() in element_symbols():
-        return f"{m.group(1).capitalize()} {m.group(2).upper()}"
-    m = re.search(r"(?i)(" + "|".join(ELEMENT_WORDS) + r")_?([klmn]\d?)(?:_|$|\.)", nm)
+        return _edge_text(m.group(1).capitalize(), m.group(2))
+    words = element_names()
+    m = re.search(r"(?i)(?:^|_)(" + "|".join(sorted(words, key=len, reverse=True)) + rf")_?({_SHELL}){end}", nm)
     if m:
-        return f"{ELEMENT_WORDS[m.group(1).lower()]} {m.group(2).upper()}"
+        return _edge_text(words[m.group(1).lower()], m.group(2))
+    m = re.search(rf"(?:^|_)([A-Z][a-z]?)((?:L|M|N)\d(?:,?\d|[LMN]\d)?){end}", nm)       # glued, capitalised: FeL23
+    if m and m.group(1) in element_symbols():
+        return _edge_text(m.group(1), m.group(2))
     return ""
 
 

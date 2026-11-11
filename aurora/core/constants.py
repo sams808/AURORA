@@ -36,7 +36,8 @@ def sdd_geometry(date: dt.date | None) -> dict:
 # stack status (sgm_report v2.5)
 MIN_SPAN_EV = 5.0                       # shorter stacks are tests
 IN_PROGRESS_MIN = 25                    # incomplete and touched less than this many minutes ago = still running
-TEST_NAME_PATTERN = r"(?i)photodiode|_diode|i0_?test|beam_?test|dark"
+# test scans by name: aurora.core.names.is_test_name (whole tokens: photodiode, i0_test, beam_test anywhere; dark,
+# diode, i0 as the whole label)
 
 # quality checks (sgm_report v2.5): see docs/HANDOFF.md section 2.4
 SAT_TOP_CV = 0.02                       # brightest-pixel total counts: spread over the probed energies below this ...

@@ -25,8 +25,8 @@ def dumps(obj) -> str:
 
 
 class Snapshot(dict):
-    """{'holders': {holder key: JSON text | None (absent)}, 'good_i0': JSON text, 'rules': JSON text}: the state an
-    edit can change."""
+    """{'holders': {holder key: JSON text | None (absent)}, 'good_i0': JSON text, 'rules': JSON text, 'ui': JSON text of
+    the undoable ui values (the chosen sample sheet)}: the state an edit can change."""
 
     @property
     def keys_touched(self) -> frozenset:
@@ -79,7 +79,8 @@ class SnapshotCommand(QUndoCommand):
             self.setText(other.text().replace(f"zone {self.place_after[1]}", "a new zone"))
         # the newer edit starts where this one ended: keep this 'before', take its 'after'
         self.after = Snapshot(holders={**self.after["holders"], **other.after["holders"]},
-                              good_i0=other.after["good_i0"], rules=other.after.get("rules"))
+                              good_i0=other.after["good_i0"], rules=other.after.get("rules"),
+                              ui=other.after.get("ui"))
         self.place_after = other.place_after
         self.when = other.when
         if self.after == self.before:

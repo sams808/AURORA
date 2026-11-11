@@ -104,11 +104,21 @@ def _guarded(name: str, fn, *args) -> int:
 
 
 def cmd_project(path: Path) -> int:
+    from aurora.core import overview
     from aurora.core.model import Project
     proj = Project.discover(path)
     print(f"project {proj.root}\nraw     {proj.raw}\n{proj.calibration.describe(proj.root) if proj.calibration else ''}")
     if proj.roi_bins and proj.roi_bins.labels:
         print("fixed ROI bins: " + ", ".join(proj.roi_bins.labels))
+    facts = overview.project_facts(proj)
+    for key, text in overview.sheet_rows(proj, facts):
+        print(f"{key}: {text}")
+    cal_path = proj.shown(proj.calibration.path) if proj.calibration is not None else None
+    for where, problems in proj.config_problems.items():
+        if where != cal_path:                   # the calibration line above says its problems already
+            print(f"config problem: {where}: {'; '.join(problems)}")
+    for note in proj.layout_notes:
+        print(f"layout: {note}")
     for day in proj.days:
         print(f"\n{day.date or day.path.name}: {len(day.holders)} holders, {len(day.scans)} scans"
               + ("  (sgm_report summary present)" if day.summary else ""))

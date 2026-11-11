@@ -145,26 +145,43 @@ class EdgeLine:
     sigma_ch: float
     n_sigma: float
     sigma_source: str                # where the peak width came from
+    nominal: bool = False            # the channels come from the nominal 10 eV per channel, not a calibration
 
 
-def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
+def edge_line_windows(edge, calibration, roi_bins=None, nominal: bool = False) -> EdgeLine | None:
     """The preset 'line of the edge': the resonant emission line of the edge (xraydb) at each detector's calibrated
     channel c, floor(c - n_sigma σ) to ceil(c + n_sigma σ) in that detector's channels: the rule of sgm_report's
     fixed bins (RoiBins.ensure), so a line of roi_bins.json gets its own bins back. σ is the line's own fitted width in
     roi_bins.json when it has one, else the median width of the other fitted lines, else sgm_report's typical 3.5
-    channels; n_sigma is roi_bins' (1.5). None without a calibration (the channels would be nominal) or an edge."""
-    if edge is None or calibration is None or not getattr(calibration, "calibrated", False):
+    channels; n_sigma is roi_bins' (1.5). None without a calibration (the channels would be nominal) or an edge;
+    nominal=True gives it anyway, on the calibration's nominal gains (UNCALIBRATED_EV_PER_CH per channel for every
+    detector without a valid entry), marked `nominal` (Reduce: 'nominal calibration, check the peak')."""
+    if edge is None:
         return None
+    calibrated = calibration is not None and getattr(calibration, "calibrated", False)
+    if not calibrated and not nominal:
+        return None
+    if calibration is None:
+        from aurora.core.io.config import Calibration
+        calibration = Calibration()
     from aurora.core.lines import resonant_line
     label = resonant_line(*edge)
     ev = emission_line_ev(label)
     if ev is None:
         return None
-    data = getattr(roi_bins, "data", {}) or {}
-    n_sigma = float(data.get("_meta", {}).get("n_sigma", N_SIGMA))
-    own = data.get(label, {}).get("sigma_ch") if isinstance(data.get(label), dict) else None
-    others = [float(v["sigma_ch"]) for k, v in data.items() if not k.startswith("_") and isinstance(v, dict)
-              and v.get("sigma_ch") is not None]
+    # the fitted widths of the file as it was read (RoiBins.raw): a line kept out for its bins still has its width
+    data = getattr(roi_bins, "raw", None) or getattr(roi_bins, "data", {}) or {}
+
+    def width(v):
+        w = v.get("sigma_ch") if isinstance(v, dict) else None
+        return float(w) if isinstance(w, (int, float)) and not isinstance(w, bool) and np.isfinite(w) and w > 0 \
+            else None
+    meta = data.get("_meta") if isinstance(data.get("_meta"), dict) else {}
+    ns = meta.get("n_sigma")
+    n_sigma = float(ns) if isinstance(ns, (int, float)) and not isinstance(ns, bool) and np.isfinite(ns) and ns > 0 \
+        else N_SIGMA
+    own = width(data.get(label))
+    others = [w for k, v in data.items() if not str(k).startswith("_") for w in [width(v)] if w is not None]
     if own is not None:
         sig, src = float(own), f"the fitted width of {label} in roi_bins.json"
     elif others:
@@ -176,7 +193,7 @@ def edge_line_windows(edge, calibration, roi_bins=None) -> EdgeLine | None:
         c = float(calibration.ch(d, ev))
         windows[d] = [int(max(0, np.floor(c - n_sigma * sig))), int(min(N_CH, np.ceil(c + n_sigma * sig)))]
     return EdgeLine(label=label, line_ev=ev, windows=normalise_windows(windows), sigma_ch=sig, n_sigma=n_sigma,
-                    sigma_source=src)
+                    sigma_source=src, nominal=not calibrated)
 
 
 def john_default_windows(edge) -> tuple[str, dict[str, list[int]]] | None:

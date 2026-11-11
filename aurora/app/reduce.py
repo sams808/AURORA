@@ -12,7 +12,7 @@ import json
 
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QCursor, QKeySequence
+from PySide6.QtGui import QColor, QCursor, QKeySequence
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QToolButton, QVBoxLayout, QWidget)
@@ -24,7 +24,7 @@ from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, ma
 from aurora.app.preview import PreviewPlot
 from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
-from aurora.app.theme import curve, min_height, on_theme_changed, refill_tones, set_item_tone
+from aurora.app.theme import TOKENS, curve, min_height, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, fit_height, overlay_host,
                                 page_scroll, pair, set_enabled)
@@ -173,9 +173,19 @@ class ScanSettingsCard(Card):
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(6)
         self.line = QComboBox(); self.line.addItems(lines)
+        self.undefined_line = ""                # a line neither the stack nor the windows define (no fluorescence)
         if settings.line and settings.line not in lines:       # a window line the stack has no fixed bins for
-            self.line.addItem(settings.line)
-        self.line.setCurrentText(settings.line if settings.line else (lines[0] if lines else ""))
+            if settings.roi:
+                self.line.addItem(settings.line)
+            else:                               # a line this beamtime does not define: kept, said in the warning tone
+                self.undefined_line = settings.line
+                self.line.addItem(f"{settings.line} (not defined in this beamtime)", settings.line)
+                self.line.setItemData(self.line.count() - 1, QColor(TOKENS["warn_fg"]), Qt.ForegroundRole)
+        i = self.line.findData(settings.line) if self.undefined_line else self.line.findText(settings.line)
+        if settings.line and i >= 0:
+            self.line.setCurrentIndex(i)
+        else:
+            self.line.setCurrentText(settings.line if settings.line else (lines[0] if lines else ""))
         self.signal = QComboBox()
         for key, text in self.SIGNALS:
             self.signal.addItem(text, key)
@@ -216,6 +226,15 @@ class ScanSettingsCard(Card):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         self.body.addLayout(grid)
+        self.line_note = QLabel("")
+        self.line_note.setWordWrap(True)
+        self.line_note.setProperty("tone", "warn")
+        if self.undefined_line:
+            self.line_note.setText(f"{self.undefined_line} (not defined in this beamtime): this scan's fluorescence "
+                                   "is left out. Pick another line, or set the window in step 2 and Save as a fixed "
+                                   "line….")
+        self.line_note.setVisible(bool(self.undefined_line))
+        self.body.addWidget(self.line_note)
         cr = QHBoxLayout()
         self.copy_btn = QPushButton("Copy to…")
         self.copy_btn.clicked.connect(self._copy_menu_at_button)
@@ -252,7 +271,8 @@ class ScanSettingsCard(Card):
 
     def values(self) -> dict:
         """The card's widgets as ScanSettings field values."""
-        return {"include": self.inc.isChecked(), "sdd": [c.isChecked() for c in self.sdd], "line": self.line.currentText(),
+        line = self.line.currentData() if isinstance(self.line.currentData(), str) else self.line.currentText()
+        return {"include": self.inc.isChecked(), "sdd": [c.isChecked() for c in self.sdd], "line": line,
                 "signal": self.signal.currentData(), "fluo_norm": self.fn.currentData(), "tey": self.tey.isChecked(),
                 "tey_norm": self.tn.currentData(), "despike": self.ds.isChecked(), "k": float(self.k.value()),
                 "i0_source": self.i0src.currentData(), "pre": self._parse(self.pre.text()), "post": self._parse(self.post.text())}
@@ -534,6 +554,8 @@ class ReducePerspective(QWidget):
         session.zones_changed.connect(self._zones_changed)
         session.zone_selected.connect(self._zone_selected)
         session.stack_selected.connect(self._stack_selected)
+        session.sheet_changed.connect(lambda: self._fill_zone_card(self.session.zone()))
+        session.config_changed.connect(self._config_changed)
         session.flags_changed.connect(self._flags_changed)
         session.add_settings_default(self._settings_default)
         on_theme_changed(self, lambda _s: (self.redraw_map(), refill_tones(self.scan_list)))
@@ -1380,6 +1402,14 @@ class ReducePerspective(QWidget):
         self.update_preview()
         self.update_actions()
 
+    def _config_changed(self) -> None:
+        """A configuration file was written (Save as a fixed line…, Import SDD calibration…): the presets and
+        the eV scale of step 2 follow it."""
+        sd = self.current_stack()
+        scan = self.session.scan_of(sd.id) if sd is not None else None
+        self.window_card.set_stack(sd, scan, self.current_choice() if sd is not None else None)
+        self._rebuild_cards()
+
     def _flags_changed(self, _sids) -> None:
         """New scan flags (Check's probe, a summary found by Reload): the cards show the settings that followed them,
         step 4 and the chip name the flags."""
@@ -1400,7 +1430,7 @@ class ReducePerspective(QWidget):
             w.blockSignals(True)
         self.z_label.clear(); self.z_group.clear()
         h = self.session.holder()
-        rows = [r for r in self.session.sheet_rows if h and r.plate.strip().lower() == h.name.lower()]
+        rows = self.session.sheet_for(h.name) if h else []
         self.z_label.addItems(sorted({r.sample_id for r in rows}))
         self.z_group.addItems(sorted({r.group for r in self.session.sheet_rows if r.group}))
         if z is None:

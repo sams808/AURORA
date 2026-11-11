@@ -1,6 +1,11 @@
-"""Scan-name conventions of the Nov 2026 beamtime: `<HHMMSS>_<holder>_<group>_<edge>_<plan>`.
+"""Scan-name conventions of the SGM beamline: `<HHMMSS>_<name>_<plan>`, where the name is what the user typed (the
+h5 records it as `scan_name`) and often ends in plan words: the edge (`_f_k`, `_fe_l23`, `_ck`), a step (`_coarse`,
+`_fine`, `_edge1`), a detector (`_tey`). Labels, holder names and edges are read from that name without any one
+lab's words; a beamtime can add its own plan words in config/naming.json (`label_suffix_words`).
 
-Ported from sgm_report.py v2.5 (`strip_scan_suffix`, `Survey.holder`, `Stack.target_edge`, `time_label`).
+Ported from sgm_report.py v2.5 (`strip_scan_suffix`, `Survey.holder`, `Stack.target_edge`, `time_label`), with these
+changes: plan words are removed only at the end of a name (a sample called `soil_coarse_fraction` keeps its name), a
+holder keeps its trailing number (`Plate_3`), and the edge is checked against the scan's energies (edge_for_range).
 """
 from __future__ import annotations
 
@@ -12,9 +17,14 @@ from pathlib import Path
 
 @lru_cache(maxsize=1)
 def element_names() -> dict[str, str]:
-    """lower-case element name -> symbol, H..U (from xraydb, imported lazily: it loads a database)."""
+    """lower-case element name -> symbol, H..U (from xraydb, imported lazily: it loads a database), plus the British
+    spellings aluminium and sulphur."""
     import xraydb
-    return {xraydb.atomic_name(z).lower(): xraydb.atomic_symbol(z) for z in range(1, 93)}
+    out = {xraydb.atomic_name(z).lower(): xraydb.atomic_symbol(z) for z in range(1, 93)}
+    out.setdefault("aluminium", "Al")
+    out.setdefault("aluminum", "Al")
+    out.setdefault("sulphur", "S")
+    return out
 
 
 @lru_cache(maxsize=1)
@@ -22,12 +32,45 @@ def element_symbols() -> frozenset[str]:
     return frozenset(element_names().values())
 
 
-@lru_cache(maxsize=1)
-def _scan_tokens() -> re.Pattern:
+# an edge's shell as scan names write it: k, l, l3, l23, l2,3, l3l2, m5, m45, m4,5, n45 ...
+SHELL = r"k|l(?:\d(?:,?\d|l\d)?)?|m(?:\d(?:,?\d|m\d)?)?|n(?:\d(?:,?\d)?)?"
+SHELL_DIGIT = r"l\d(?:,?\d|l\d)?|m\d(?:,?\d|m\d)?|n\d(?:,?\d)?"           # the glued form needs a digit (BM is no edge)
+# glued K edges written without a digit (CK, OK, NaK) are read for the light elements whose K edge SGM reaches
+GLUED_K = ("c", "n", "o", "f", "na", "mg", "al", "si")
+GENERIC_WORDS = r"coarse\d*|fine\d*|zone\d*|bigstep|smallstep|tey\d*|pfy\d*|edge\d*|survey|stack"
+
+
+@lru_cache(maxsize=16)
+def _end_token(words: tuple[str, ...] = ()) -> re.Pattern:
+    """One plan token at the very end of a name: a generic word, an edge (`_f_k`, `_fe_l23`, `_fluorine_k`, `_ck`,
+    `_mnL23`, `_u_n45coarse`) or one of the beamtime's own words (config/naming.json)."""
     names = "|".join(sorted(element_names(), key=len, reverse=True))
-    return re.compile(r"(?i)_(?:zone|coarse|fine|bigstep|smallstep|wsu|tey|pfy|edge\d*|survey|stack|f_?k|f_coarse|"
-                      + names + r"_?[klmn]\d*|"
-                      + r"[a-z]{1,2}_(?:k|l\d?|m\d?|n\d{1,2})|u_?n\d+|un\d+)(?=_|$|\d|coarse|fine)")
+    own = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True) if w)
+    edge = (rf"(?:{names})_?(?:{SHELL})|[a-z]{{1,2}}_(?:{SHELL})|[a-z]{{1,2}}(?:{SHELL_DIGIT})|"
+            rf"(?:{'|'.join(GLUED_K)})k")
+    alts = "|".join(a for a in (own, GENERIC_WORDS, rf"(?:{edge})(?:coarse|fine)?") if a)
+    return re.compile(rf"(?i)_(?:{alts})$")
+
+
+def scan_base(name: str) -> str:
+    """The name the user typed: a scan folder name without its HHMMSS_ time and its _survey / _stack plan suffix."""
+    s = re.sub(r"^\d{6}_", "", str(name))
+    return re.sub(r"_(stack|survey)$", "", s)
+
+
+def label_from_name(name: str, words=()) -> str:
+    """The sample label of a scan name (a folder name or the h5 scan_name): the plan tokens at its end removed, one
+    after the other, never the whole name; a trailing re-take counter (`_1`) goes only after plan tokens."""
+    pat = _end_token(tuple(w.lower() for w in words))
+    s = scan_base(name)
+    m = re.match(r"^(.+?)_(\d+)$", s)
+    if m and pat.search(m.group(1)) and pat.search(m.group(1)).start() > 0:
+        s = m.group(1)                                  # 'UF4_u_n45coarse_1': the re-take counter of a plan
+    while True:
+        m = pat.search(s)
+        if not m or m.start() == 0:
+            return s
+        s = s[:m.start()]
 
 
 def time_label(scan_dir_name: str) -> str:
@@ -63,20 +106,61 @@ def short_time(sid: str) -> str:
     return time_label(split_stack_id(sid)[1])
 
 
-def strip_scan_suffix(name: str) -> str:
-    """'095242_sampleA_f_k_u_n45_stack' -> 'sampleA'; '150255_UF4_u_n45coarse_1_stack' -> 'UF4'."""
-    s = re.sub(r"^\d{6}_", "", name)
-    s = re.sub(r"_(stack|survey)$", "", s)
-    m = _scan_tokens().search(s)
-    if m and m.start() > 0:
-        s = s[:m.start()]
-    return re.sub(r"_\d+$", "", s)
+def strip_scan_suffix(name: str, words=()) -> str:
+    """The sample label of a scan folder name (label_from_name): '103000_sample1_f_k_stack' -> 'sample1';
+    '092758_soil_coarse_fraction_ca_l_stack' -> 'soil_coarse_fraction'; '150255_UF4_u_n45coarse_1_stack' -> 'UF4'."""
+    return label_from_name(name, words)
 
 
-def holder_from_survey(name: str) -> str:
-    """'010013_holderA_survey' -> 'N5'; 'N7_plate_survey' -> 'N7'; 'R2_survey_survey' -> 'R2'."""
-    base = strip_scan_suffix(name)
-    return re.sub(r"(?i)^plate_?|_?plate$|_survey", "", base) or base
+def holder_from_survey(name: str, scan_name: str | None = None) -> str:
+    """The holder a survey starts: the survey's own name (`scan_name` from its h5 when given, else the folder name
+    without HHMMSS_), without its '_survey' plan suffix and a 'plate' prefix or suffix. A trailing number stays:
+    '101500_holderA_survey' -> 'holderA'; '010013_holderA_survey' -> 'N5'; '011600_N7_plate_survey' -> 'N7';
+    '133400_R2_survey_survey' -> 'R2'; '093000_Plate_3_survey' -> 'Plate_3'; '093000_survey' -> 'holder 09:30'."""
+    base = re.sub(r"^\d{6}_", "", str(scan_name or name or ""))
+    while re.search(r"(?i)(?:^|_)survey$", base):
+        base = re.sub(r"(?i)_?survey$", "", base)
+    for pat in (r"(?i)^plate[_\s-]?", r"(?i)[_\s-]?plate$"):
+        rest = re.sub(pat, "", base)
+        if rest != base and re.search(r"[A-Za-z]", rest):      # 'holderA' -> 'N5'; 'Plate_3' keeps its word
+            base = rest
+    base = base.strip("_ -")
+    if base:
+        return base
+    t = time_label(Path(str(name)).name)
+    return f"holder {t}" if t else "holder"
+
+
+def norm_holder(s: str) -> str:
+    """A holder name compared loosely: no 'plate' / 'holder' word, case, spaces and punctuation ignored ('Plate N5',
+    'holderA' and 'N5' are one holder; 'holder A' and 'holderA' too)."""
+    t = re.sub(r"(?i)plate|holder", "", str(s or ""))
+    return re.sub(r"[^0-9a-z]", "", t.lower()) or re.sub(r"[^0-9a-z]", "", str(s or "").lower())
+
+
+def sheet_holders(value: str) -> set[str]:
+    """The holders a sample-sheet cell names, loosely compared (norm_holder): 'N5', 'N5/N6', 'N5?' ."""
+    return {norm_holder(p.strip().rstrip("?")) for p in re.split(r"[/;,]", str(value or "")) if p.strip()}
+
+
+def on_holder(value: str, holder: str) -> bool:
+    """Whether a sample-sheet holder cell names `holder`."""
+    return bool(holder) and norm_holder(holder) in sheet_holders(value)
+
+
+# beamline test scans: a strong word anywhere in the name, or a weak word that is the whole label ('dark', but not
+# 'dark_glass' or 'Darkite'); each as a whole token, never inside a word
+TEST_STRONG = r"(?i)(?:^|_)(?:photodiode|i0_?test|beam_?test)(?:_|$)"
+TEST_WEAK = r"(?i)(?:diode|dark|i0)(?:_?\d+)?"
+
+
+def is_test_name(name: str, words=()) -> bool:
+    """Whether a scan folder name says it is a beamline test, not a sample: 'photodiode_f_k', 'i0_test', 'dark' and
+    'dark_2' are; 'dark_glass_fe_l3', 'Darkite' and 'my_diode_array' are samples."""
+    base = scan_base(name)
+    if re.search(TEST_STRONG, base):
+        return True
+    return bool(re.fullmatch(TEST_WEAK, label_from_name(name, words)))
 
 
 def short_label(label: str, holder: str | None) -> str:
@@ -89,27 +173,106 @@ def short_label(label: str, holder: str | None) -> str:
 
 
 def target_edge(name: str) -> tuple[str, str] | None:
-    """Edge the scan was set up for, from its name: ('F', 'K'), ('U', 'N45'), ('Se', 'L32') ...; None if not stated.
+    """Edge the scan was set up for, from its name: ('F', 'K'), ('U', 'N45'), ('Se', 'L3L2'), ('Fe', 'L23') ...; None
+    if not stated. Read: `fe_l23`, `Fe_L2,3`, `mnL23`, `iron_l3`, `CK`, `OK`, `u_n45coarse`.
 
-    The glued form (un45, sel3) needs a digit in the shell, otherwise a sample code such as 'BM' reads as boron M.
+    The glued form (un45, sel3) needs a digit in the shell, otherwise a sample code such as 'BM' reads as boron M; a
+    glued K without digit is read for the light elements of GLUED_K only (CK, OK, FK, NaK ...).
     """
-    nm = name.replace("-", "_")
+    nm = str(name).replace("-", "_")
     names = element_names()
-    m = re.search(r"(?i)_(" + "|".join(names) + r")_?([klmn]\d*)(?=_|$)", nm)
+    end = r"(?=_|$|coarse|fine)"
+    m = re.search(r"(?i)(?:^|_)(" + "|".join(sorted(names, key=len, reverse=True)) + rf")_?({SHELL}){end}", nm)
     if m:
-        el, shell = names[m.group(1).lower()], m.group(2).upper()
+        el, shell = names[m.group(1).lower()], m.group(2)
     else:
-        # 'se_l3l2' = L3 and L2 in one token
-        m = re.search(r"(?i)(?:^|_)(?:([a-z]{1,2})_(k|l\d?(?:l\d)?|m\d?(?:m\d)?|n\d{1,2})|([a-z]{1,2})(l\d|m\d|n\d{1,2}))(?=_|$|coarse|fine)", nm)
+        m = re.search(rf"(?i)(?:^|_)(?:([a-z]{{1,2}})_({SHELL})|([a-z]{{1,2}})({SHELL_DIGIT})|"
+                      rf"({'|'.join(GLUED_K)})(k)){end}", nm)
         if not m:
-            if re.search(r"(?i)_f_coarse", nm):
-                return ("F", "K")
             return None
-        el = (m.group(1) or m.group(3)).capitalize()
-        shell = (m.group(2) or m.group(4)).upper()
+        el = (m.group(1) or m.group(3) or m.group(5)).capitalize()
+        shell = m.group(2) or m.group(4) or m.group(6)
     if el not in element_symbols():
         return None
+    return el, shell.upper().replace(",", "")
+
+
+# the edges guessed from a scan's energies: K first, then L3, L2, M5, M4, N5, N4, each for the elements whose edge of
+# that kind a soft X-ray beamline measures (H..U from xraydb; no hand-typed energies)
+RANGE_FAMILIES = (("K", 3, 20), ("L3", 11, 60), ("L2", 11, 60), ("M5", 55, 83), ("M4", 55, 83), ("N5", 89, 92),
+                  ("N4", 89, 92))
+EDGE_TOLERANCE_EV = 30.0                # a named edge this far outside the scan's energies is still the name's edge
+
+
+@lru_cache(maxsize=1)
+def _range_edges() -> tuple[tuple[float, int, str, str], ...]:
+    import xraydb
+    out = []
+    for pri, (shell, z0, z1) in enumerate(RANGE_FAMILIES):
+        for z in range(z0, z1 + 1):
+            el = xraydb.atomic_symbol(z)
+            try:
+                e = float(xraydb.xray_edge(el, shell).energy)
+            except Exception:                       # noqa: BLE001  an edge xraydb does not list
+                continue
+            if e > 0:
+                out.append((e, pri, el, shell))
+    return tuple(sorted(out))
+
+
+def edge_for_range(e_min: float, e_max: float, tolerance: float = EDGE_TOLERANCE_EV) -> tuple[str, str] | None:
+    """The edge a scan over e_min..e_max eV most likely measured: among the edges inside the range, the first family of
+    RANGE_FAMILIES (K before L3 ...), the lowest edge of it; when none lies inside, the same within `tolerance` eV of
+    the range, nearest first; None when no edge is that close."""
+    try:
+        lo, hi = sorted((float(e_min), float(e_max)))
+    except (TypeError, ValueError):
+        return None
+    if not (lo == lo and hi == hi):
+        return None
+    inside = [c for c in _range_edges() if lo <= c[0] <= hi]
+    if inside:
+        e, pri, el, shell = min(inside, key=lambda c: (c[1], c[0]))
+        return el, shell
+    near = [c for c in _range_edges() if lo - tolerance <= c[0] <= hi + tolerance]
+    if not near:
+        return None
+    e, pri, el, shell = min(near, key=lambda c: (c[1], min(abs(c[0] - lo), abs(c[0] - hi))))
     return el, shell
+
+
+def resolve_edge(name_edge: tuple[str, str] | None, energies, known=None) -> tuple[tuple[str, str] | None, str]:
+    """(edge, note) of a stack: the edge its name states when the edge energy lies within its energies ±
+    EDGE_TOLERANCE_EV; else an edge the names of the beamtime's other stacks state (`known`: {edge: number of stacks})
+    within that tolerance, the most common first; else the edge the energies cover (edge_for_range); a note says which.
+    The name's edge unchanged when the energies are unknown or near no edge."""
+    from aurora.core.lines import edge_energy
+    import math
+    vals = [float(e) for e in (energies or []) if e is not None and math.isfinite(float(e))]
+    if not vals:
+        return name_edge, ""
+    lo, hi = min(vals), max(vals)
+    if name_edge is not None:
+        ev = edge_energy(*name_edge)
+        if ev is not None and lo - EDGE_TOLERANCE_EV <= ev <= hi + EDGE_TOLERANCE_EV:
+            return name_edge, ""
+    guess, how = None, "the energies"
+    near = []
+    for edge, n in (known or {}).items():
+        ev = edge_energy(*edge)
+        if ev is not None and lo - EDGE_TOLERANCE_EV <= ev <= hi + EDGE_TOLERANCE_EV and edge != name_edge:
+            near.append((-n, 0.0 if lo <= ev <= hi else min(abs(ev - lo), abs(ev - hi)), edge))
+    if near:
+        guess, how = min(near)[2], "the energies and the other scans of this beamtime"
+    if guess is None:
+        guess = edge_for_range(lo, hi)
+    if guess is None:
+        return name_edge, ""
+    if name_edge is None:
+        return guess, f"edge {pretty_edge(guess)} from {how} ({lo:.0f}–{hi:.0f} eV): the name states none"
+    ev = edge_energy(*name_edge)
+    said = f"{pretty_edge(name_edge)} ({ev:.0f} eV)" if ev is not None else pretty_edge(name_edge)
+    return guess, f"the name says {said}, the energies cover {lo:.0f}–{hi:.0f} eV: {pretty_edge(guess)} used"
 
 
 def pretty_edge(edge: tuple[str, str] | None) -> str:

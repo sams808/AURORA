@@ -59,8 +59,8 @@ from PySide6.QtWidgets import QMainWindow
 from aurora import __version__
 from aurora.app.shortcuts import native_text
 from aurora.app.undo import Snapshot, SnapshotCommand, dumps, make_stack
-from aurora.core.io.config import (SESSION_SCHEMA, HolderZones, ScanSettings, Zone, ZonesFile, file_schema,
-                                   json_default, read_sample_sheet)
+from aurora.core.io.config import (SESSION_SCHEMA, HolderZones, ScanSettings, SheetChoice, Zone, ZonesFile,
+                                   file_schema, find_sample_sheet, json_default)
 from aurora.core.model import Holder, Project, ScanInfo
 from aurora.core.names import split_stack_id
 from aurora.core.stack import TOTAL_LABEL, StackData
@@ -89,6 +89,8 @@ SNAPSHOT_BEFORE = re.compile(r"^(propose|apply|restore)\b|\brules?\b", re.IGNORE
 _SNAP_NAME = re.compile(r"^session-(\d{8}-\d{6})(?:_(\d+))?\.json$")     # '_2' sorts after '.json'
 _STAMP_FMT = "%Y%m%d-%H%M%S"
 IMPORT_POLICIES = ("merge", "replace", "skip")
+SAMPLE_SHEET_KEY = "sample_sheet"       # ui value: the sample sheet chosen with File > Choose sample sheet… (relative)
+UNDOABLE_UI = (SAMPLE_SHEET_KEY,)       # ui values an edit records for undo (the others are view memory)
 DEFAULT_LABEL = re.compile(r"^zone \d+$")      # the label new_zone gives a zone without one ('zone 3')
 QUEUE_KEY = "check_queue"               # ui block: the Easy check queue, [[holder key, zone id, sid], ...]
 
@@ -225,6 +227,8 @@ class Session(QObject):
     recovered = Signal(str)                 # a damaged session.json was set aside; the text says what was restored
     reloaded = Signal(str)                  # Reload of the same project kept the place; the stack id kept ('' = none)
     warned = Signal(str, str)               # (title, text): opened read-only, the lock taken over, a foreign change
+    sheet_changed = Signal()                # the sample sheet was chosen, written or read again (sheet_rows changed)
+    config_changed = Signal()               # AURORA wrote a configuration file (a fixed line, a calibration)
     flags_changed = Signal(list)            # sids whose flags a flag source may have changed (follow_new_flags)
 
     def __init__(self, parent: QObject | None = None):
@@ -238,6 +242,7 @@ class Session(QObject):
         self._stacks: dict[str, StackData] = {}
         self._surveys: dict[str, SurveyData] = {}
         self.sheet_rows: list = []
+        self.sheet_choice = SheetChoice()               # the sheet used, its columns and the CSVs not used
         self.check_queue: list[CheckItem] = []
         self.read_only = False                  # True: edits stay in memory, save() refuses (a newer session schema,
         #                                         the project open in another AURORA, a folder that cannot be written)
@@ -395,14 +400,59 @@ class Session(QObject):
         return self.project.root.name if self.project else ""
 
     def _read_sheet(self) -> None:
-        self.sheet_rows = []
-        for s in sorted(self.project.root.glob("*.csv")):
+        """The sample sheet (find_sample_sheet): the one chosen with File > Choose sample sheet… (the 'sample_sheet'
+        ui value), else the CSV at the root with a sample and a holder column, else the first with a sample column."""
+        chosen = self.zones.ui.get(SAMPLE_SHEET_KEY)
+        self.sheet_choice = find_sample_sheet(self.project.root, chosen if isinstance(chosen, str) else None)
+        self.sheet_rows = list(self.sheet_choice.rows)
+
+    def reread_sheet(self) -> None:
+        """Read the sample sheet again (after File > New sample sheet…, or a sheet edited outside AURORA)."""
+        if self.project is not None:
+            self._read_sheet()
+            self.sheet_changed.emit()
+
+    def sheet_for(self, holder_name: str | None) -> list:
+        """The sample-sheet rows of a holder (its holder column names it, compared loosely: 'Plate N5' is N5); every
+        row when the sheet has no holder column."""
+        if not holder_name:
+            return []
+        if self.sheet_rows and "holder" not in self.sheet_choice.columns:
+            return list(self.sheet_rows)
+        from aurora.core.names import on_holder
+        return [r for r in self.sheet_rows if on_holder(r.holder, holder_name)]
+
+    def choose_sample_sheet(self, path: Path | None) -> bool:
+        """File > Choose sample sheet…: use this CSV (None: back to the automatic choice), one undo step. False (and a
+        status line) when the file is no sample sheet."""
+        if self.project is None:
+            return False
+        value = None
+        if path is not None:
+            path = Path(path)
+            from aurora.core.io.config import SheetError, parse_sample_sheet
             try:
-                self.sheet_rows = read_sample_sheet(s)
-                if self.sheet_rows:
-                    break
-            except Exception:
-                continue
+                rows, _cols, _note = parse_sample_sheet(path)
+            except (SheetError, OSError) as err:
+                self.status.emit(f"{path.name} is not a sample sheet: {err}")
+                return False
+            if not rows:
+                self.status.emit(f"{path.name} has a header but no sample row")
+                return False
+            try:
+                value = path.resolve().relative_to(Path(self.project.root).resolve()).as_posix()
+            except ValueError:
+                value = str(path.resolve())
+        with self.edit("choose the sample sheet"):
+            if value is None:
+                self.zones.ui.pop(SAMPLE_SHEET_KEY, None)
+            else:
+                self.zones.ui[SAMPLE_SHEET_KEY] = value
+        self._read_sheet()
+        self.sheet_changed.emit()
+        name = self.sheet_choice.path.name if self.sheet_choice.path is not None else "none"
+        self.status.emit(f"sample sheet: {name}, {len(self.sheet_rows)} samples")
+        return True
 
     def ui_items(self, key: str) -> list[CheckItem]:
         """CheckItems saved in the ui block as [[holder key, zone id, sid], ...] (the check queue under 'check_queue');
@@ -971,6 +1021,7 @@ class Session(QObject):
             self._widen_edit(key)
             self._edit_state.before["good_i0"] = dumps(self.zones.good_i0)
             self._edit_state.before["rules"] = dumps(self.zones.rules)
+            self._edit_state.before["ui"] = self._ui_part()
             if SNAPSHOT_BEFORE.search(str(description)) and self.project is not None:
                 self.backup_now(str(description))
         elif self._edit_state is not None:
@@ -1012,7 +1063,11 @@ class Session(QObject):
     def _snapshot(self, keys) -> Snapshot:
         hz = self.zones.holders
         return Snapshot(holders={k: (dumps(hz[k].to_json()) if k in hz else None) for k in keys},
-                        good_i0=dumps(self.zones.good_i0), rules=dumps(self.zones.rules))
+                        good_i0=dumps(self.zones.good_i0), rules=dumps(self.zones.rules), ui=self._ui_part())
+
+    def _ui_part(self) -> str:
+        """The ui values an edit can change and undo puts back (UNDOABLE_UI: the chosen sample sheet)."""
+        return dumps({k: self.zones.ui.get(k) for k in UNDOABLE_UI})
 
     def _attached_set(self) -> frozenset | None:
         z = self.zone() if self.current_zone is not None else None
@@ -1025,7 +1080,7 @@ class Session(QObject):
         self._attach_holders(keys)
         after = self._snapshot(keys)
         before = Snapshot(holders={k: state.before["holders"].get(k) for k in keys}, good_i0=state.before["good_i0"],
-                          rules=state.before["rules"])
+                          rules=state.before["rules"], ui=state.before.get("ui"))
         self.zones_changed.emit()
         if after == before:
             # nothing changed in the holders the edit covers; a change elsewhere (a holder the edit did not name, the
@@ -1058,6 +1113,16 @@ class Session(QObject):
         self.zones.good_i0 = {k: bool(v) for k, v in json.loads(snap["good_i0"]).items()}
         if snap.get("rules") is not None:           # the settings rules (Save rules, Remember the XRF window)
             self.zones.rules = json.loads(snap["rules"])
+        sheet_before = self.zones.ui.get(SAMPLE_SHEET_KEY)
+        if snap.get("ui") is not None:              # the undoable ui values (the chosen sample sheet)
+            for k, v in json.loads(snap["ui"]).items():
+                if v is None:
+                    self.zones.ui.pop(k, None)
+                else:
+                    self.zones.ui[k] = v
+        if self.project is not None and self.zones.ui.get(SAMPLE_SHEET_KEY) != sheet_before:
+            self._read_sheet()
+            self.sheet_changed.emit()
         self._attach_holders(list(snap["holders"]))
         holder, zid = place
         if holder in self.holder_keys and holder != self.current_holder:

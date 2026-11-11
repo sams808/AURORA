@@ -5,8 +5,8 @@ open; Accept adds them to the holder in one session edit ('grid of N zones')."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QSpinBox,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGridLayout, QInputDialog, QLabel,
+                               QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from aurora.app.help_text import explain, explain_buttons, labelled
 from aurora.core.propose import grid_cells, layout_group, layout_groups, norm_text, pads_from_survey, snap_to_pads, \
@@ -57,7 +57,7 @@ class GridDialog(QDialog):
         self.holder = h.name if h else ""
         layout = session.project.plate_layout if session.project is not None else {}
         self.groups = layout_groups(layout, self.holder)
-        self.sheet = [r for r in session.sheet_rows if h and r.plate.strip().lower() == h.name.lower()]
+        self.sheet = session.sheet_for(h.name) if h else []
         self.matched = best_layout_group(layout, self.holder, list(scans), self.bbox)
 
         lay = QVBoxLayout(self)
@@ -103,6 +103,10 @@ class GridDialog(QDialog):
         self.summary.setWordWrap(True)
         self.summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self.summary)
+        self.save_layout_btn = QPushButton("Save as plate layout…")
+        self.save_layout_btn.clicked.connect(lambda: self.save_layout())
+        explain(self.save_layout_btn, "survey.grid.save_layout")
+        lay.addWidget(self.save_layout_btn, 0, Qt.AlignLeft)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Help | QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self.accept_btn = self.buttons.button(QDialogButtonBox.Ok)
         self.accept_btn.setText("Accept")
@@ -128,6 +132,70 @@ class GridDialog(QDialog):
             start = next((i + 1 for i, g in enumerate(self.groups) if g.get("id") == self.matched.get("id")), 0)
         self.layout_combo.setCurrentIndex(start)
         self._group_picked()
+        self._save_layout_state()
+
+    # ------------------------------------------------------------------ Save as plate layout…
+    def _layout_path(self):
+        proj = self.session.project
+        return proj.config_dir / "plate_layout.json" if proj is not None else None
+
+    def _save_layout_state(self) -> None:
+        from aurora.app.widgets import set_enabled
+        from aurora.core.io.safety import is_protected
+        p = self._layout_path()
+        if p is None or not self.holder:
+            set_enabled(self.save_layout_btn, False, "open a project first")
+        elif is_protected(p):
+            set_enabled(self.save_layout_btn, False, "this beamtime folder is protected: AURORA never writes there")
+        else:
+            set_enabled(self.save_layout_btn, True)
+
+    def ask_layout_name(self, default: str) -> str | None:
+        """The name of the new layout group (tests replace this method)."""
+        text, ok = QInputDialog.getText(self, "Save as plate layout",
+                                        f"Name of this grid in config/plate_layout.json (holder {self.holder}):",
+                                        text=default)
+        return text.strip() if ok and text.strip() else None
+
+    def save_layout(self, name: str | None = None) -> str:
+        """Write the grid shown (rows, columns and labels, in the layout's reading order) as a group of the holder in
+        config/plate_layout.json; the next Grid of zones on this holder offers it. Returns the group id ('' when
+        nothing was written)."""
+        from aurora.core.propose import add_layout_group, layout_group_entry
+        p = self._layout_path()
+        if p is None or not self.holder:
+            return ""
+        rot = int(self.rotation.currentData() or 0) % 360
+        rows, cols = (self.rows.value(), self.cols.value()) if rot in (0, 180) else (self.cols.value(), self.rows.value())
+        if name is None:
+            name = self.ask_layout_name(f"grid {len(self.groups) + 1}")
+        if not name:
+            return ""
+        labels, _groups = self.label_lists()
+        lay = (self.session.project.plate_layout or {}).get(self.holder, {})
+        nums = [int(k) for k in (lay.get("samples") or {}) if str(k).isdigit()] if isinstance(lay, dict) else []
+        group, samples = layout_group_entry(name, rows, cols, labels, first_number=max(nums, default=0) + 1)
+        try:
+            add_layout_group(p, self.holder, group, samples)
+        except (OSError, ValueError) as err:
+            from aurora.app.session import _os_text
+            self.summary.setText(f"the plate layout was not saved: {_os_text(err)}")
+            return ""
+        self.session.project.read_config()
+        from aurora.core.propose import layout_groups
+        self.groups = layout_groups(self.session.project.plate_layout, self.holder)
+        self.layout_combo.blockSignals(True)
+        self.layout_combo.clear()
+        self.layout_combo.addItem("none", None)
+        for i, g in enumerate(self.groups):
+            shape = (f"{g['rows']} × {g['cols']}" if g.get("rows") and g.get("cols") else
+                     f"{len(g.get('labels') or [])} samples, arrangement unknown")
+            self.layout_combo.addItem(f"{g.get('id', f'group {i + 1}')} ({shape})", i)
+        self.layout_combo.setCurrentIndex(next((i + 1 for i, g in enumerate(self.groups) if g.get("id") == name), 0))
+        self.layout_combo.blockSignals(False)
+        self.session.status.emit(f"grid '{name}' saved in config/plate_layout.json for holder {self.holder}")
+        self.session.config_changed.emit()
+        return name
 
     # ------------------------------------------------------------------ state
     def group(self) -> dict | None:

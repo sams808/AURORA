@@ -22,29 +22,23 @@ STATUS_ORDER = ("survey", "complete", "in_progress", "aborted", "test", "empty",
 @dataclass
 class ProjectFacts:
     """Files found next to the scans (computed in the discovery job: it globs and reads the sample sheet)."""
-    sheet: Path | None = None                  # the sample sheet AURORA uses (first CSV at the root that parses)
+    sheet: Path | None = None                  # the sample sheet AURORA uses (aurora.core.io.config.find_sample_sheet)
     sheet_rows: int = 0
     sheet_plates: list[str] = field(default_factory=list)
+    choice: object = None                      # the SheetChoice (columns recognised, CSVs skipped and why)
 
 
-def project_facts(project) -> ProjectFacts:
-    """The sample sheet the session will use: the first CSV at the project root with sample rows (same rule as
-    Session.set_project)."""
-    from aurora.core.io.config import read_sample_sheet
-    facts = ProjectFacts()
-    try:
-        sheets = sorted(Path(project.root).glob("*.csv"))
-    except OSError:
-        return facts
-    for p in sheets:
-        try:
-            rows = read_sample_sheet(p)
-        except Exception:                       # noqa: BLE001  any CSV that is not a sample sheet
-            continue
-        if rows:
-            facts.sheet, facts.sheet_rows = p, len(rows)
-            facts.sheet_plates = sorted({r.plate.strip() for r in rows if r.plate.strip()})
-            break
+def project_facts(project, chosen: str | None = None) -> ProjectFacts:
+    """The sample sheet the session will use (find_sample_sheet, the same rule as Session): `chosen` (a path relative
+    to the root), else the session's File > Choose sample sheet… read from .aurora/session.json, else the rules."""
+    from aurora.core.io.config import find_sample_sheet, session_ui_value
+    root = Path(project.root)
+    if chosen is None:
+        chosen = session_ui_value(root, "sample_sheet")
+    choice = find_sample_sheet(root, chosen if isinstance(chosen, str) else None)
+    facts = ProjectFacts(choice=choice)
+    if choice.path is not None:
+        facts.sheet, facts.sheet_rows, facts.sheet_plates = choice.path, len(choice.rows), choice.holders
     return facts
 
 
@@ -83,32 +77,74 @@ def project_rows(project, facts: ProjectFacts | None = None) -> list[tuple[str, 
              + (f" (opened alone; left out: {_names(project.days_left_out)})" if project.days_left_out else "")),
             ("holders", f"{len(holders)}: {_names(holders)}" if holders else "none (no survey found)"),
             ("scans", f"{len(scans)}" + (f" ({counts})" if counts else ""))]
+    notes = list(getattr(project, "layout_notes", []) or [])
+    note_rows = [("layout note", n) for n in notes]
+    if note_rows and (not days or not holders or not scans):
+        rows[1:1] = note_rows                   # nothing found: what was not recognised comes first
+    else:
+        rows += note_rows
     continued = [s for d in project.days for s in d.continued]
     if continued:
         rows.append(("after midnight", f"{len(continued)} stack(s) continue a holder of the previous day: "
                      + _names([f"{s.name} ({s.holder})" for s in continued], 6)))
     cal = project.calibration
-    if cal is not None and cal.calibrated:
-        rows.append(("calibration", f"{shown_path(cal.path, project.root)} (last updated {cal.last_updated})"))
+    if cal is not None:
+        rows.append(("calibration", cal.summary(project.root)))
     else:
-        where = cal.path if cal is not None and cal.path is not None else Path(project.config_dir) / "sdd_calibration.json"
-        rows.append(("calibration", f"none found ({shown_path(where, project.root)}): the default gain is used, "
-                     "not calibrated"))
+        rows.append(("calibration", "none (no config/sdd_calibration.json), nominal 10 eV per channel"))
     bins = project.roi_bins
+    roi_where = shown_path(Path(project.config_dir) / "roi_bins.json", project.root)
     if bins is not None and bins.labels:
         where = shown_path(bins.path, project.root) if bins.path else "roi_bins.json"
         rows.append(("ROI bins", f"{where}: {_names(bins.labels)}"))
+    elif bins is not None and getattr(bins, "exists", False):
+        rows.append(("ROI bins", f"{roi_where} has no usable line: total XRF only (Reduce step 2, Save as a fixed "
+                     "line… adds one)"))
     else:
-        rows.append(("ROI bins", f"none found ({shown_path(Path(project.config_dir) / 'roi_bins.json', project.root)}): "
-                     "total XRF only"))
-    if facts.sheet is not None:
-        rows.append(("sample sheet", f"{facts.sheet.name}, {facts.sheet_rows} samples"
-                     + (f" on {_names(facts.sheet_plates, 8)}" if facts.sheet_plates else "")))
-    else:
-        rows.append(("sample sheet", "none found (a CSV with a 'Sample ID' column at the project root)"))
+        rows.append(("ROI bins", f"none found ({roi_where}): total XRF only"))
+    rows += sheet_rows(project, facts)
     if project.plate_layout:
         rows.append(("plate layout", f"config/plate_layout.json: {_names(sorted(project.plate_layout), 10)}"))
+    shown_cal = shown_path(cal.path, project.root) if cal is not None and cal.path is not None else None
+    for where, problems in (getattr(project, "config_problems", {}) or {}).items():
+        if where != shown_cal:                  # the calibration row above says its problems already
+            rows.append(("config problem", f"{where}: {'; '.join(problems)}"))
     return rows
+
+
+def sheet_rows(project, facts: ProjectFacts) -> list[tuple[str, str]]:
+    """The sample-sheet rows of the project summary: the sheet used, its samples and holders, the columns recognised,
+    how it was chosen; the CSVs not used, each with its reason; a sheet whose holders are none of the beamtime's."""
+    from aurora.core.names import norm_holder
+    choice = facts.choice
+    out: list[tuple[str, str]] = []
+    if facts.sheet is not None:
+        text = f"{facts.sheet.name}, {facts.sheet_rows} sample{'s' if facts.sheet_rows != 1 else ''}"
+        if facts.sheet_plates:
+            text += f" on {_names(facts.sheet_plates, 8)}"
+        cols = choice.columns_text() if choice is not None else ""
+        if cols:
+            text += f" (columns: {cols})"
+        if choice is not None and choice.chosen:
+            text += "; chosen with File > Choose sample sheet…"
+        if choice is not None and choice.note:
+            text += f"; {choice.note}"
+        out.append(("sample sheet", text))
+        if choice is not None and "holder" not in choice.columns:
+            out.append(("sample sheet", "no holder column: its samples are offered on every holder (a column named "
+                                        "Holder, Plate or Mount says where each sample sits)"))
+        else:
+            mine = {norm_holder(h.name) for d in project.days for h in d.holders}
+            theirs = {norm_holder(h) for h in facts.sheet_plates}
+            if mine and theirs and not mine & theirs:
+                col = choice.columns.get("holder", "holder") if choice is not None else "holder"
+                out.append(("sample sheet", f"its {col} column names {_names(facts.sheet_plates, 5)}, none of the "
+                                            f"holders of this beamtime ({_names(sorted(h.name for d in project.days for h in d.holders), 5)})"))
+    else:
+        out.append(("sample sheet", "none found (a CSV with a 'Sample ID' column at the project root)"))
+    for p, why in (choice.skipped if choice is not None else []):
+        out.append(("CSV not used", f"{Path(p).name}: {why}"))
+    return out
 
 
 # ----------------------------------------------------------------------------- one scan
@@ -198,6 +234,11 @@ def scan_rows(scan, project=None, incomplete: list[tuple[float, str]] | None = N
     rows.append(("holder", scan.holder))
     if scan.kind == "stack":
         rows.append(("edge", scan.edge_text))
+        if getattr(scan, "edge_note", ""):
+            rows.append(("edge note", scan.edge_note))
+    if getattr(scan, "kind_from_h5", False):
+        rows.append(("kind", f"{scan.kind}, from the plan_name of its .h5 (the folder name does not end in "
+                             f"_{scan.kind})"))
     rows.append(("status", f"{scan.status.replace('_', ' ')} ({scan.status_reason})" if scan.status_reason
                  else scan.status.replace("_", " ")))
     grating = md.get("grating_selection") or md.get("grating") or ""

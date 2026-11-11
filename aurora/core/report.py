@@ -62,10 +62,10 @@ from aurora.credits import CREDITS, CREDITS_SHORT, FOOTER  # noqa: E402
 from aurora.core import provenance  # noqa: E402
 from aurora.core.constants import DETS  # noqa: E402
 from aurora.core.flags import Flag, merged_flags  # noqa: E402
-from aurora.core.io.config import ScanSettings, Zone, ZonesFile, read_sample_sheet  # noqa: E402
+from aurora.core.io.config import ScanSettings, Zone, ZonesFile, find_sample_sheet  # noqa: E402
 from aurora.core.io.textio import read_json, write_json_atomic  # noqa: E402
 from aurora.core.model import Project, ScanInfo  # noqa: E402
-from aurora.core.names import pretty_edge, short_time, split_stack_id  # noqa: E402
+from aurora.core.names import on_holder, pretty_edge, short_time, split_stack_id  # noqa: E402
 from aurora.core.stack import TOTAL_BOUNDS, TOTAL_LABEL, StackData  # noqa: E402
 from aurora.core.survey import SurveyData  # noqa: E402
 from aurora.core.spectra import ZoneTraces, good_i0_curve  # noqa: E402
@@ -214,18 +214,45 @@ def group_key(rank: dict[str, int] | None = None):
     return lambda g: (0, rank[g], "") if g in rank else (2 if g == UNGROUPED else 1, 0, g.lower())
 
 
-def load_sample_sheet(project: Project | None) -> list:
-    """The first parsable sample sheet at the project root (the session's rule); [] when there is none."""
+def load_sample_sheet(project: Project | None, chosen: str | None = None) -> list:
+    """The rows of the project's sample sheet (aurora.core.io.config.find_sample_sheet, the session's rule: `chosen`,
+    the session's File > Choose sample sheet…, wins); [] when there is none."""
     if project is None:
         return []
-    for s in sorted(Path(project.root).glob("*.csv")):
-        try:
-            rows = read_sample_sheet(s)
-        except Exception:                       # noqa: BLE001  not a sample sheet
-            continue
-        if rows:
-            return rows
-    return []
+    return find_sample_sheet(Path(project.root), chosen).rows
+
+
+def line_defined(project: Project | None, st: ScanSettings, scan: ScanInfo | None = None, stacks=None) -> bool:
+    """Whether the emission line of a zone x scan can be reduced: it has its own windows (ScanSettings.roi), is the
+    total, is a line of config/roi_bins.json, or a line the loaded stack (or the scan's sgm_report cache) holds."""
+    line = st.line or ""
+    if st.roi or not line or line == TOTAL_LABEL:
+        return True
+    rb = getattr(project, "roi_bins", None)
+    if rb is not None and rb.has(line):
+        return True
+    if scan is not None:
+        sd = (stacks or {}).get(f"{scan.day}_{scan.name}")
+        if sd is not None:
+            return line in sd.labels
+        return line in _report_cache_labels(project, scan)
+    return False
+
+
+def _report_cache_labels(project: Project | None, scan: ScanInfo) -> list[str]:
+    """The ROI labels of the scan's sgm_report cache (processed/<day>/<scan>/_reduced_cache.npz), [] without one; only
+    the small label array is read."""
+    if project is None:
+        return []
+    p = Path(project.processed) / scan.day / scan.name / "_reduced_cache.npz"
+    try:
+        if not p.is_file():
+            return []
+        with open(p, "rb") as fh, np.load(fh, allow_pickle=True) as z:
+            return [str(v) for v in np.asarray(z["roi_labels"]).ravel()] if "roi_labels" in z.files else []
+    except Exception as err:                    # noqa: BLE001  a damaged cache: StackData.load says why
+        log.info("%s: labels unreadable (%s)", p, err)
+        return []
 
 
 _XY_CACHE: dict[tuple[str, int, int], tuple[np.ndarray, np.ndarray, tuple[float, float]]] = {}
@@ -274,6 +301,11 @@ def _plates(plate: str) -> set[str]:
     return {p.strip().rstrip("?").strip() for p in str(plate).split("/") if p.strip()}
 
 
+def line_not_defined_text(line: str) -> str:
+    """Why the fluorescence of a zone x scan is left out: its line is not defined in this beamtime."""
+    return f"line {line!r} is not defined in config/roi_bins.json"
+
+
 # ----------------------------------------------------------------------------- pre-flight
 FINDING_KINDS = {
     "ungrouped": "zones without a group",
@@ -287,6 +319,7 @@ FINDING_KINDS = {
     "good_i0_empty": "good-I0 asked for with an empty pool",
     "saturated_ticked": "saturated detectors still ticked",
     "sheet_row_no_zone": "sample-sheet rows without a zone",
+    "line_not_defined": "emission lines not defined in this beamtime",
 }
 NOTE_KINDS = {"ungrouped", "label_not_in_sheet", "sheet_row_no_zone", "duplicate_label"}     # the others drop data
 
@@ -384,7 +417,7 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
     stacks = stacks or {}
     hk = holder_keys(project)
     keys = list(hk) + [k for k in zones.holders if k not in hk]
-    rows = load_sample_sheet(project) if sheet_rows is None else list(sheet_rows)
+    rows = load_sample_sheet(project, zones.ui.get("sample_sheet")) if sheet_rows is None else list(sheet_rows)
     sheet = {_norm_label(r.sample_id): r.sample_id for r in rows if _norm_label(r.sample_id)}
     good_pool = [g for g, on in zones.good_i0.items() if on]
     out = Plan(group_rank=group_rank(rows))
@@ -442,6 +475,12 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
                                             "out.", key, z.id, sid))
                     continue
                 pz.spectra.append((sid, pretty_edge(scan.edge), n_pix))
+                if not line_defined(project, st, scan, stacks):
+                    findings.append(Finding(f"line_not_defined|{key}|{z.id}|{sid}|{st.line}", "line_not_defined",
+                                            f"{who} on {scan.time} {scan.label} uses the line {st.line!r}, which is "
+                                            "not defined in this beamtime, so its fluorescence is left out (TEY "
+                                            "kept): define the line (Reduce, XRF window, Save as a fixed line…) or "
+                                            "choose another window.", key, z.id, sid))
                 flags = merged_flags(project, scan)
                 ticked = {d for d, on in zip(DETS, st.sdd) if on}
                 for f in flags:
@@ -487,7 +526,7 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
         if rows:
             labels = [_norm_label(z.label) for z in zlist]
             for r in rows:
-                if hname in _plates(r.plate):
+                if on_holder(r.holder, hname):
                     rn = _norm_label(r.sample_id)
                     if rn and not any(_label_matches(n, rn) for n in labels):
                         findings.append(Finding(f"sheet_row_no_zone|{key}|{r.sample_id}", "sheet_row_no_zone",
@@ -734,6 +773,11 @@ class ReportBuilder:
             t = zone_traces(sd, pix, st, good)
             if t is None:
                 continue
+            if not st.roi and st.line and st.line not in sd.labels:
+                why = f"fluorescence skipped: {line_not_defined_text(st.line)}"
+                self._skip(f"{hz.holder} {z.label} {split_stack_id(sid)[1]}: {why}")
+                if why not in t.notes:
+                    t.notes.append(why)
             fl = list(merged_flags(self.project, scan))
             if st.i0_source == "good" and good is None:
                 fl.append(Flag("good-I0 requested but no good scan ticked: own I0 used", "note", "report"))
@@ -916,7 +960,8 @@ class ReportBuilder:
     def _build_into(self, folder: Path, started: dt.datetime, progress=None) -> ReportResult:
         (folder / "figures").mkdir(exist_ok=True)
         (folder / "csv").mkdir(exist_ok=True)
-        rows = self.sheet_rows if self.sheet_rows is not None else load_sample_sheet(self.project)
+        rows = self.sheet_rows if self.sheet_rows is not None else load_sample_sheet(
+            self.project, self.zones.ui.get("sample_sheet"))
         self.plan = plan(self.project, self.zones, rows, self.holders, self.days, self.groups,
                          stacks=self._stack_source(), progress=progress)
         entries = self.collect(progress)
@@ -1398,7 +1443,9 @@ class ReportBuilder:
         if rb is not None and rb.has(line):
             b = rb.bounds(line)
             return {d: [int(b[d][0]), int(b[d][1])] for d in DETS}, "config/roi_bins.json"
-        return {}, f"TODO: need reference (line {line!r} is not in config/roi_bins.json)"
+        if line in getattr(e.stack, "labels", []):
+            return {}, f"the stack's own reduction ({e.stack.source or 'its cache'})"
+        return {}, line_not_defined_text(line) + ": fluorescence left out"
 
     def csv_meta(self, e: Entry) -> dict:
         """Everything the CSV header and its sidecar say about one entry (deterministic: no build time)."""

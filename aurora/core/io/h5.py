@@ -60,6 +60,21 @@ def all_attrs(path: Path) -> dict[str, dict[str, str]]:
     return out
 
 
+def plan_kind(path: Path) -> str:
+    """'survey' or 'stack' from the `plan_name` the scan's .h5 records (scan_metadata for a survey, stack_metadata for
+    a stack), else 'other' (no plan recorded, or the file cannot be read)."""
+    try:
+        with open_h5(path) as h:
+            for group in ("stack_metadata", "scan_metadata"):
+                if group in h:
+                    plan = _as_str(h[group].attrs.get("plan_name", "")).strip().lower()
+                    if plan in ("survey", "stack"):
+                        return plan
+    except (OSError, KeyError, ValueError):
+        pass
+    return "other"
+
+
 def root_attrs(path: Path) -> dict[str, str]:
     """Attributes of the file's root group as strings (file_creation_timestamp_iso, ring_current, ...)."""
     with open_h5(path) as h:

@@ -90,6 +90,15 @@ HELP: dict[str, tuple[str, str, str]] = {
     "survey.grid": ("Drag a rectangle over a block of pads, then cut it into a grid of zones (rows and columns from "
                     "config/plate_layout.json when one of its groups matches the holder's scans). Click again to "
                     "cancel.", "Grid of zones", "31-grid-of-zones-advanced"),
+    "survey.new_sheet": ("Write samples.csv in the beamtime folder, one row per holder with the holder filled in, to "
+                         "complete in a spreadsheet (the same as File > New sample sheet…).", "New sample sheet",
+                         "3-survey"),
+    "survey.choose_sheet": ("Pick the CSV that lists the samples (the same as File > Choose sample sheet…).",
+                            "Choose sample sheet", "3-survey"),
+    "survey.grid.save_layout": ("Save this grid (rows, columns and labels) in config/plate_layout.json as a layout "
+                                "group of the holder: the next Grid of zones on it offers the same grid. The file is "
+                                "created when missing; the previous one is kept as a backup.",
+                                "Save as plate layout", "31-grid-of-zones-advanced"),
     "survey.grid.layout": ("The plate_layout.json group whose rows, columns and sample names fill the grid.",
                            "layout group", "31-grid-of-zones-advanced"),
     "survey.grid.rows": ("Rows of pads in the rectangle, as seen on the map.", "rows", "31-grid-of-zones-advanced"),
@@ -201,6 +210,10 @@ HELP: dict[str, tuple[str, str, str]] = {
                           "detector edited", "48-xrf-windows"),
     "reduce.window.remember": ("Save these windows as a default rule for the edge of this stack: scans of that edge "
                                "attached later use them (Rules…).", "Remember these windows", "48-xrf-windows"),
+    "reduce.window.save_line": ("Save the windows of the four detectors shown now as a fixed line of this beamtime "
+                                "(config/roi_bins.json, created when missing; the previous file is kept as a backup): "
+                                "every scan offers it as a preset, and Maps draws its elemental map.",
+                                "Save as a fixed line", "48-xrf-windows"),
     "reduce.add_to_check": ("Queue the selected sample on this scan for Check, with the Easy settings listed above "
                             "(Ctrl+Return).", "Add to Check", "4-reduce"),
     "reduce.reset_easy": ("Rewrite the settings that differ from the Easy defaults (named in the chip) in one step; Undo "

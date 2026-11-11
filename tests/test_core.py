@@ -16,16 +16,17 @@ from aurora.core.names import (day_from_path, holder_from_survey, pretty_edge, s
 
 
 # ----------------------------------------------------------------------------- names
-@pytest.mark.parametrize("name, label", [
-    ("095242_sampleA_f_k_u_n45_stack", "sampleA"),
-    ("150255_UF4_u_n45coarse_1_stack", "UF4"),
-    ("092758_alpha_beta_f_k_stack", "alpha_beta"),
-    ("101456_gamma_f_k_stack", "gamma"),
-    ("154516_ZnSe_coarse_se_l3l2_coarse_stack", "ZnSe"),
-    ("010013_holderA_survey", "holderA"),
+@pytest.mark.parametrize("name, label, words", [
+    ("095242_sampleA_f_k_u_n45_stack", "sampleA", ()),
+    ("150255_UF4_u_n45coarse_1_stack", "UF4", ()),
+    ("092758_alpha_beta_f_k_stack", "alpha_beta_f_k", ()),       # 'wsu' is no generic plan word ...
+    ("092758_alpha_beta_f_k_stack", "alpha_beta", ("wsu",)),         # ... a beamtime's config/naming.json adds it
+    ("101456_gamma_f_k_stack", "gamma", ("f_coarse",)),
+    ("154516_ZnSe_coarse_se_l3l2_coarse_stack", "ZnSe", ()),
+    ("010013_holderA_survey", "holderA", ()),
 ])
-def test_strip_scan_suffix(name, label):
-    assert strip_scan_suffix(name) == label
+def test_strip_scan_suffix(name, label, words):
+    assert strip_scan_suffix(name, words) == label
 
 
 @pytest.mark.parametrize("name, holder", [
@@ -41,7 +42,7 @@ def test_holder_from_survey(name, holder):
     ("095242_sampleA_f_k_u_n45_stack", ("F", "K")),
     ("150255_UF4_u_n45coarse_1_stack", ("U", "N45")),
     ("154516_ZnSe_coarse_se_l3l2_coarse_stack", ("Se", "L3L2")),
-    ("101456_gamma_f_k_stack", ("F", "K")),
+    ("101456_gamma_f_k_stack", None),          # no edge in the name: the energies give it (resolve_edge)
     ("210000_N4_BM-series_f_k_stack", ("F", "K")),
     ("011600_N7_plate_survey", None),
 ])
@@ -205,14 +206,14 @@ def test_calibration_default_and_file(tmp_path):
 
 
 def test_calibration_describe_names_the_file_or_says_not_calibrated(tmp_path, capsys):
-    """The provenance line (aurora project, the report cover, every report CSV): the file used, relative to the project
-    ('../' for the sibling SGM_Beamline_Analysis-main/), its date and the gains; without a file 'not calibrated', never
-    'SDD calibration (?)'."""
+    """The provenance line (aurora project, the report cover, every report CSV), in words (BL-19): without a file
+    'none (no config/sdd_calibration.json), nominal 10 eV per channel'; the file used, relative to the project ('../'
+    for the CLS toolkit's file next to the project, said so), its date and the gains; never 'SDD calibration (?)'."""
     from aurora.cli import cmd_project
     root = testdata.make_fake_project(tmp_path / "beamtime")
     proj = Project.discover(root)
     text = proj.calibration.describe(proj.root)
-    assert text == "SDD calibration: none found (config/sdd_calibration.json), the default 10 eV/ch is used, not calibrated"
+    assert text == "SDD calibration: none (no config/sdd_calibration.json), nominal 10 eV per channel"
     gains = {"sdd1": (10.058, 3.9), "sdd2": (9.398, -3.6), "sdd3": (9.852, -1.3), "sdd4": (10.090, 7.9)}
     lib = tmp_path / "SGM_Beamline_Analysis-main"
     lib.mkdir()
@@ -220,11 +221,13 @@ def test_calibration_describe_names_the_file_or_says_not_calibrated(tmp_path, ca
                                                           "_metadata": {"last_updated": "2026-11-04 14:06:43"}}))
     proj = Project.discover(root)
     text = proj.calibration.describe(proj.root)
-    assert text.startswith("SDD calibration ../SGM_Beamline_Analysis-main/sdd_calibration.json (last updated "
-                           "2026-11-04 14:06:43): sdd1 10.058 eV/ch +3.9;") and text.endswith("sdd4 10.090 eV/ch +7.9")
+    assert text.startswith("SDD calibration: ../SGM_Beamline_Analysis-main/sdd_calibration.json (updated "
+                           "2026-11-04 14:06:43), from beside the project (the project has no "
+                           "config/sdd_calibration.json): sdd1 10.058 eV/ch +3.9;") and text.endswith("sdd4 10.090 eV/ch +7.9")
     assert cmd_project(root) == 0 and text in capsys.readouterr().out
     part = Calibration(data={"sdd1": {"gain": 10.1, "offset": 0.0}}).describe()      # a file without three detectors
-    assert "(?)" not in part and "sdd2 10.000 eV/ch +0.0 (not in the file: default, not calibrated)" in part
+    assert "(?)" not in part and part.startswith("SDD calibration: sdd_calibration.json, incomplete (sdd2–sdd4 missing: "
+                                                 "nominal)") and "sdd2 10.000 eV/ch +0.0 (nominal)" in part
 
 
 def test_roi_bins_read(tmp_path):
@@ -245,7 +248,7 @@ def test_sample_sheet(tmp_path):
     rows = read_sample_sheet(p)
     assert len(rows) == 1
     r = rows[0]
-    assert (r.plate, r.group, r.sample_id, r.other_edges) == ("N7", "Group 7", "AR1", "Cu L")
+    assert (r.plate, r.group, r.sample_id, r.edges) == ("N7", "Group 7", "AR1", "Cu L")       # 'no' F K edge
     assert r.composition == "CaCuSi2O4, SiO2" and r.notes == "café"
 
 

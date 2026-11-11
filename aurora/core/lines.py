@@ -12,11 +12,23 @@ SHELL_TO_EDGE = {"K": "K", "L": "L3", "L1": "L1", "L2": "L2", "L3": "L3", "L3L2"
 LINE_LABEL_BY_SHELL = {"K": "Kα", "L": "Lα", "M": "Mα"}
 
 
+def edge_name(shell: str) -> str:
+    """The xraydb edge of a scan-name shell: 'K' -> 'K', 'L' / 'L23' / 'L2,3' / 'L3L2' -> 'L3', 'M45' -> 'M5',
+    'N45' -> 'N5' (two subshells in one token: the lower-energy one, which has the higher number)."""
+    s = str(shell).upper().replace(",", "")
+    if s in SHELL_TO_EDGE:
+        return SHELL_TO_EDGE[s]
+    m = re.fullmatch(r"([KLMN])(\d)[KLMN]?(\d)", s)
+    if m:
+        return f"{m.group(1)}{max(m.group(2), m.group(3))}"
+    return s
+
+
 @lru_cache(maxsize=512)
 def edge_energy(el: str, shell: str) -> float | None:
-    """Edge energy in eV for ('U', 'N45') etc., None when xraydb has no such edge."""
+    """Edge energy in eV for ('U', 'N45'), ('Fe', 'L23') etc., None when xraydb has no such edge."""
     import xraydb
-    name = SHELL_TO_EDGE.get(shell.upper(), shell.upper())
+    name = edge_name(shell)
     try:
         return float(xraydb.xray_edge(el, name).energy)
     except Exception:

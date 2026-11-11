@@ -199,11 +199,11 @@ def test_cover_and_csvs_name_the_calibration_and_groups_follow_the_sheet(tmp_pat
     b = ReportBuilder(proj, zf, tmp_path / "reports", sheet_rows=sheet, png_dpi=40, page_png_dpi=0)
     res = b.build()
     cover = " ".join(ln.strip() for ln in b.cover_lines)
-    assert ("SDD calibration config/sdd_calibration.json (last updated 2026-11-04 14:06:43): sdd1 10.058 eV/ch +3.9; "
+    assert ("SDD calibration: config/sdd_calibration.json (updated 2026-11-04 14:06:43): sdd1 10.058 eV/ch +3.9; "
             "sdd2 9.398 eV/ch -3.6; sdd3 9.852 eV/ch -1.3; sdd4 10.090 eV/ch +7.9") in cover
     assert all(len(ln) <= 110 for ln in b.cover_lines)
     start = b.cover_lines.index("Contents") + 1
     assert [ln.split(":")[0].strip() for ln in b.cover_lines[start:start + 2]] == ["Zeta glass", "Minerals"]
     for csv in res.csvs:
         cal = provenance.read_header(csv)["calibration"]
-        assert cal.startswith("SDD calibration config/sdd_calibration.json") and "sdd4 10.090 eV/ch +7.9" in cal
+        assert cal.startswith("SDD calibration: config/sdd_calibration.json") and "sdd4 10.090 eV/ch +7.9" in cal
