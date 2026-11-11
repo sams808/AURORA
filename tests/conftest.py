@@ -131,6 +131,28 @@ def _destroy_leftover_windows(_isolated_settings):
         import gc
         if gc.isenabled():
             gc.collect()
+        _COLLECT_AFTER[0] = True
+
+
+_COLLECT_AFTER = [False]          # a test destroyed windows: collect again once pytest has released its arguments
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """The garbage of the windows a test destroyed, collected on the GUI thread once the test is over. The collection
+    in _destroy_leftover_windows runs while the test's fixture values (item.funcargs, cleared by pytest only after
+    the teardown) and its own locals still hold the windows' wrappers, so most of what they own (pyqtgraph's
+    parentless menus and items, about 15 000 objects per window) is not garbage yet; left to the automatic
+    collector it was freed at an allocation inside a later MainWindow() (an access violation in test_theme after
+    test_layout and test_zone_drawing)."""
+    try:
+        return (yield)
+    finally:
+        if _COLLECT_AFTER[0]:
+            _COLLECT_AFTER[0] = False
+            import gc
+            if gc.isenabled():
+                gc.collect()
 
 
 @pytest.fixture(autouse=True)
