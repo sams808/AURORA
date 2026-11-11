@@ -19,6 +19,31 @@ INTERNALS = re.compile(r"Errno|Traceback|aurora\.core|aurora\.app|ProtectedPathE
 NAMES = ("John Bussey", "Dynes", "sgm_report", "CLS GUI")
 
 
+def owner_names() -> list[str]:
+    """Names no shipped text may state, found at run time so that no test file writes one down (tests/test_blank.py
+    scans the tests too): this machine's account, the author's first name (pyproject.toml) and the tokens of the
+    local deny-list (AURORA_BLANK_DENYLIST, when one is configured)."""
+    import tomllib
+    from pathlib import Path
+
+    from test_blank import _accounts, denylist
+    root = Path(__file__).resolve().parent.parent
+    author = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["authors"][0]["name"]
+    return sorted(_accounts() | {author.split()[0]} | set(denylist() or []))
+
+
+def names_in(text: str) -> list[str]:
+    """The person and pipeline names of NAMES, the owner names (whole words, any case) and a CLS beamtime folder name
+    found in a text that ships (the glossary, the welcome panel). Not for window texts: a folder path shown in the
+    window may hold the account name of the machine."""
+    from test_blank import BEAMTIME_FOLDER, _word
+    hits = [n for n in NAMES if n in text]
+    hits += [n for n in owner_names() if _word(n).search(text)]
+    if BEAMTIME_FOLDER.search(text):
+        hits.append("a beamtime folder name")
+    return hits
+
+
 @dataclass
 class Text:
     where: str

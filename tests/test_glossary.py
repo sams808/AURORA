@@ -46,13 +46,13 @@ def test_glossary_covers_the_personas():
 
 
 def test_glossary_voice_and_blank():
+    from plain_helpers import names_in                  # person, pipeline and owner names, found at run time
     banned = re.compile(r"\b(I|we|our|my)\b")
-    names = ("John Bussey", "Dynes", "sgm_report", "2026_CLS", "WSU", "the lab", "jdoe")
     for t in g.GLOSSARY:
         for field in (t.term, t.short, t.plain, t.why, t.where, t.detail, t.report, *t.aliases):
             text = field.replace("I0", "").replace("(I)", "")
             assert not banned.search(text), (t.key, field)
-            assert not any(n in field for n in names), (t.key, field)
+            assert not names_in(field), (t.key, field, names_in(field))
 
 
 def test_the_values_it_states_are_aurora_s_own():

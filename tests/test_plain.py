@@ -240,12 +240,11 @@ def test_advanced_mode_shows_no_guide(qapp, tmp_path):
 
 def test_welcome_is_blank_and_plain(qapp):
     from aurora.app.home import WELCOME_TEXT, HomePerspective
-    banned = ("2026_CLS", "John Bussey", "CLS GUI", "WSU", "the lab")
-    for adv in (False, True):
+    for adv in (False, True):                            # person, pipeline and owner names (found at run time)
         mode.set_advanced(adv)
         texts = (WELCOME_TEXT, guide.getting_started_html(adv), HomePerspective._welcome_html())
         for t in texts:
-            assert not any(b in t for b in banned), (adv, t[:120])
+            assert not ph.names_in(t), (adv, ph.names_in(t), t[:120])
     mode.set_advanced(False)
     html = guide.getting_started_html(False)
     assert "my_beamtime/" in html and "open this folder" in html and "samples.csv" in html
