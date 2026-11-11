@@ -149,6 +149,7 @@ class PreviewPlot(QWidget):
         self.top.setMinimumHeight(MIN_TOP_PX)
         self._min_plot = int(min_plot_px)
         self._forced_compact: bool | None = None        # None: automatic (by the plot height)
+        self._bands_tip = False                         # the grey-band note in the tooltip (held compact)
         self._compact = False
         self._apply_min()                               # g09: room for readable ticks
         on_theme_changed(self, lambda _s: self._apply_min())   # ... at every Text size
@@ -181,13 +182,67 @@ class PreviewPlot(QWidget):
     def eventFilter(self, obj, ev) -> bool:
         if obj is self.gl and ev.type() == QEvent.Resize:
             self._layout_rows()
+            self._fit_titles()
         return False
 
+    # ------------------------------------------------------------------ titles and the grey-band note
+    def _set_titles(self, top: str, mid: str, low: str) -> None:
+        """The panel titles (TITLES), each elided to the width of its panel (_fit_titles)."""
+        self._titles = {"top": top, "mid": mid, "low": low}
+        self._fit_titles()
+
+    def _fit_titles(self) -> None:
+        """pyqtgraph makes the width of a title's text the minimum width of its plot: a long title in a narrow
+        column (the Survey's Zone preview, Reduce at 1200 px) pushed the right of the plot, its last energies and
+        the legend, out of view. Each title is elided to the width beside the left axis; the full titles are the
+        plots' tooltip."""
+        titles = getattr(self, "_titles", None)
+        if titles is None:
+            return
+        from aurora.app.theme import px
+        fm = QFontMetricsF(self._title_font())
+        row = self.title_row_px()
+        cut = False
+        for key, plot in (("top", self.top), ("mid", self.mid), ("low", self.low)):
+            text = titles[key]
+            room = max(float(px(60)), self.gl.width() - plot.getAxis("left").width() - px(16))
+            shown = fm.elidedText(text, Qt.ElideRight, room) if text else ""
+            cut = cut or shown != text
+            if plot.titleLabel.text != shown:
+                plot.setTitle(shown)
+            plot.layout.setRowFixedHeight(0, row)      # pyqtgraph's fixed 30 px row: the text's height instead
+        tip = [t for t in titles.values() if t] if cut else []     # a tooltip only when something is not shown
+        if self._bands_tip:
+            tip.append(BANDS_NOTE)
+        self.gl.setToolTip("\n".join(tip))
+
+    def _show_bands_note(self, on: bool) -> None:
+        """The line that says what the grey bands are, under the plots; a compact preview held compact (the
+        Survey's Zone preview, whose column has no line to spare) says it in the plots' tooltip instead."""
+        held = self._forced_compact is True
+        self._bands_tip = bool(on and held)
+        self.bands_note.setVisible(bool(on and not held))
+        self._fit_titles()
+
+    def _title_font(self) -> QFont:
+        from aurora.app.theme import px
+        font = QFont(self.gl.font())
+        font.setPixelSize(px(14))                      # the title size of theme.restyle_plot
+        return font
+
+    def title_row_px(self) -> int:
+        """The height of a panel's title row: one line of the title font (pyqtgraph gives every title 30 px)."""
+        return int(math.ceil(QFontMetricsF(self._title_font()).height())) + 2
+
     def _apply_min(self) -> None:
-        """The plots' minimum height at the Text size: THREE_PANELS_PX with the three panels, min_plot_px compact."""
+        """The plots' minimum height at the Text size: THREE_PANELS_PX with the three panels, plus the title rows of the
+        TEY and I0 panels (their data keep the room they had before they had titles); min_plot_px compact."""
         from aurora.app.theme import px
         compact = self._forced_compact if self._forced_compact is not None else self._compact
-        self.gl.setMinimumHeight(px(self._min_plot if compact else max(self._min_plot, THREE_PANELS_PX)))
+        if compact:
+            self.gl.setMinimumHeight(px(self._min_plot))
+        else:
+            self.gl.setMinimumHeight(px(max(self._min_plot, THREE_PANELS_PX)) + 2 * self.title_row_px())
 
     def _layout_rows(self) -> None:
         if self._forced_compact is not None:
@@ -236,10 +291,8 @@ class PreviewPlot(QWidget):
             self.top.legend.clear()
         from aurora.app.widgets import set_plot_hint
         if not self._traces:
-            self.top.setTitle("")
-            self.mid.setTitle("")
-            self.low.setTitle("")
-            self.bands_note.hide()
+            self._set_titles("", "", "")
+            self._show_bands_note(False)
             set_plot_hint(self.top, self._waiting or "select a sample (zone) and a scan to see its traces")
             for p in (self.mid, self.low):
                 set_plot_hint(p, " ")                 # no bare 0..1 axes on an empty preview
@@ -249,11 +302,10 @@ class PreviewPlot(QWidget):
         multi = len(self._traces) > 1
         t0 = self._traces[0][1]
         ipfy = bool(t0.settings and getattr(t0.settings, "signal", "pfy") == "ipfy")
-        self.top.setTitle(TITLES["ipfy" if ipfy else "pfy"]
-                          + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))
-        self.mid.setTitle(TITLES["tey"])
-        self.low.setTitle(TITLES["i0"])
-        self.bands_note.setVisible(bool(t0.pre))
+        self._set_titles(TITLES["ipfy" if ipfy else "pfy"]
+                         + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""),
+                         TITLES["tey"], TITLES["i0"])
+        self._show_bands_note(bool(t0.pre))
         self._spike_named = False
         if t0.pre:
             for rng in (t0.pre, t0.post):
