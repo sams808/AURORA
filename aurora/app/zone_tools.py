@@ -446,7 +446,10 @@ class ZoneEditor(QObject):
         with ses.edit(description(stroke, None if new else target.id), **kw):
             z = ses.new_zone() if new else target
             if z is not None:
+                empty = new or not (z.rects or z.paint or getattr(z, "polys", None))
                 apply_stroke(z, stroke, x, y, pitch)
+                if empty and not stroke.erase and hasattr(ses, "name_from_sheet"):
+                    ses.name_from_sheet(z)          # 'zone N' takes the sample-sheet name its stack holds
         if z is None:
             return None
         if not legacy:

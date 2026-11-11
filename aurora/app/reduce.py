@@ -338,6 +338,27 @@ class ScanSettingsCard(Card):
         ev.accept()
 
 
+def _whole_title(label: QLabel) -> None:
+    """A card title as wide as its text in the bold title font (the stylesheet's weight is not applied yet when the
+    page is built)."""
+    from PySide6.QtGui import QFont, QFontMetrics
+    f = QFont(label.font())
+    f.setWeight(QFont.DemiBold)
+    label.setMinimumWidth(QFontMetrics(f).horizontalAdvance(label.text()) + 6)
+
+
+class _NameEdit(QLineEdit):
+    """The 'Name this sample:' field: Esc emits escaped (the zone keeps 'zone N')."""
+    escaped = Signal()
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() == Qt.Key_Escape:
+            self.escaped.emit()
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
+
 class ReducePerspective(QWidget):
     def __init__(self, session: Session, parent: QWidget | None = None):
         super().__init__(parent)
@@ -406,6 +427,25 @@ class ReducePerspective(QWidget):
         zr.addWidget(self.new_zone_btn); zr.addWidget(self.del_zone_btn)
         zr.addWidget(pair(labelled("sample name", self.z_label, "reduce.label"), self.z_label))
         centre.body.addWidget(zone_row)
+        # Add to Check on a sample still named 'zone N': one inline field asks for its name (Enter names it, Esc keeps
+        # 'zone N'); hidden otherwise
+        self.name_row = QWidget()
+        nr = QHBoxLayout(self.name_row)
+        nr.setContentsMargins(0, 0, 0, 0)
+        nr.setSpacing(6)
+        self.name_prompt = QLabel("Name this sample:")
+        self.name_edit = _NameEdit()
+        self.name_edit.setAccessibleName("name this sample")
+        self.name_edit.setToolTip("The sample's name, as it goes into the saved files and the report. Enter names it; "
+                                  "Esc keeps the name it has.")
+        self.name_prompt.setBuddy(self.name_edit)
+        nr.addWidget(self.name_prompt)
+        nr.addWidget(self.name_edit, 1)
+        self.name_edit.returnPressed.connect(self._name_accepted)
+        self.name_edit.escaped.connect(self._name_dismissed)
+        self.name_row.hide()
+        self._naming: int | None = None             # the zone id the field names
+        centre.body.addWidget(self.name_row)
         self.show_row = QWidget()                       # map line / SDD / mode / energy / I0 / log: Advanced
         show = FlowLayout(self.show_row, spacing=6)
         self.map_line = QComboBox()
@@ -1487,7 +1527,8 @@ class ReducePerspective(QWidget):
         self.z_label.clear(); self.z_group.clear()
         h = self.session.holder()
         rows = self.session.sheet_for(h.name) if h else []
-        self.z_label.addItems(sorted({r.sample_id for r in rows}))
+        names = sorted({r.sample_id for r in rows if r.sample_id})
+        self.z_label.addItems(names or self.session.scan_labels())       # no sheet row: the labels of the scans
         self.z_group.addItems(sorted({r.group for r in self.session.sheet_rows if r.group}))
         if z is None:
             self.z_label.setEditText(""); self.z_group.setEditText(""); self.z_comment.setText("")
@@ -1749,14 +1790,48 @@ class ReducePerspective(QWidget):
                 st.n = k
                 z.settings[sd.id] = st
         n = self.session.queue_for_check([CheckItem(self.session.current_holder, z.id, sd.id)])
-        # a default name is saved as it is (the earlier GUI asked for a label first), so say so
-        unnamed = (" · it is saved under this name: name the sample in the sample name box"
-                   if DEFAULT_LABEL.match(z.label) else "")
+        # a default name would be saved as it is (the earlier GUI asked for a label first): ask for one here
+        unnamed = ""
+        if DEFAULT_LABEL.match(z.label):
+            unnamed = f" · name the sample in the field below (Enter), or press Esc to keep '{z.label}'"
+            self.ask_name(z)
         self.status_label.setText(say("reduce.added", label=z.label, scan=short_time(sd.id) or sd.name,
                                       waiting=len(self.session.check_queue)) + unnamed if n else
                                   f"{z.label} on {short_time(sd.id) or sd.name} is already in Check")
         self._paint_next_link()
         return n
+
+    def ask_name(self, z: Zone) -> None:
+        """Show the inline 'Name this sample:' field for a zone still named 'zone N', with the focus."""
+        self._naming = z.id
+        self.name_edit.clear()
+        self.name_edit.setPlaceholderText(z.label)
+        self.name_row.show()
+        self.name_edit.setFocus(Qt.OtherFocusReason)
+
+    def _name_accepted(self) -> None:
+        """Enter in 'Name this sample:': the zone takes the name (one undo step); an empty field keeps 'zone N'."""
+        text = self.name_edit.text().strip()
+        zid, self._naming = self._naming, None
+        self.name_row.hide()
+        z = self.session.zone(zid) if zid is not None else None
+        if z is None or not text or text == z.label:
+            return
+        old = z.label
+        with self.session.edit(f"rename zone {z.id}"):
+            z.label = text
+            if not z.group:
+                m = next((r for r in self.session.sheet_rows if r.sample_id and r.sample_id.lower() == text.lower()), None)
+                if m is not None and m.group:
+                    z.group = m.group
+        if self.session.current_zone == z.id:
+            self._fill_zone_card(z)
+        self.status_label.setText(f"{old} is now named {text}")
+
+    def _name_dismissed(self) -> None:
+        """Esc in 'Name this sample:': the zone keeps 'zone N'."""
+        self._naming = None
+        self.name_row.hide()
 
     # ------------------------------------------------------------------ batch settings: copy, paste, rules
     def copy_fields(self) -> list[str]:

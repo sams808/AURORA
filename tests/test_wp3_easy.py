@@ -284,7 +284,8 @@ def test_johns_step_3_conveniences_in_easy(qapp, fake_project):
         rd.map.rect_drawn.emit(x0, x1, y0, y1)
         pump(qapp)
         assert ses.zone().label == "zone 1"
-        assert rd.add_to_check() == 1 and "name the sample in the sample name box" in rd.status_label.text()
+        assert rd.add_to_check() == 1 and "name the sample in the field below" in rd.status_label.text()
+        assert not rd.name_row.isHidden()                       # 'Name this sample:' asks (plain PL-20)
         win.show_perspective("check")
         assert win.jobs.wait_idle(30000)
         pump(qapp)

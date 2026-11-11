@@ -45,7 +45,9 @@ and a larger text, at once. Long tasks run in the background with a progress str
    *Getting started* row at the top of Home, and the *Next* link of the top bar, say what to do next at every step.
 2. **Survey**: the map of the holder. The rectangles are the measured areas (stacks); click one to open it.
 3. **Reduce**: step **2 · Which X-rays to count** is preset for your element: keep it. In step **3 · Outline the
-   sample**, drag around your sample on the map and pick its name in **sample name**. Step **4 · Send to Check** says
+   sample**, drag around your sample on the map; it takes its name from the sample sheet when the stack's name holds
+   it, otherwise pick or type its name in **sample name** (or in the field *Name this sample:* that **Add to Check**
+   opens). Step **4 · Send to Check** says
    in one sentence how the spectrum is made; press **Add to Check**.
 4. **Check**: look at the preview. A good spectrum rises once at the edge, then stays roughly level, and its four
    detector curves have the same shape. Untick **Looks OK** on any that does not, then press **Save ticked →

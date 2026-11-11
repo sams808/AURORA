@@ -1272,6 +1272,60 @@ class Session(QObject):
         self.zone_selected.emit(z)
         return z
 
+    def sheet_name_for(self, z: Zone, key: str | None = None):
+        """The sample-sheet row of the zone's holder whose ID the name of a stack the zone covers holds (the scan folder
+        name or the sample label of the scan, compared as whole words without case: a stack
+        '…_beta_glass_f_k_stack' holds 'Beta glass' and 'beta', not 'bet'); the longest ID wins. The current stack stands in for a zone
+        that covers none yet. None without a sheet row, or when no stack name holds one."""
+        key = key or self._holder_of_zone(z) or self.current_holder
+        h = self.holder(key) if key else None
+        rows = [r for r in (self.sheet_for(h.name) if h is not None else []) if _words(r.sample_id)]
+        if not rows:
+            return None
+        names: list[str] = []
+        for s in self.stacks_of(key):
+            c = self.coordinates(self.stack_id(s))
+            if c is None:
+                continue
+            try:
+                hit = bool(np.count_nonzero(members(z, c[0], c[1], c[2])))
+            except Exception:                   # noqa: BLE001  a geometry this version cannot read: no name
+                hit = False
+            if hit:
+                names += [s.name, s.label]
+        if not names and self.current_stack:
+            scan = self.scan_of(self.current_stack)
+            if scan is not None and self.holder_of_stack(self.current_stack) in (key, None):
+                names += [scan.name, scan.label]
+        found = [r for r in rows if any(_holds(_words(n), _words(r.sample_id)) for n in names if n)]
+        return max(found, key=lambda r: len(r.sample_id.strip())) if found else None
+
+    def name_from_sheet(self, z: Zone, key: str | None = None) -> bool:
+        """A zone still named 'zone N' takes the label and group of sheet_name_for (a second zone of the same sample is
+        'label 2', ...). Called inside the edit that draws the zone, so it is part of that undo step. True when named."""
+        if z is None or not DEFAULT_LABEL.match(z.label or ""):
+            return False
+        row = self.sheet_name_for(z, key)
+        if row is None:
+            return False
+        key = key or self._holder_of_zone(z) or self.current_holder
+        hz = self.zones.holders.get(key) if key else None
+        taken = {o.label for o in (hz.zones if hz else []) if o is not z}
+        base = row.sample_id.strip()
+        label, n = base, 2
+        while label in taken:
+            label, n = f"{base} {n}", n + 1
+        z.label = label
+        if not z.group and row.group:
+            z.group = row.group
+        log.info("zone %s named %r from the sample sheet (group %r)", z.id, label, z.group)
+        return True
+
+    def scan_labels(self, key: str | None = None) -> list[str]:
+        """The sample labels of the holder's stacks (the sample box's list when the sheet has no row for the holder)."""
+        key = key or self.current_holder
+        return sorted({s.label for s in self.stacks_of(key) if s.label}) if key else []
+
     def delete_zone(self, zid: int) -> None:
         """Delete a zone of the current holder. No confirmation: Ctrl+Z brings it back."""
         if self._no_holder():

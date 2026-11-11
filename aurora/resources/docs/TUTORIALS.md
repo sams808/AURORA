@@ -62,7 +62,8 @@ headless listing and the tree agree.
    in the step-2 window, averaged over the outlined pixels and added over the four detectors, divided by the beam
    intensity (I0), …*); its tooltip has the exact settings (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as the
    earlier SGM XAS GUI) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (off by default in the earlier SGM XAS GUI)
-   · SDD1-4 · PFY F Kα*). Select zone 1 and press **Add to Check**; do the same for zone 2.
+   · SDD1-4 · PFY F Kα*). Select zone 1 and press **Add to Check**; do the same for zone 2. (A sample still called
+   *zone 1* when it is added gets a field *Name this sample:* under the map: type the name and press **Enter**.)
 7. *Advanced*: switch with **Ctrl+Shift+A**. The cards lose their numbers; the **Zone** card shows **group**, filled
    from the sample sheet when the label was picked (`Group 1` for zone 1, `Group 2` for zone 2). The scan card below shows **include** ticked, SDD1–4 ticked,
    line F Kα, fluorescence */ I0, edge jump = 1*, **de-spike** with k = 6, I0 own. Untick **SDD3** and watch the

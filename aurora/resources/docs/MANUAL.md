@@ -698,7 +698,13 @@ card on the right. **Propose zones**, **Stitch…**, **Load polygon…** and **S
 three [x, y] vertices in mm) into a new sample named after the file; **Save polygon…** writes the selected sample in
 that format when it is exactly one polygon.
 A label picked from the **sample** list renames the sample at once; **Ctrl+Z** in that box undoes the last edit when
-the box has no typing of its own to undo.
+the box has no typing of its own to undo. The list holds the sample sheet's samples of the holder; when the sheet has
+no row for the holder (or there is no sheet), it holds the sample labels of the holder's scans instead.
+
+A new sample drawn on a stack whose name holds a sample-sheet ID of the holder (as whole words, without case: the
+stack *…_beta_glass_f_k_stack* holds *Beta glass*) takes that name and its group at once, in the same undo step as
+its first stroke; the longest such ID wins, and a second sample of the same name is *Beta glass 2*. Otherwise a new
+sample is called *zone 1*, *zone 2*, …
 
 A zone is attached to every complete stack of the holder that it covers, loaded or not: the stage coordinates are
 read from each stack's .h5 when the project opens (no detector data is read), and every covered stack gets its
@@ -731,8 +737,9 @@ undo step, and the session is backed up just before.
   (**Ctrl+Return**) queues the selected sample on the current scan for Check (disabled while the outline holds no
   pixel); the status line counts what waits (*1 alpha on 09:27 added to Check (1 waiting)*) and the link **Go to
   Check** appears next to the button. Settings that do not exist yet are made from the Easy defaults.
-  A sample still called *zone 1* is saved under that name: the status line says so (John Bussey's GUI asked for a
-  label). **Load polygon…** (4.3) sits next to **Add to Check**. A flagged SDD that is still in the sum is named
+  A sample still called *zone 1* gets a field *Name this sample:* under the map with the focus (John Bussey's GUI
+  asked for a label): **Enter** names it (one undo step, the sample sheet's group comes with a name the sheet knows),
+  **Esc** keeps *zone 1*, under which it is then saved. **Load polygon…** (4.3) sits next to **Add to Check**. A flagged SDD that is still in the sum is named
   (*SDD1 flagged saturated, still in the sum*), and so is an I0 flagged invalid that is still used.
 - When a sample's settings differ from the Easy defaults (set in Advanced, or by a rule), Easy mode shows the chip
   *advanced settings in use*; its tooltip lists the fields (*fluorescence normalisation: / I0, maximum = 1; SDD3
