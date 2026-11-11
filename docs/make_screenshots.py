@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scheme", choices=["light", "dark"], default="light")
     ap.add_argument("--out", type=Path, default=OUT)
     ap.add_argument("--easy", action="store_true", help="Easy mode instead of Advanced")
+    ap.add_argument("--only", nargs="+", metavar="NAME", help="only these shots (survey_zone, reduce_erase, ...)")
     args = ap.parse_args(argv)
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
@@ -122,13 +123,20 @@ def main(argv: list[str] | None = None) -> int:
     win.jobs.wait_idle(180000)
 
     shots = [("home", lambda: win.show_perspective("home")), ("survey", lambda: win.show_perspective("survey")),
-             ("reduce", lambda: win.show_perspective("reduce")), ("check", lambda: win.show_perspective("check")),
+             ("survey_zone", lambda: survey_stroke(win, sd)),
+             ("reduce", lambda: win.show_perspective("reduce")), ("reduce_erase", lambda: reduce_erase(win, sd, z1)),
+             ("check", lambda: win.show_perspective("check")),
              ("compare", lambda: win.show_perspective("compare")),
              ("fit_lcf", lambda: (win.show_perspective("fit"), fit.tabs.setCurrentIndex(0))),
              ("fit_mcr", lambda: fit.tabs.setCurrentIndex(1)), ("fit_peaks", lambda: fit.tabs.setCurrentIndex(3)),
              ("maps_explore", lambda: (win.show_perspective("maps"), mp.tabs.setCurrentIndex(0))),
              ("maps_elements", lambda: mp.tabs.setCurrentIndex(1)), ("maps_clusters", lambda: mp.tabs.setCurrentIndex(3)),
              ("report", lambda: win.show_perspective("report"))]
+    if args.only:
+        unknown = set(args.only) - {name for name, _ in shots}
+        if unknown:
+            raise SystemExit(f"unknown shots: {', '.join(sorted(unknown))}")
+        shots = [sh for sh in shots if sh[0] in args.only]
     state = {"i": 0}
 
     def step():
@@ -136,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             name = shots[state["i"] - 1][0]
             win.grab().save(str(out / f"{name}.png"))
             print("wrote", out / f"{name}.png")
+        let_go()                                      # a drag held for the last shot ends without writing
         if state["i"] >= len(shots):
             app.quit(); return
         shots[state["i"]][1]()
@@ -148,6 +157,70 @@ def main(argv: list[str] | None = None) -> int:
     shutdown_app(app, win)
     remove_later(base)                                # a shared folder (Public Documents): leave nothing behind
     return code
+
+
+# ----------------------------------------------------------------------------- strokes held for a shot
+_HELD: dict = {}
+
+
+def _viewport_point(map_view, x: float, y: float):
+    from PySide6.QtCore import QPointF
+    return map_view.mapFromScene(map_view.vb.mapViewToScene(QPointF(x, y)))
+
+
+def hold_stroke(map_view, pts) -> None:
+    """Press on the map and move along `pts` (mm) without letting go: the shot shows the stroke in progress (the
+    points it adds or removes, the line saying what the release will do, the live preview). let_go() cancels it."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    vp = map_view.viewport()
+    QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, _viewport_point(map_view, *pts[0]))
+    for x, y in pts[1:]:
+        QTest.qWait(30)                               # pyqtgraph drops moves less than 10 ms apart
+        QTest.mouseEvent(QTest.MouseAction.MouseMove, vp, Qt.NoButton, Qt.NoModifier, _viewport_point(map_view, x, y))
+    _HELD["drag"] = (map_view, pts[-1])
+
+
+def let_go() -> None:
+    """End a held stroke without writing it (Esc, then the release)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    held = _HELD.pop("drag", None)
+    if held is not None:
+        map_view, pt = held
+        map_view.cancel_drawing()
+        QTest.mouseRelease(map_view.viewport(), Qt.LeftButton, Qt.NoModifier, _viewport_point(map_view, *pt))
+
+
+def _path(x0: float, x1: float, y0: float, y1: float, n: int = 6):
+    return [(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n) for k in range(n + 1)]
+
+
+def survey_stroke(win, sd) -> None:
+    """The Survey with a rectangle being drawn: over the stack's footprint where the survey covers it (the Zone preview
+    then shows the stack's XAS too), else over the middle of the survey map."""
+    win.show_perspective("survey")
+    sv, ses = win.survey, win.session
+    sv.set_tool("rect+")
+    survey = ses.survey()
+    x0, x1, y0, y1 = sd.bbox
+    inside = (survey.x >= x0) & (survey.x <= x1) & (survey.y >= y0) & (survey.y <= y1)
+    if not inside.any():                              # a survey beside the stack: its middle third
+        sx0, sx1, sy0, sy1 = float(survey.x.min()), float(survey.x.max()), float(survey.y.min()), float(survey.y.max())
+        x0, x1 = sx0 + (sx1 - sx0) / 3, sx1 - (sx1 - sx0) / 3
+        y0, y1 = sy0 + (sy1 - sy0) / 3, sy1 - (sy1 - sy0) / 3
+    hold_stroke(sv.map, _path(x0 - 0.05, x1 + 0.05, y0 - 0.05, y1 + 0.05))
+
+
+def reduce_erase(win, sd, zone) -> None:
+    """Reduce in Erase mode with a rectangle being dragged over the lower part of the zone: the crosses on the points
+    it removes, the line on the map, the live preview, the caption counting the change."""
+    win.show_perspective("reduce")
+    win.session.select_zone(zone.id)
+    win.reduce.set_tool("rect-")
+    x0, x1, y0, y1 = zone.rects[0]
+    px, py = sd.pitch
+    hold_stroke(win.reduce.map, _path(x0 - 0.4 * px, x0 + 0.55 * (x1 - x0), y0 - 0.4 * py, y0 + 0.5 * (y1 - y0)))
 
 
 def remove_later(folder: Path) -> None:
