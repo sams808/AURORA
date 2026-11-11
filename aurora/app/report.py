@@ -502,7 +502,7 @@ class ReportPerspective(QWidget):
         QTimer.singleShot(0, self, self.fit_options)
 
     def _project_changed(self, project) -> None:
-        self.out_dir.setText(str(project.root / "reports" / "aurora"))
+        self.out_dir.setText(str(project.output_root / "reports" / "aurora"))
         self._result = None
         self._plan = None
         self._fill_groups()
@@ -950,7 +950,8 @@ class ReportPerspective(QWidget):
         author = self.resolve_author(ask=True)
         preset = self.preset_key()
         p = PRESETS[preset]
-        out = Path(self.out_dir.text()) if self.out_dir.text().strip() else self.session.project.root / "reports" / "aurora"
+        out = (Path(self.out_dir.text()) if self.out_dir.text().strip()
+               else self.session.project.output_root / "reports" / "aurora")
         # only the options that differ from the preset are passed: the preset decides the others
         extra = {k: v for k, v in (("appendix", self.appendix.isChecked()), ("maps", self.maps.isChecked()),
                                    ("png_dpi", self.dpi.value())) if v != p[k]}

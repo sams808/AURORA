@@ -752,7 +752,7 @@ class ReducePerspective(QWidget):
         if getattr(sd, "_xrf_source", None) is None:
             scan = self.session.scan_of(sd.id)
             if scan is not None:
-                xw.attach(sd, scan, self.session.project.root)
+                xw.attach(sd, scan, self.session.project.work_root)
 
     # ------------------------------------------------------------------ holder / scans
     def _holder_changed(self, key: str) -> None:

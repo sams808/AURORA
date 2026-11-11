@@ -66,8 +66,8 @@ GUIDE = ("AURORA ticked {{looks-ok|Looks OK}} where its own checks found no prob
 LOOK_FOR = ("What to look for: one rise at the edge, then a roughly level curve · the four detectors with the same shape "
             "(their heights may differ) · no single point far off the curve · a flat or very noisy curve means the "
             "outline missed the sample.")
-READ_ONLY_NOTE = ("Not saved: {why}. Copy the beamtime to this computer and open the copy to keep your spectra, or "
-                  "press Show in Compare without saving.")
+READ_ONLY_NOTE = ("Not saved: {why}. Choose a working folder (the note at the top of the window) to keep your "
+                  "spectra, or press Show in Compare without saving.")
 def source_words(source: str) -> str:
     """Where a checked spectrum's counts were read, in words (Easy mode: no cache path, no 'bins')."""
     import re as _re
@@ -1193,8 +1193,8 @@ class CheckPerspective(QWidget):
         try:
             out = export.default_folder(ses.project, "sample").parent
         except (OSError, ValueError):
-            out = ses.project.root / "processed" / "reduced"
-        root = Path(ses.project.root)
+            out = ses.project.output_root / "processed" / "reduced"
+        root = Path(ses.project.work_root)
         if getattr(ses, "folder_read_only", False) or is_protected(root):
             return "this beamtime folder is read-only"
         if is_protected(out):

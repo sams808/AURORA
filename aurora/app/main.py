@@ -20,7 +20,7 @@ from aurora.app.compare import ComparePerspective
 from aurora.app.fit import FitPerspective
 from aurora.app.library import Library
 from aurora.app.maps import MapsPerspective
-from aurora.app.home import HomePerspective
+from aurora.app.home import HomePerspective, path_line as home_path_line
 from aurora.app.reduce import ReducePerspective
 from aurora.app.report import ReportPerspective
 from aurora.app.session import Session
@@ -46,8 +46,8 @@ MODE_STATUS = {False: "Easy mode: the main steps with standard settings", True: 
 NEXT_WIDTH = 420                        # the top bar's Next link is elided to this width (the full sentence: tooltip)
 MIN_SIZE = (1200, 760)                  # DESIGN.md: the smallest window every perspective fits without clipping
 BANNER_TEXT = ("This beamtime folder is read-only for AURORA (a locked drive, a share without write access, or a "
-               "protected folder): your outlines and spectra cannot be saved inside it. Copy the beamtime folder to "
-               "this computer and open the copy to keep your work.")
+               "protected folder): your outlines and spectra cannot be saved inside it. Choose a working folder to "
+               "keep your work there; the beamtime folder is only read.")
 CLOSE_WAIT_S = 5.0                      # closing waits at most this long for cancelled jobs to stop
 EXIT_WAIT_S = 10.0                      # then the process waits at most this long in all for the threads still running
 SEP = "▸"
@@ -731,7 +731,7 @@ class MainWindow(QMainWindow):
             n_complete_stacks=n_stacks, n_zones=n_zones, n_queued=len(ses.check_queue),
             n_saved=self.check.n_saved, n_library=len(rows) if rows is not None else 0, fit_ran=self._fit_ran,
             report_folder=self._report_folder, visited=frozenset(self._visited), current=self.current_key(),
-            can_choose_work_folder=False)
+            can_choose_work_folder=True)
 
     def read_only_beamtime(self) -> bool:
         """The beamtime folder cannot be written: a protected folder, or the session found it read-only."""
@@ -740,7 +740,7 @@ class MainWindow(QMainWindow):
             return False
         try:
             from aurora.core.io.safety import is_protected
-            if is_protected(Path(p.root)):
+            if is_protected(Path(p.work_root)):
                 return True
         except (ImportError, OSError, ValueError):
             pass
@@ -827,6 +827,13 @@ class MainWindow(QMainWindow):
         self.banner_text = TermLabel(BANNER_TEXT)
         self.banner_text.setObjectName("bannertext")
         lay.addWidget(self.banner_text, 1)
+        self.banner_work = QPushButton("Choose a working folder…")
+        self.banner_work.setToolTip("A folder of your own (on this computer) where AURORA keeps the outlines, the "
+                                    "checks, the saved spectra and the reports of this beamtime; the beamtime folder "
+                                    "is only read. AURORA remembers it for this beamtime.")
+        self.banner_work.setAccessibleName("Choose a working folder")
+        self.banner_work.clicked.connect(lambda: self.choose_work_folder())
+        lay.addWidget(self.banner_work)
         self.banner_dismiss = QPushButton("Dismiss")
         self.banner_dismiss.setToolTip("Hide this note for this beamtime (the save indicator still says read-only)")
         self.banner_dismiss.setAccessibleName("Dismiss the read-only note")
@@ -846,6 +853,58 @@ class MainWindow(QMainWindow):
         p = self.session.project
         show = p is not None and self.read_only_beamtime() and self._banner_dismissed != str(p.root)
         self.banner.setVisible(show)
+
+    # ------------------------------------------------------------------ working folder (a read-only beamtime)
+    def choose_work_folder(self) -> bool:
+        """Choose a working folder…: a folder dialog (Documents/AURORA when it exists); the beamtime's work then goes
+        to <chosen folder>/<beamtime name>/."""
+        from PySide6.QtWidgets import QFileDialog
+        p = self.session.project
+        if p is None:
+            return False
+        docs = Path.home() / "Documents"
+        start = docs / "AURORA" if (docs / "AURORA").is_dir() else docs if docs.is_dir() else Path.home()
+        d = QFileDialog.getExistingDirectory(self, f"Choose a working folder for {p.root.name}", str(start))
+        if not d:
+            return False
+        d = Path(d)
+        return self.set_work_folder(d if d.name == p.root.name else d / p.root.name)
+
+    def set_work_folder(self, work: Path) -> bool:
+        """Keep the open beamtime's session, checks, caches, saved spectra and reports in `work` (remembered for the
+        beamtime; nothing is ever written into the beamtime folder). False, with a message, when it cannot be used."""
+        from PySide6.QtWidgets import QMessageBox
+        from aurora.app.settings import remember_work_folder
+        from aurora.app.widgets import plain_error
+        from aurora.core.io.safety import is_protected
+        p = self.session.project
+        if p is None:
+            return False
+        work = Path(work)
+        why = ""
+        try:
+            work.resolve().relative_to(Path(p.root).resolve())
+            why = "it lies inside the beamtime folder"
+        except (ValueError, OSError):
+            pass
+        if not why and is_protected(work / ".aurora"):
+            why = "this folder is protected too"
+        if not why:
+            try:
+                self.session.use_work_folder(work)
+            except OSError as err:
+                why = plain_error(err)
+        if why:
+            QMessageBox.warning(self, "Choose a working folder", f"{work} cannot be the working folder: {why}.")
+            return False
+        remember_work_folder(p.root, work)
+        self.library.set_project(p)
+        self.home.path_label.setText(home_path_line(p))
+        self.crumb.refresh()
+        self.statusBar().showMessage(f"Working folder {work}: your outlines, checks, spectra and reports are kept "
+                                     "there; the beamtime folder is only read", 12000)
+        self.refresh_guide()
+        return True
 
     def _on_project(self, project) -> None:
         self.statusBar().showMessage(f"{plural(len(project.scans), 'scan')} in {project.root}")

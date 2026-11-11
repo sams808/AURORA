@@ -47,15 +47,24 @@ Contents
   press Save ticked → Compare.*; a click goes there; on that page it reads *Here: …*). It follows the *Getting started*
   row of Home (2.6) and Settings can hide both.
 - **Read-only banner**: under the top bar, when AURORA cannot write in the beamtime folder (a locked drive, a share
-  without write access, a protected folder): *This beamtime folder is read-only for AURORA …*, with what to do (copy
-  the beamtime to this computer and open the copy) and **Dismiss**. Check then offers **Show in Compare without
-  saving** (5.1) and Report disables **Build the report** while its folder cannot be written (9.1).
+  without write access, a protected folder): *This beamtime folder is read-only for AURORA …*, with **Choose a working
+  folder…** and **Dismiss**. Until a working folder is chosen, Check offers **Show in Compare without saving** (5.1)
+  and Report disables **Build the report** while its folder cannot be written (9.1).
+- **Choose a working folder…** asks for a folder of your own (it starts in *Documents/AURORA* when that folder
+  exists) and keeps the beamtime's work in `<chosen folder>/<beamtime name>/`: the session (outlines, settings, the
+  Check list), the checks, the Compare library, the caches, AURORA's sketch copies, the spectra saved by Check
+  (`processed/reduced/`) and the reports (`reports/aurora/`). The outlines on screen go with it, also the ones not
+  saved yet. The beamtime folder is only read: its own `.aurora/` (a session saved there earlier) is the starting
+  point while the working folder has none. AURORA remembers the working folder for that beamtime and uses it each
+  time the beamtime opens; Home's path line names it.
 - *Rail* (left): the eight perspectives, **Home** to **Report**, in the order of a normal workflow; **Ctrl+1** …
   **Ctrl+8** open them, and the tooltip of each rail button names its shortcut and what the page is for (*Survey
   (Ctrl+2): the map of each holder: where the samples and the measured areas are*). **Settings** sits at the bottom.
   Every perspective keeps its state when you switch.
 - **Cards**: every panel has a title and a small **?** that opens this manual at the panel's section. **F1** (**Help
-  on this page**) opens the section of the current perspective, or of the current tab in Fit and Maps.
+  on this page**) opens the section of the current perspective, or of the current tab in Fit and Maps; in Easy mode it
+  opens the user guide's quick start at the page instead (*Reduce in Easy mode* …), whose first image is that page
+  in Easy mode.
 - *Empty panels* say what to do next, with a button for it (**Open project…**, **Open the demo beamtime**, **Go to
   Reduce**, **Go to Compare**, …). A button that cannot act yet is greyed, and its tooltip says why (*open a project
   first*, *tick at least two rows 'Fit' in Compare*).
@@ -159,7 +168,10 @@ The shortcuts of Advanced tools do nothing in Easy mode; there the dialog lists 
 ### 1.4 The session: saving, undo and backups
 
 One *session* is attached to the open project: the current holder, the zones of every holder, the per-scan settings
-of every zone, the good-I0 choices, the saved rules and the view memory. It is saved automatically to
+of every zone, the good-I0 choices, the saved rules and the view memory. A session last saved on another computer
+(a shared beamtime folder) says so when it opens: *This beamtime holds outlines saved on another computer on
+2026-11-03 14:05: they are shown, and your changes are added to them.* The file keeps a short hash of the computer
+that saved it, never its name. It is saved automatically to
 `<project>/.aurora/session.json` within a second of every change, and only when something changed: opening a project
 and looking at it writes nothing. Every change to zones, settings or good-I0 can be undone (the last 100). One stroke on a map (a
 rectangle, a brush or lasso drag, a click) is one step however long it takes, and two strokes are two steps however
@@ -1493,7 +1505,7 @@ Writes:
 
 | Path | Content |
 |---|---|
-| `<project>/.aurora/session.json` | the session: a header `{"format": "aurora-session", "schema": 2, "app": "AURORA <version>"}`, then the zone tool's keys (holders, zones with id, label, group, comment, rects, erects, paint, erase, polys, epolys (erased outlines), per-scan settings `st` and `members`, goodI0) plus the `ui` (view memory, including `preflight_ignored`) and `rules` blocks; per-scan settings may carry `roi` (XRF windows), `sig`, `dsm` and `pin` (fields set by hand); keys AURORA does not know are kept. Written atomically (a temporary file, then a replace) |
+| `<project>/.aurora/session.json` | the session: a header `{"format": "aurora-session", "schema": 2, "app": "AURORA <version>", "host": "<hash>"}` (`host`: a hash of the computer that saved it), then the zone tool's keys (holders, zones with id, label, group, comment, rects, erects, paint, erase, polys, epolys (erased outlines), per-scan settings `st` and `members`, goodI0) plus the `ui` (view memory, including `preflight_ignored`) and `rules` blocks; per-scan settings may carry `roi` (XRF windows), `sig`, `dsm` and `pin` (fields set by hand); keys AURORA does not know are kept. Written atomically (a temporary file, then a replace) |
 | `<project>/.aurora/session.json.bak` | the previous good session.json, replaced at every save |
 | `<project>/.aurora/sketches/<holder>.<ext>` | the copy made by **Load a sketch…**; **Remove the sketch** deletes it |
 | `<project>/.aurora/backups/session-YYYYmmdd-HHMMSS.json` | snapshots: at most one per 10 min of editing, plus one before every import, proposal, rule application and restore; the last 30 are kept; each carries a `backup` note (reason, time) |
@@ -1516,6 +1528,11 @@ Writes:
 A loose folder of scans is its own project: `<loose folder>/.aurora/session.json` and `.aurora/cache/<day>/<scan>/`
 are written inside it, nothing next to it.
 
+With a working folder (**Choose a working folder…**, section 1), `<project>` in the table above is the working folder
+`<chosen folder>/<beamtime name>/` for everything AURORA writes for itself (`.aurora/`, `processed/reduced/`, the
+report folder); the files of `config/` and the sample sheet stay in the beamtime folder, so **Save as a fixed line…**,
+**Import SDD calibration…** and **New sample sheet…** cannot write while the beamtime folder cannot be written.
+
 **Export zones…** writes the zone tool's zones_all.json: version 1, without the header and the `ui` and `rules`
 blocks. A session.json with a higher schema than this AURORA knows opens read-only.
 
@@ -1536,7 +1553,7 @@ When a result looks wrong (the quick start of the user guide has the same table)
 | *inverse yield (IPFY)* in Check, and detector curves that dip | the window counts another element's X-rays; the spectrum is computed as beam ÷ counts and rises at the edge | normal; choose the line of the edge element in step 2 to count its own X-rays |
 | detector curves of different heights | the four detectors see the sample from different angles | normal when their shapes agree |
 | *saturated* detectors, or *no detector left in the sum* | too many X-rays for those detectors | use the electron-yield (TEY) spectrum of that scan |
-| *read-only* in the top bar, a banner about a read-only folder | AURORA cannot write in the beamtime folder | copy the beamtime folder to this computer and open the copy |
+| *read-only* in the top bar, a banner about a read-only folder | AURORA cannot write in the beamtime folder | press **Choose a working folder…** in the banner: your work is kept in a folder of your own, the beamtime folder is only read |
 
 - **Plots are empty, maps are blank**: PySide6 older than 6.10 paints no pyqtgraph items. The installers ship a
   recent version; from source, install in a fresh environment (`INSTALL.md`).

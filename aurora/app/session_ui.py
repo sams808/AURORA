@@ -38,8 +38,8 @@ STATE_DETAIL = {
 }
 # the read-only cases in words (Easy and Advanced; Advanced adds EXPORT_HINT, the action Easy mode hides)
 READ_ONLY_DETAIL = {
-    "folder": "AURORA cannot write in this beamtime folder: outlines drawn now are lost when AURORA closes. Copy the "
-              "beamtime folder to this computer and open the copy to keep your work.",
+    "folder": "AURORA cannot write in this beamtime folder: outlines drawn now are lost when AURORA closes. Choose a "
+              "working folder (the note at the top of the window) to keep your work there.",
     "newer": "This session was saved by a newer AURORA: edits here are not saved. Install the newer AURORA to keep "
              "working on it.",
     "other": "This session is open in another AURORA (or its lock was taken over): edits here are not saved.",

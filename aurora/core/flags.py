@@ -75,13 +75,27 @@ _QC_CACHE: dict[str, tuple[int, int, dict]] = {}
 
 
 def qc_path(project) -> Path | None:
+    """Where the checks are written: <work root>/.aurora/qc.json (the beamtime folder without a working folder)."""
+    own = getattr(project, "aurora_dir", None)
+    if own is not None:
+        return Path(own) / QC_FILE[-1]
     root = getattr(project, "root", None)
     return Path(root).joinpath(*QC_FILE) if root else None
 
 
+def qc_read_path(project) -> Path | None:
+    """The qc.json that is read: the working folder's, else (none there yet) the beamtime's own."""
+    p = qc_path(project)
+    root = getattr(project, "root", None)
+    if p is None or root is None or p.is_file():
+        return p
+    own = Path(root).joinpath(*QC_FILE)
+    return own if own != p and own.is_file() else p
+
+
 def qc_entries(project) -> dict[str, dict]:
     """sid -> entry of the project's qc.json (empty when there is none or it is unreadable)."""
-    p = qc_path(project)
+    p = qc_read_path(project)
     if p is None:
         return {}
     try:

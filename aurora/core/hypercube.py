@@ -165,7 +165,7 @@ def fallback_cache_root() -> Path:
 
 def cache_dirs(project: Project, scan: ScanInfo) -> list[Path]:
     """The scan's cache folders in the order they are tried: the project's own, then the per-user one."""
-    own = Path(project.root) / ".aurora" / "cache" / scan.day / scan.name
+    own = Path(getattr(project, "aurora_dir", None) or Path(project.root) / ".aurora") / "cache" / scan.day / scan.name
     tag = hashlib.sha1(str(Path(project.root).resolve()).encode("utf-8")).hexdigest()[:10]
     return [own, fallback_cache_root() / tag / scan.day / scan.name]
 

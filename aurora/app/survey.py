@@ -370,7 +370,8 @@ class SurveyPerspective(QWidget):
         self.sketch_btn.setVisible(has and h is not None)
         why = self._sketch_refusal()
         set_enabled(self.sketch_btn, has and h is not None and not why, why or "open a project first")
-        own = has and h is not None and sketches.is_own(self.session.project.root, self.sketch_path)
+        own = has and h is not None and sketches.is_own(self.session.project.root, self.sketch_path,
+                                                         self.session.project.work)
         set_enabled(self.remove_sketch_btn, own and not why,
                     why or "this sketch is a file of the beamtime folder: AURORA removes only the copy it made")
         title = holder_title(h)
@@ -721,7 +722,8 @@ class SurveyPerspective(QWidget):
         """Show the holder's sketch in its card, or hide the card: a holder without one shows no sketch at all."""
         h = self.session.holder()
         root = self.session.project.root if self.session.project is not None else None
-        p = sketches.find_sketch(root, h.name) if h is not None and root is not None else None
+        work = self.session.project.work if self.session.project is not None else None
+        p = sketches.find_sketch(root, h.name, work) if h is not None and root is not None else None
         pm = QPixmap(str(p)) if p is not None else QPixmap()
         if p is not None and pm.isNull():
             self.hint.setText(f"the sketch {p.name} could not be read as an image")
@@ -748,7 +750,7 @@ class SurveyPerspective(QWidget):
         if proj is None:
             return ""
         return ("this beamtime folder is protected (read-only): AURORA keeps no copy in it"
-                if is_protected(proj.root / sketches.OWN_DIR[0] / sketches.OWN_DIR[1] / "x.png") else "")
+                if is_protected(sketches.own_folder(proj.root, proj.work) / "x.png") else "")
 
     def load_sketch(self, path: str | Path | None = None) -> Path | None:
         """Load a sketch…: copy an image (PNG or JPEG) of the holder to .aurora/sketches/<holder>.<ext> and show it.
@@ -768,12 +770,12 @@ class SurveyPerspective(QWidget):
             return None
         out = None
         with guarded_write(self, f"the sketch of holder {h.name}") as g:
-            out = sketches.add_sketch(self.session.project.root, h.name, path)
+            out = sketches.add_sketch(self.session.project.root, h.name, path, self.session.project.work)
         if not g.ok:
             return None
         self._load_sketch()
         self.session.status.emit(f"sketch of holder {h.name}: {path.name} copied to "
-                                 f"{out.relative_to(self.session.project.root).as_posix()}")
+                                 f"{out.relative_to(self.session.project.work_root).as_posix()}")
         return out
 
     def remove_sketch(self) -> list[Path]:
@@ -783,7 +785,7 @@ class SurveyPerspective(QWidget):
             return []
         gone: list[Path] = []
         with guarded_write(self, f"the sketch of holder {h.name}") as g:
-            gone = sketches.remove_sketch(self.session.project.root, h.name)
+            gone = sketches.remove_sketch(self.session.project.root, h.name, self.session.project.work)
         if g.ok and gone:
             self.session.status.emit(f"sketch of holder {h.name} removed (AURORA's copy; the original image is kept)")
         self._load_sketch()

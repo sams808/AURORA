@@ -591,7 +591,7 @@ class ZonePreviewCard(Card):
         if getattr(sd, "_xrf_source", None) is None:
             scan = self.session.scan_of(sd.id)
             if scan is not None:
-                xw.attach(sd, scan, self.session.project.root)
+                xw.attach(sd, scan, self.session.project.work_root)
 
     def _load(self, sid: str, short: str) -> None:
         from aurora.app import jobs

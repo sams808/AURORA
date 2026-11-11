@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import logging
 import os
 import threading
 from pathlib import Path
@@ -25,7 +26,7 @@ from aurora.app import jobs, shortcuts
 from aurora.app.help_text import explain, header_tips
 from aurora.app.icons import icon
 from aurora.app.mode import is_advanced, mark_advanced_column, on_mode_changed
-from aurora.app.settings import recent_projects, remember_project, settings
+from aurora.app.settings import recent_projects, remember_project, settings, work_folders
 from aurora.app.theme import MONO_FONT, TOKENS, on_theme_changed, refill_tones, set_item_tone, tone_of
 from aurora.app import guide
 from aurora.app.vocab import edge_words, flag_words, plural
@@ -34,6 +35,8 @@ from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskB
 from aurora.core import overview
 from aurora.core.constants import sdd_geometry
 from aurora.core.model import Project, ScanInfo
+
+log = logging.getLogger("aurora.home")
 
 COLS = ("Scan", "Time", "Kind", "Edge", "Status", "Energies", "Pixels", "Flags")
 COL_KEYS = ("scan", "time", "kind", "edge", "status", "energies", "points", "flags")     # HELP keys home.col.<key>
@@ -102,9 +105,10 @@ def check_paths(paths: list[str], progress) -> dict[str, bool]:
     return {p: bool(box.get("value")) for p, (_t, box) in asked.items()}
 
 
-def discover(path: Path, progress) -> tuple[Project, overview.ProjectFacts]:
+def discover(path: Path, progress, work: dict | None = None) -> tuple[Project, overview.ProjectFacts]:
     """The discovery job: the project and the files found next to it (sample sheet). The path is looked at first in
-    a thread of its own (see _asked), so Cancel and a closing window never wait for a share that does not answer."""
+    a thread of its own (see _asked), so Cancel and a closing window never wait for a share that does not answer.
+    `work`: the remembered working folders ({beamtime root: folder}, read in the window's thread)."""
     path = Path(path)
     t, box = _asked(lambda: path.is_dir() or path.is_file())
     while t.is_alive():
@@ -114,7 +118,7 @@ def discover(path: Path, progress) -> tuple[Project, overview.ProjectFacts]:
         raise box["error"]
     if not box.get("value"):
         raise FileNotFoundError(f"{path}: no such folder or file, or the share that holds it does not answer")
-    project = Project.discover(path, progress=progress)
+    project = Project.discover(path, progress=progress, work_folders=work)
     return project, overview.project_facts(project)
 
 
@@ -147,8 +151,9 @@ def path_line(project: Project) -> str:
     n_days = len(project.days) + len(project.days_left_out)
     days = (f"{project.days[0].date} only (1 of {n_days} days)" if project.days_left_out and project.days
             else plural(len(project.days), "day"))
+    work = f"   ·   working folder {project.work}" if getattr(project, "work", None) else ""
     return (f"{project.root}   ·   {days}, {plural(project.n_holders, 'holder')}, "
-            f"{plural(len(project.scans), 'scan')}")
+            f"{plural(len(project.scans), 'scan')}{work}")
 
 
 def breakable(text: str) -> str:
@@ -479,7 +484,8 @@ class HomePerspective(QWidget):
         self.open_btn.setEnabled(False)
         self._opening = path.name or str(path)
         self.opening_state.set_content(f"Reading {self._opening} …")
-        job = mgr.submit(f"discover:{req}", lambda cb: discover(path, cb),
+        work = work_folders()
+        job = mgr.submit(f"discover:{req}", lambda cb: discover(path, cb, work),
                          on_done=lambda r: req == self._request and self._discovered(r),
                          on_failed=lambda t: req == self._request and self._on_failed(t),
                          on_end=lambda _s: self._open_ended(), label=f"reading {path.name}", taskbar=self.taskbar,
@@ -552,6 +558,12 @@ class HomePerspective(QWidget):
             return
         self._quiet = False
         self._failed = ""
+        if getattr(project, "work", None) is None:      # a project discovered elsewhere (tests, the demo, distcheck)
+            from aurora.core.model import work_folder_for
+            project.work = work_folder_for(project.root, work_folders())
+        if project.work is not None and not Path(project.work).parent.is_dir():
+            log.warning("%s: the working folder %s is not reachable: not used", project.root, project.work)
+            project.work = None
         self.project = project
         self.facts = facts
         self._map_checks.clear()

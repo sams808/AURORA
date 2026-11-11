@@ -939,6 +939,27 @@ def _project_root(session=None) -> Path | None:
     return Path(root) if root else None
 
 
+# kinds whose dialogs save a file: they start under the working folder of a read-only beamtime
+OUTPUT_KINDS = {"export", "compare", "fit", "maps", "report", "config", "csv", "reduced"}
+
+
+def _project_roots(kind: str, session=None) -> list[Path]:
+    """The folders a dialog of this kind may start in, in order: the beamtime root and its working folder (first
+    for the kinds that save)."""
+    root = _project_root(session)
+    if root is None:
+        return []
+    obj = session
+    if obj is None:
+        from aurora.app import nav
+        obj = getattr(nav.window_of(None), "session", None)
+    proj = getattr(obj, "project", None) or obj
+    work = getattr(proj, "work", None)
+    if not work:
+        return [root]
+    return [Path(work), root] if kind in OUTPUT_KINDS else [root, Path(work)]
+
+
 def _inside(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -951,18 +972,19 @@ def default_dir(kind: str, session=None) -> str:
     """The folder a file dialog of this kind starts in: the last one used for this kind (inside the open project, when
     one is open), else the project's reports/ (exports) or matching subfolder, the project root, then ~/Documents."""
     from aurora.app.settings import settings
-    root = _project_root(session)
+    roots = _project_roots(kind, session)
     last = str(settings().value(f"last_dir/{kind}", "") or "")
     if last:
         p = Path(last)
-        if p.is_dir() and (root is None or _inside(p, root)):
+        if p.is_dir() and (not roots or any(_inside(p, r) for r in roots)):
             return str(p)
-    if root is not None:
-        for sub in KIND_SUBDIRS.get(kind, ("reports",)):
-            d = root / sub
-            if d.is_dir():
-                return str(d)
-        return str(root)
+    if roots:
+        for root in roots:
+            for sub in KIND_SUBDIRS.get(kind, ("reports",)):
+                d = root / sub
+                if d.is_dir():
+                    return str(d)
+        return str(roots[0])
     docs = Path.home() / "Documents"
     return str(docs if docs.is_dir() else Path.home())
 

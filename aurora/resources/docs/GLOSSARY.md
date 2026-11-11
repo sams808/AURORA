@@ -438,8 +438,8 @@ check before building and what was left out.
 *Also called:* Appendix A, Appendix B, Appendix C.
 
 ### Session (autosave)
-AURORA's record of your outlines and settings, saved in the beamtime folder (`.aurora/session.json`) within a second
-of every change.
+AURORA's record of your outlines and settings, saved in the beamtime folder (`.aurora/session.json`), or in your
+working folder, within a second of every change.
 
 *Why it matters:* Nothing needs saving by hand; Ctrl+Z undoes the last change.
 *In AURORA:* the save indicator in the top bar.

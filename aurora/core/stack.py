@@ -26,6 +26,7 @@ from aurora.core.io.h5 import find_h5, xy
 from aurora.core.io.raw import read_point_dir, stack_energy_dirs, stack_last_mtime
 from aurora.core.lines import edge_energy, main_line
 from aurora.core.model import Project, ScanInfo
+from aurora.core.model import own_dirs as _own_dirs
 from aurora.core.names import pretty_edge, target_edge
 from aurora.core.spectra import i0_low_mask
 from aurora.core.zones import grid_pitch
@@ -168,7 +169,7 @@ class StackData:
         why: list[str] = []
         fallback = None                 # an sgm_report cache with other windows: used unless AURORA's cache matches
         for src, cdir in (("sgm_report", project.processed / scan.day / scan.name),
-                          ("aurora", project.root / ".aurora" / "cache" / scan.day / scan.name)):
+                          *(("aurora", d / "cache" / scan.day / scan.name) for d in _own_dirs(project))):
             if src == "sgm_report" and not use_report_cache:
                 continue
             rc, problem = ReducedCache.open(cdir, allow_pickle=(src == "sgm_report"))
@@ -255,7 +256,7 @@ class StackData:
         if bad.any():
             notes.append(f"I0 <= 0 at {E[bad].tolist()[:6]}")
         log.info("%s: reduced %d energies x %d pixels x %d ROIs from raw (%d skipped)", scan.name, nE, npts, nroi, len(skipped))
-        cdir = project.root / ".aurora" / "cache" / scan.day / scan.name
+        cdir = _own_dirs(project)[0] / "cache" / scan.day / scan.name
         sig = aurora_signature(nE, stack_last_mtime(edirs), bounds)
         try:                                     # numbers and unicode only: AURORA reads its caches without pickle
             save_npz(cdir / CACHE_NAME, signature=np.array(sig), i0=i0, tey=tey, roi_pix_det=rpd,

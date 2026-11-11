@@ -75,8 +75,21 @@ class Library(QObject):
 
     # ------------------------------------------------------------------ project, autosave
     def library_file(self) -> Path | None:
+        """<work root>/.aurora/library.json (the beamtime's own .aurora/ without a working folder)."""
+        own = getattr(self.project, "aurora_dir", None)
+        if own is not None:
+            return Path(own) / LIBRARY_FILE
         root = getattr(self.project, "root", None)
         return Path(root) / ".aurora" / LIBRARY_FILE if root else None
+
+    def _library_source(self) -> Path | None:
+        """The library read at open: the working folder's, else (none there yet) the beamtime's own."""
+        path = self.library_file()
+        root = getattr(self.project, "root", None)
+        if path is None or root is None or path.is_file():
+            return path
+        own = Path(root) / ".aurora" / LIBRARY_FILE
+        return own if own != path and own.is_file() else path
 
     def set_project(self, project) -> None:
         """A project was opened: write a pending change of the previous one, then restore this project's library.
@@ -86,13 +99,25 @@ class Library(QObject):
         new_root = getattr(project, "root", None)
         if old_root is not None and new_root is not None and Path(old_root).resolve() == Path(new_root).resolve():
             self.project = project
-            return
-        self.flush()
+            new_file = self.library_file()
+            opened, self._opened_file = getattr(self, "_opened_file", None), new_file
+            if opened is None or new_file is None or opened == new_file:
+                return
+            # a working folder was chosen for this beamtime: the rows on screen are written there (when it has no
+            # library of its own yet), else its library is read
+            if not new_file.is_file():
+                self._last_text = self._last_npz = None
+                if self.requests:
+                    self.touch()
+                return
+        else:
+            self.flush()
         had_project = self.project is not None
         self.project = project
+        self._opened_file = self.library_file()
         self._edge_cache.clear()
         self._last_text = self._last_npz = None
-        path = self.library_file()
+        path = self._library_source()
         if path is not None and path.is_file():
             try:
                 self._restoring = True

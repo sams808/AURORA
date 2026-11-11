@@ -1446,6 +1446,7 @@ class ReportBuilder:
             rel = root / "processed" / e.scan.day / e.scan.name / "_reduced_cache.npz"
             kind = "sgm_report cache"
         elif src.startswith("aurora cache") or src == "reduced from raw":
+            root = Path(getattr(self.project, "work_root", root))     # a working folder: named from its own root
             rel = root / ".aurora" / "cache" / e.scan.day / e.scan.name / "_reduced_cache.npz"
             kind = "raw reduce"
         else:

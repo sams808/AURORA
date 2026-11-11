@@ -335,8 +335,8 @@ GLOSSARY: tuple[Term, ...] = (
        "They show how each spectrum was obtained.", "Report, Options", "report",
        ("Appendix A", "Appendix B", "Appendix C"), question="What are Appendix A, B and C?"),
     _T("session", "Session (autosave)", "session",
-       "AURORA's record of your outlines and settings, saved in the beamtime folder (`.aurora/session.json`) within "
-       "a second of every change.",
+       "AURORA's record of your outlines and settings, saved in the beamtime folder (`.aurora/session.json`), or in "
+       "your working folder, within a second of every change.",
        "Nothing needs saving by hand; Ctrl+Z undoes the last change.", "the save indicator in the top bar", "report",
        ("autosave", "session.json")),
     _T("easy-mode", "Easy and Advanced mode", "Easy and Advanced mode",

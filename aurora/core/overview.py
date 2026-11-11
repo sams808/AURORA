@@ -34,7 +34,7 @@ def project_facts(project, chosen: str | None = None) -> ProjectFacts:
     from aurora.core.io.config import find_sample_sheet, session_ui_value
     root = Path(project.root)
     if chosen is None:
-        chosen = session_ui_value(root, "sample_sheet")
+        chosen = session_ui_value(root, "sample_sheet", work=getattr(project, "work", None))
     choice = find_sample_sheet(root, chosen if isinstance(chosen, str) else None)
     facts = ProjectFacts(choice=choice)
     if choice.path is not None:

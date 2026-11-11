@@ -21,9 +21,10 @@ from scipy import ndimage
 from aurora.core.constants import (BAD_POINT_FRACTION, COUNT_RATE_PROBE_N, DETS, FEW_POINTS, I0_BAD_FRAC, I0_COL,
                                    I0_LOW_FRAC, I0_REF_WINDOW_EV, I0_VARIES_FACTOR, SAT_I0_VAR, SAT_RATE_RATIO,
                                    SAT_TOP_CV)
-from aurora.core.flags import CHECK_SOURCE, qc_path
+from aurora.core.flags import CHECK_SOURCE, qc_path, qc_read_path
 from aurora.core.io.raw import read_point_dir, stack_energy_dirs, stack_last_mtime
 from aurora.core.model import Project, ScanInfo
+from aurora.core.model import own_dirs as _own_dirs
 from aurora.core.spectra import ZoneTraces, i0_score
 
 log = logging.getLogger("aurora.qc")
@@ -60,7 +61,8 @@ def count_rate_probe(project: Project, scan: ScanInfo, n_probe: int = COUNT_RATE
     """Read n_probe energy folders of a stack (cached under .aurora/cache; sgm_report's _count_rate.json is reused)."""
     edirs = scan.energy_dirs or stack_energy_dirs(scan.path)
     key = f"{len(edirs)}:{stack_last_mtime(edirs):.0f}"
-    for cdir in (project.processed / scan.day / scan.name, project.root / ".aurora" / "cache" / scan.day / scan.name):
+    for cdir in (project.processed / scan.day / scan.name,
+                 *(d / "cache" / scan.day / scan.name for d in _own_dirs(project))):
         p = cdir / "_count_rate.json"
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
@@ -83,7 +85,7 @@ def count_rate_probe(project: Project, scan: ScanInfo, n_probe: int = COUNT_RATE
         rows.append(dict(E_eV=float(e), i0=float(np.nanmean(pd.mcc[:, I0_COL])), dwell_s=(tmap / n if tmap else None),
                          mean=[float(t.mean()) for t in tot], top=[float(np.percentile(t, 99)) for t in tot]))
     cr = CountRate(scan=scan.name, key=key, time_per_map_s=tmap, rows=rows)
-    cdir = project.root / ".aurora" / "cache" / scan.day / scan.name
+    cdir = _own_dirs(project)[0] / "cache" / scan.day / scan.name
     try:
         from aurora.core.io.safety import assert_writable
         assert_writable(cdir)
@@ -330,7 +332,7 @@ def save_qc(project: Project, results: dict[str, QcResult]) -> Path:
     """Merge `results` into <project>/.aurora/qc.json (entries of other scans are kept) with an atomic write."""
     from aurora.core.io.textio import read_json, write_json_atomic
     p = qc_path(project)
-    old = read_json(p, {})
+    old = read_json(qc_read_path(project), {})
     data = {k: v for k, v in (old.items() if isinstance(old, dict) else [])}
     for sid, r in results.items():
         data[sid] = r.to_json()
@@ -681,14 +683,15 @@ def mcc_curves(project: Project, scan: ScanInfo) -> MccCurves:
     """Read only the mcc csv of every energy folder (fast), cached as json under .aurora/cache."""
     edirs = scan.energy_dirs or stack_energy_dirs(scan.path)
     key = f"mcc:{len(edirs)}:{stack_last_mtime(edirs):.0f}"
-    cdir = project.root / ".aurora" / "cache" / scan.day / scan.name
+    cdir = _own_dirs(project)[0] / "cache" / scan.day / scan.name
     p = cdir / "_mcc_curves.json"
-    try:
-        d = json.loads(p.read_text(encoding="utf-8"))
-        if d.get("key") == key:
-            return MccCurves(scan.name, *(np.array(d[k], float) for k in ("E", "mesh", "diode", "aux", "tey")))
-    except (OSError, ValueError):
-        pass
+    for d_ in _own_dirs(project):
+        try:
+            d = json.loads((d_ / "cache" / scan.day / scan.name / p.name).read_text(encoding="utf-8"))
+            if d.get("key") == key:
+                return MccCurves(scan.name, *(np.array(d[k], float) for k in ("E", "mesh", "diode", "aux", "tey")))
+        except (OSError, ValueError):
+            pass
     E, cols = [], []
     for e, pdir in edirs:
         try:

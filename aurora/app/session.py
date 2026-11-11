@@ -92,6 +92,31 @@ IMPORT_POLICIES = ("merge", "replace", "skip")
 SAMPLE_SHEET_KEY = "sample_sheet"       # ui value: the sample sheet chosen with File > Choose sample sheet… (relative)
 UNDOABLE_UI = (SAMPLE_SHEET_KEY,)       # ui values an edit records for undo (the others are view memory)
 DEFAULT_LABEL = re.compile(r"^zone \d+$")      # the label new_zone gives a zone without one ('zone 3')
+
+
+def _words(text) -> list[str]:
+    """The words of a name, without case ('A1_Beta-glass' -> ['a1', 'beta', 'glass'])."""
+    return re.findall(r"[^\W_]+", str(text or "").casefold())
+
+
+def _holds(words: list[str], part: list[str]) -> bool:
+    """Whether `part` is a run of whole words of `words`."""
+    n = len(part)
+    return bool(n) and any(words[i:i + n] == part for i in range(len(words) - n + 1))
+
+
+OTHER_COMPUTER_TEXT = ("This beamtime holds outlines saved on another computer {when}: they are shown, and your "
+                       "changes are added to them.")
+
+
+def host_id() -> str:
+    """This computer in session.json's 'host' header: a short hash of its network name (the name itself is never
+    written), so a session saved elsewhere can be told apart."""
+    import platform
+    node = (platform.node() or "").strip().casefold()
+    return hashlib.sha1(node.encode("utf-8")).hexdigest()[:12] if node else ""
+
+
 QUEUE_KEY = "check_queue"               # ui block: the Easy check queue, [[holder key, zone id, sid], ...]
 
 
@@ -298,7 +323,8 @@ class Session(QObject):
         """Open a project. The pending autosave of the previous one is written first. Opening the same folder again
         (Reload) keeps the place (holder, zone, stack), the loaded stacks that did not change and the undo history."""
         self.flush()
-        if self.project is not None and Path(self.project.root) == Path(project.root):
+        if (self.project is not None and Path(self.project.root) == Path(project.root)
+                and Path(self.project.work_root) == Path(project.work_root)):
             self._reload(project)
         else:
             self._open(project)
@@ -521,11 +547,46 @@ class Session(QObject):
 
     @property
     def session_file(self) -> Path:
-        return self.project.root / ".aurora" / "session.json"
+        """<work root>/.aurora/session.json: the file this session writes (the beamtime's own without a working
+        folder)."""
+        return self.project.aurora_dir / "session.json"
+
+    def _session_source(self) -> Path:
+        """The session file read at open: the working folder's; while the working folder has none yet, the beamtime's
+        own (the starting point, never written: the first save goes to the working folder)."""
+        sf = self.session_file
+        if not sf.exists() and self.project.work is not None:
+            own = Path(self.project.root) / ".aurora" / "session.json"
+            if own.is_file():
+                return own
+        return sf
 
     @property
     def backup_dir(self) -> Path:
-        return self.project.root / ".aurora" / BACKUP_DIR
+        return self.project.aurora_dir / BACKUP_DIR
+
+    def use_work_folder(self, work: Path) -> None:
+        """Keep this beamtime's session in a working folder from now on (Choose a working folder…). The working
+        folder gets the zones on screen, edits not saved yet included, when it has no session of its own; one it
+        already has is read. The session then opens again there: lock, autosave, backups."""
+        if self.project is None:
+            return
+        from aurora.core.io.safety import assert_writable
+        from aurora.core.io.textio import write_text_atomic
+        target = Path(work) / ".aurora" / "session.json"
+        assert_writable(target)
+        Path(work).mkdir(parents=True, exist_ok=True)
+        if not target.exists() and not self._newer and (self._user_edits or self.zones.holders):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self.zones.exported = self.clock().isoformat(timespec="seconds")
+            self.zones.stamp(f"AURORA {__version__}", host_id())
+            write_text_atomic(target, json.dumps(self.zones.to_json(), indent=1, ensure_ascii=False,
+                                                 default=json_default))
+            log.info("%s: the session on screen written to the working folder %s", self.project.root, work)
+        self._save_timer.stop()
+        self._dirty = self._user_edits = False
+        self.project.work = Path(work)
+        self._open(self.project)
 
     @property
     def dirty(self) -> bool:
@@ -538,7 +599,7 @@ class Session(QObject):
         session may save; otherwise the session is read-only and the text says why."""
         from aurora.core.io.lock import ProjectLock
         try:
-            lock, other = ProjectLock.acquire(self.project.root, f"AURORA {__version__}")
+            lock, other = ProjectLock.acquire(self.project.work_root, f"AURORA {__version__}")
             if lock is None:
                 text = LOCKED_TEXT.format(who=other.describe())
             elif self.session_file.exists() and not os.access(self.session_file, os.W_OK):
@@ -612,7 +673,7 @@ class Session(QObject):
     # ------------------------------------------------------------------ reading session.json
     def _read_session_file(self) -> str:
         """Read session.json into self.zones. Returns a status text for the user ('' when all is normal)."""
-        sf = self.session_file
+        sf = self._session_source()
         if not sf.exists():
             return ""
         try:
@@ -649,7 +710,16 @@ class Session(QObject):
         self._file_bytes = data if schema < SESSION_SCHEMA else None
         self._file_stamp = _file_stamp(sf)
         log.info("session restored from %s (schema %d)", sf, schema)
-        return ""
+        return self._other_computer(zf)
+
+    @staticmethod
+    def _other_computer(zf: ZonesFile) -> str:
+        """The status line for a session last saved on another computer ('' for this one, or a file without 'host')."""
+        mine = host_id()
+        if not zf.host or not mine or zf.host == mine:
+            return ""
+        when = _local_naive(zf.exported) if zf.exported else None
+        return OTHER_COMPUTER_TEXT.format(when=f"on {when:%Y-%m-%d %H:%M}" if when is not None else "earlier")
 
     @staticmethod
     def _migrate(d: dict, schema: int) -> dict:
@@ -1462,7 +1532,7 @@ class Session(QObject):
             self._keep_old_schema(path)
             self._keep_previous(path)
             self.zones.exported = now.isoformat(timespec="seconds")
-            self.zones.stamp(f"AURORA {__version__}")
+            self.zones.stamp(f"AURORA {__version__}", host_id())
             d = self.zones.to_json()
             write_text_atomic(path, json.dumps(d, indent=1, ensure_ascii=False, default=json_default))
         except Exception as err:            # OSError (disk, permission, protected), TypeError (a ui value)

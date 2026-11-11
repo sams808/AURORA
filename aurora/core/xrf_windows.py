@@ -299,12 +299,13 @@ def source_of(stack) -> RawSource | None:
     with _LOCK:
         projects = list(_PROJECTS)
     if root is not None:
-        projects = [p for p in projects if _same_path(p.root, root)]
+        projects = [p for p in projects
+                    if _same_path(p.root, root) or _same_path(getattr(p, "work_root", p.root), root)]
     for proj in projects:
         scan = next((s for s in proj.scans if s.name == name and (s.day or "") == day
                      and (not s.energy_dirs or len(s.energy_dirs) == stack.n_energies)), None)
         if scan is not None:
-            return attach(stack, scan, proj.root)
+            return attach(stack, scan, getattr(proj, "work_root", proj.root))
     if root is None:
         return None
     for raw in (root / "raw" / day / name, root / day / name, root / name):

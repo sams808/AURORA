@@ -9,6 +9,8 @@ image whose name is `h` (compared without case) with a .png, .jpg or .jpeg suffi
 
 `add_sketch` copies an image into the first folder (never elsewhere), `remove_sketch` removes only that copy: the
 user's own files in 2. and 3. are never changed. Both go through aurora.core.io.safety (a protected beamtime refuses).
+With a working folder (`work`, a beamtime AURORA may not write into), AURORA's copy lives in <work>/.aurora/sketches/,
+looked at first; the beamtime's own folders are still read.
 """
 from __future__ import annotations
 
@@ -39,36 +41,42 @@ def _matches(folder: Path, holder: str) -> list[Path]:
     return [p for p in items if p.is_file() and p.suffix.lower() in SKETCH_EXTS and p.stem.casefold() == h]
 
 
-def find_sketch(root: Path, holder: str | None) -> Path | None:
+def own_folder(root: Path, work: Path | None = None) -> Path:
+    """AURORA's sketch folder: <work or root>/.aurora/sketches."""
+    return _folder(work if work is not None else root, OWN_DIR)
+
+
+def find_sketch(root: Path, holder: str | None, work: Path | None = None) -> Path | None:
     """The holder's sketch by the lookup order of the module docstring, or None (no holder, no image)."""
     if not holder or root is None:
         return None
-    for parts in SKETCH_DIRS:
-        found = _matches(_folder(root, parts), holder)
+    folders = ([own_folder(root, work)] if work is not None else []) + [_folder(root, parts) for parts in SKETCH_DIRS]
+    for folder in folders:
+        found = _matches(folder, holder)
         if found:
             return found[0]
     return None
 
 
-def own_sketch(root: Path, holder: str | None) -> Path | None:
+def own_sketch(root: Path, holder: str | None, work: Path | None = None) -> Path | None:
     """AURORA's own copy for the holder (<root>/.aurora/sketches/<holder>.<ext>), or None."""
     if not holder or root is None:
         return None
-    found = _matches(_folder(root, OWN_DIR), holder)
+    found = _matches(own_folder(root, work), holder)
     return found[0] if found else None
 
 
-def is_own(root: Path, path: Path | None) -> bool:
+def is_own(root: Path, path: Path | None, work: Path | None = None) -> bool:
     """True when `path` lies in AURORA's own sketch folder of the project (so Remove the sketch may delete it)."""
     if path is None:
         return False
     try:
-        return Path(path).resolve().parent == _folder(root, OWN_DIR).resolve()
+        return Path(path).resolve().parent == own_folder(root, work).resolve()
     except OSError:
         return False
 
 
-def add_sketch(root: Path, holder: str, image: Path) -> Path:
+def add_sketch(root: Path, holder: str, image: Path, work: Path | None = None) -> Path:
     """Copy `image` (.png, .jpg or .jpeg) to <root>/.aurora/sketches/<holder><suffix> and return the copy. An earlier
     copy for the holder (another suffix too) is replaced. ValueError for another file type or an empty holder name;
     ProtectedPathError (a PermissionError) when the project is protected; OSError when the file cannot be read."""
@@ -79,7 +87,7 @@ def add_sketch(root: Path, holder: str, image: Path) -> Path:
         raise ValueError(f"{image.name} is not a PNG or JPEG image")
     if not holder or any(c in holder for c in '\\/:*?"<>|'):
         raise ValueError(f"no file name can be made from the holder name {holder!r}")
-    folder = _folder(root, OWN_DIR)
+    folder = own_folder(root, work)
     target = folder / f"{holder}{suffix}"
     assert_writable(target)
     if target.exists() and image.resolve() == target.resolve():
@@ -105,12 +113,12 @@ def add_sketch(root: Path, holder: str, image: Path) -> Path:
     return target
 
 
-def remove_sketch(root: Path, holder: str) -> list[Path]:
+def remove_sketch(root: Path, holder: str, work: Path | None = None) -> list[Path]:
     """Delete AURORA's copies for the holder (<root>/.aurora/sketches/<holder>.*); returns what was deleted. The user's
     own sketches/ and zones_html/sketches/ files are never touched. ProtectedPathError when the project is protected."""
     from aurora.core.io.safety import assert_writable
     gone = []
-    for p in _matches(_folder(root, OWN_DIR), holder):
+    for p in _matches(own_folder(root, work), holder):
         assert_writable(p)
         p.unlink()
         gone.append(p)

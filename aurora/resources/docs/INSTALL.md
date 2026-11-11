@@ -134,9 +134,11 @@ a backup in `.aurora/backups/` or an exported `zones_all.json` is kept; **File >
 (Advanced mode) brings back a backup.
 
 A beamtime folder on a network share works; the first read of a stack is slow, and the caches live beside the data.
-On a read-only share the hypercubes go to the per-user cache above; the session cannot be saved there, so copy the
-beamtime locally to keep zones with it. Such a project opens read-only and says so; closing the window offers to
-export the zones. Two AURORAs on one beamtime (two computers on a share, or AURORA started twice): the second opens it
+On a read-only share the project opens with a banner that says so: **Choose a working folder…** in it keeps the
+session, the checks, the caches, the saved spectra and the reports in a folder of your own (remembered for that
+beamtime), and nothing is written on the share. Without one, the session cannot be saved there and closing the window
+offers to export the zones; the hypercubes go to the per-user cache above. A session saved on another computer says
+so when it opens. Two AURORAs on one beamtime (two computers on a share, or AURORA started twice): the second opens it
 read-only and names the first.
 
 A session written by an older AURORA opens and is upgraded (the original is kept once as `session.v1.bak.json`); a

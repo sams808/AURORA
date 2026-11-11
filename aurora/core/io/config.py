@@ -458,10 +458,14 @@ def load_naming(path: Path) -> tuple[list[str], list[str]]:
     return [w.strip().strip("_") for w in words if w.strip().strip("_")], problems
 
 
-def session_ui_value(root: Path, key: str, default=None):
+def session_ui_value(root: Path, key: str, default=None, work: Path | None = None):
     """One value of the 'ui' block of <root>/.aurora/session.json, read without opening the session (Home's project
-    summary, the command line); `default` when the file, the block or the key is missing or unreadable."""
-    d = _read_json(Path(root) / ".aurora" / "session.json", None)
+    summary, the command line); `default` when the file, the block or the key is missing or unreadable. With a working
+    folder (`work`), its session is read when it has one."""
+    path = Path(root) / ".aurora" / "session.json"
+    if work is not None and (Path(work) / ".aurora" / "session.json").is_file():
+        path = Path(work) / ".aurora" / "session.json"
+    d = _read_json(path, None)
     ui = d.get("ui") if isinstance(d, dict) else None
     return ui.get(key, default) if isinstance(ui, dict) else default
 
@@ -972,12 +976,13 @@ class ZonesFile:
     format: str = ""                                            # header: 'aurora-session' (session.json only)
     schema: int | None = None                                   # header: SESSION_SCHEMA of the writer
     app: str = ""                                               # header: 'AURORA <version>' of the writer
+    host: str = ""                                              # header: the writer's computer, as a short hash
     extra: dict = field(default_factory=dict)                   # keys this version does not know
     _seen: frozenset = field(default=frozenset(), compare=False, repr=False)
 
     BASE_KEYS = ("version", "exported", "project", "built", "notes", "goodI0", "holders")
     ADDED_KEYS = ("ui", "rules")
-    HEADER_KEYS = ("format", "schema", "app")
+    HEADER_KEYS = ("format", "schema", "app", "host")
 
     @classmethod
     def from_json(cls, d: dict) -> "ZonesFile":
@@ -1002,6 +1007,7 @@ class ZonesFile:
                             for name, h in _of(d.get("holders"), dict, "'holders'", {}).items()},
                    ui=dict(ui) if isinstance(ui, dict) else {}, rules=list(rules) if isinstance(rules, list) else [],
                    format=str(d.get("format", "")), schema=schema, app=str(d.get("app", "")),
+                   host=str(d.get("host", "") or ""),
                    extra=_unknown(d, known),
                    _seen=frozenset(k for k in cls.ADDED_KEYS if k in d))
 
@@ -1028,6 +1034,8 @@ class ZonesFile:
                 out["schema"] = self.schema
             if self.app:
                 out["app"] = self.app
+            if self.host:
+                out["host"] = self.host
         out.update({"version": TOOL_VERSION if export else self.version, "exported": self.exported,
                     "project": self.project, "built": self.built, "notes": self.notes, "goodI0": self.good_i0,
                     "holders": {k: h.to_json() for k, h in self.holders.items()}})
@@ -1042,9 +1050,12 @@ class ZonesFile:
             out.setdefault(key, value)
         return out
 
-    def stamp(self, app: str) -> None:
-        """Mark this file as a current AURORA session (the header written by Session.save)."""
+    def stamp(self, app: str, host: str = "") -> None:
+        """Mark this file as a current AURORA session (the header written by Session.save); `host`: the writer's
+        computer (Session's host_id, a hash: no computer name is written)."""
         self.format, self.schema, self.app = SESSION_FORMAT, SESSION_SCHEMA, app
+        if host:
+            self.host = host
         self.extra.pop("schema", None)          # a non-integer 'schema' read from an older writer is replaced
 
     def save(self, path: Path, export: bool = False) -> None:

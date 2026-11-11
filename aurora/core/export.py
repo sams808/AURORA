@@ -293,8 +293,10 @@ def _ev(es) -> str:
 
 
 def default_folder(project, label: str) -> Path:
-    """<project>/processed/reduced/<label>/, where John's Compare and AURORA's 'Add saved spectra…' look."""
-    return Path(project.root) / "processed" / "reduced" / safe_label(label)
+    """<project>/processed/reduced/<label>/, where John's Compare and AURORA's 'Add saved spectra…' look (under the
+    working folder when the beamtime has one)."""
+    base = getattr(project, "output_root", None) or project.root
+    return Path(base) / "processed" / "reduced" / safe_label(label)
 
 
 def target_paths(out_dir: Path, label: str, zone: Zone, pitch=None) -> list[Path]:

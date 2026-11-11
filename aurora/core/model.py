@@ -326,6 +326,30 @@ def group_holders(scans: list[ScanInfo]) -> tuple[list[Holder], list[ScanInfo]]:
     return day.holders, day.others
 
 
+def own_dirs(project) -> list[Path]:
+    """AURORA's folders of a project, the one written first (Project.aurora_dirs; <root>/.aurora for a stand-in)."""
+    dirs = getattr(project, "aurora_dirs", None)
+    return list(dirs()) if callable(dirs) else [Path(project.root) / ".aurora"]
+
+
+def work_folder_for(root: Path, work_folders: dict | None) -> Path | None:
+    """The working folder remembered for a beamtime root ({root: folder}, compared as resolved paths), or None."""
+    if not work_folders:
+        return None
+    try:
+        key = str(Path(root).resolve())
+    except OSError:
+        key = str(root)
+    for k, v in work_folders.items():
+        try:
+            same = str(Path(k).resolve()) == key
+        except OSError:
+            same = str(k) == key
+        if same and v:
+            return Path(v)
+    return None
+
+
 @dataclass
 class Project:
     """A beamtime folder: raw/<day>/<scan>, processed/<day>/..., config/*.json, reports/, sketches/."""
@@ -343,6 +367,30 @@ class Project:
     config_problems: dict[str, list[str]] = field(default_factory=dict)
     naming_words: list[str] = field(default_factory=list)   # config/naming.json label_suffix_words
     kind_overrides: dict[str, str] = field(default_factory=dict)    # scan folder -> 'sample' | 'test' (the session)
+    # a working folder for a beamtime AURORA may not write into (Choose a working folder…): the session, the caches,
+    # the saved spectra and the reports go there; None writes next to the beamtime (its .aurora/, processed/, reports/)
+    work: Path | None = None
+
+    @property
+    def work_root(self) -> Path:
+        """Where AURORA writes for this beamtime: the working folder when one is chosen, else the beamtime folder."""
+        return Path(self.work) if self.work else self.root
+
+    @property
+    def aurora_dir(self) -> Path:
+        """AURORA's own folder (session, checks, library, caches, sketches): <work root>/.aurora."""
+        return self.work_root / ".aurora"
+
+    @property
+    def output_root(self) -> Path:
+        """The folder under which saved spectra (processed/reduced) and reports (reports/aurora) are written."""
+        return self.work_root
+
+    def aurora_dirs(self) -> list[Path]:
+        """AURORA's folders in the order they are read: the working folder's, then the beamtime's own .aurora/ (what
+        was written there before a working folder was chosen, read and never written)."""
+        own = self.root / ".aurora"
+        return [self.aurora_dir] if self.aurora_dir == own else [self.aurora_dir, own]
 
     @property
     def processed(self) -> Path:
@@ -396,12 +444,14 @@ class Project:
 
     @classmethod
     def discover(cls, path: Path, progress=None, now: float | None = None,
-                 overrides: dict[str, str] | None = None) -> "Project":
+                 overrides: dict[str, str] | None = None, work_folders: dict | None = None) -> "Project":
         """Read a beamtime: its configuration files (each optional and validated), its scans and their grouping into
-        holders. `overrides`: {scan folder: 'sample' | 'test'}; None reads the session's (.aurora/session.json)."""
+        holders. `overrides`: {scan folder: 'sample' | 'test'}; None reads the session's (.aurora/session.json).
+        `work_folders`: {beamtime root: working folder} (the window's setting): the root's entry becomes Project.work."""
         root, raw, day_dirs = cls.resolve(path)
         log.info("project %s (raw %s): %d day folders", root, raw, len(day_dirs))
         proj = cls(root=root, raw=raw, loose=day_dirs == [root])
+        proj.work = work_folder_for(root, work_folders)
         if len(day_dirs) == 1 and not proj.loose:   # a day, scan or .h5 path: the other days of its raw folder
             proj.days_left_out = sorted(d.name for d in _day_dirs(raw) if d != day_dirs[0])
             if proj.days_left_out:
@@ -409,7 +459,7 @@ class Project:
                          len(proj.days_left_out))
         proj.read_config()
         if overrides is None:
-            overrides = session_ui_value(root, KIND_OVERRIDE, {})
+            overrides = session_ui_value(root, KIND_OVERRIDE, {}, work=proj.work)
         proj.kind_overrides = {str(k): str(v) for k, v in overrides.items()
                                if v in ("sample", "test")} if isinstance(overrides, dict) else {}
         children = {}

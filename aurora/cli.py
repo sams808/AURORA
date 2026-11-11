@@ -190,7 +190,7 @@ def cmd_report(args) -> int:
     from aurora.core.model import Project
     from aurora.core.report import ReportBuilder, _plural, holder_keys
     proj = Project.discover(args.project)
-    zpath = args.zones or (proj.root / ".aurora" / "session.json")
+    zpath = args.zones or (proj.aurora_dir / "session.json")
     if not Path(zpath).is_file():
         if args.zones:
             raise FileNotFoundError(f"the zones file {zpath} does not exist")
