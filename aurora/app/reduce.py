@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBo
                                QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav, shortcuts
-from aurora.app.help_text import explain, explain_all, labelled
+from aurora.app.help_text import explain, explain_all, labelled, say
 from aurora.app.mapview import TOOLS, MapView, scale_label, split_tool
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_action, mark_easy, on_mode_changed
 from aurora.app.preview import PreviewPlot
@@ -30,9 +30,10 @@ from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import TOKENS, curve, min_height, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.trace_cache import zone_traces_cached
 from aurora.app.zone_tools import PreviewThrottle, ZoneEditor, ZoneToolBar, fast_settings, register_shortcuts, zone_name
-from aurora.app.vocab import DET_LABELS, NORM_LABELS, det_items, plural, unit_suffix
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, fit_height, overlay_host,
-                                page_scroll, pair, set_enabled)
+from aurora.app.vocab import (DET_LABELS, ELEMENT_NAMES, NORM_LABELS, channel_words, det_items, det_words, edge_words,
+                              flag_words, plural, unit_suffix)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, fit_height,
+                                overlay_host, page_scroll, pair, set_enabled)
 from aurora.core import rules as rl
 from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
@@ -142,6 +143,9 @@ class EnergySpin(QSpinBox):
     def validate(self, text, pos):
         from PySide6.QtGui import QValidator
         return QValidator.Acceptable, text, pos
+
+
+SCAN_ROLE = int(Qt.UserRole) + 11          # the ScanInfo of a scan-list row (its text is made at the list's width)
 
 
 class ScanSettingsCard(Card):
@@ -343,7 +347,7 @@ class ReducePerspective(QWidget):
 
         head = QHBoxLayout()
         h1 = QLabel("Reduce"); h1.setObjectName("h1")
-        sub = ElidedLabel("draw the zones on the stack map, choose per scan what goes into the report", Qt.ElideRight)
+        self.subtitle = sub = ElidedLabel(say("reduce.subtitle"), Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
         self.status_label = ElidedLabel("", Qt.ElideRight); self.status_label.setObjectName("muted")
@@ -388,12 +392,12 @@ class ReducePerspective(QWidget):
         zone_row = QWidget()
         zr = FlowLayout(zone_row, spacing=6)
         self.new_zone_btn = QPushButton("New sample"); self.new_zone_btn.clicked.connect(self._new_zone)
-        self.del_zone_btn = QPushButton("Delete"); self.del_zone_btn.clicked.connect(self._delete_zone)
+        self.del_zone_btn = QPushButton("Delete sample"); self.del_zone_btn.clicked.connect(self._delete_zone)
         self.z_label = QComboBox(); self.z_label.setEditable(True); self.z_label.setMinimumWidth(150)
         self.z_label.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.z_label.setMinimumContentsLength(12)
         zr.addWidget(self.new_zone_btn); zr.addWidget(self.del_zone_btn)
-        zr.addWidget(pair(labelled("sample", self.z_label, "reduce.label"), self.z_label))
+        zr.addWidget(pair(labelled("sample name", self.z_label, "reduce.label"), self.z_label))
         centre.body.addWidget(zone_row)
         self.show_row = QWidget()                       # map line / SDD / mode / energy / I0 / log: Advanced
         show = FlowLayout(self.show_row, spacing=6)
@@ -417,7 +421,12 @@ class ReducePerspective(QWidget):
         self.zone_list.setAccessibleName("zones of the holder")
         self.zone_list.currentItemChanged.connect(self._zone_picked)
         self.zone_list.setMinimumWidth(110)
-        self.zone_split.addWidget(self.zone_list)
+        zl_box = QWidget()
+        zlb = QVBoxLayout(zl_box); zlb.setContentsMargins(0, 0, 0, 0); zlb.setSpacing(2)
+        self.zone_list_title = QLabel("Samples on this holder")
+        self.zone_list_title.setObjectName("muted"); self.zone_list_title.setWordWrap(True)
+        zlb.addWidget(self.zone_list_title); zlb.addWidget(self.zone_list, 1)
+        self.zone_split.addWidget(zl_box)
         self.map = MapView()
         self.map.setAccessibleName("stack map")
         self.map.set_zone_tools(True)
@@ -446,6 +455,9 @@ class ReducePerspective(QWidget):
         min_height(self.map, 200)
         self.zone_split.setStretchFactor(0, 0); self.zone_split.setStretchFactor(1, 1)
         self.zone_split.setSizes([120, 480])
+        self.map_caption = TermLabel("")                 # Easy: what the colour of the map shows
+        self.map_caption.setObjectName("muted")
+        centre.body.addWidget(self.map_caption)
         centre.body.addWidget(self.zone_split, 1)
         self.region_caption = ElidedLabel("", Qt.ElideMiddle)
         centre.body.addWidget(self.region_caption)
@@ -456,10 +468,8 @@ class ReducePerspective(QWidget):
         # ---- right: 4 · reduce (the zone card), per-scan settings, preview
         self.right_split = right = QSplitter(Qt.Vertical)
         self.zone_card = Card("Zone", help_anchor="44-the-zone-card")
-        self.step4_line = QLabel("")                    # Easy: the settings used, read-only
-        self.step4_line.setWordWrap(True)
+        self.step4_line = TermLabel("")                 # Easy: how the spectrum is made; the settings in its tooltip
         self.step4_line.setObjectName("muted")
-        self.step4_line.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.zone_card.body.addWidget(self.step4_line)
         self.chip_box = QWidget()                       # 'advanced settings in use' (Easy, when a field differs)
         cl = FlowLayout(self.chip_box, spacing=6)
@@ -494,7 +504,13 @@ class ReducePerspective(QWidget):
         self.stitch_btn = QPushButton("Stitch…"); self.stitch_btn.clicked.connect(self.stitch_tiles)
         self.load_poly_btn = QPushButton("Load polygon…"); self.load_poly_btn.clicked.connect(lambda: self.load_polygon())
         self.save_poly_btn = QPushButton("Save polygon…"); self.save_poly_btn.clicked.connect(lambda: self.save_polygon())
-        for b in (self.add_check_btn, self.send_btn, self.rules_btn, self.propose_btn, self.stitch_btn,
+        # Easy: 'Go to Check ›' once a spectrum waits there (a link, not a button: the Easy budget stays)
+        self.next_link = QLabel("")
+        self.next_link.setTextFormat(Qt.RichText)
+        self.next_link.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+        self.next_link.setAccessibleName("Go to Check")
+        self.next_link.linkActivated.connect(lambda _h: nav.go(self, "check"))
+        for b in (self.add_check_btn, self.next_link, self.send_btn, self.rules_btn, self.propose_btn, self.stitch_btn,
                   self.load_poly_btn, self.save_poly_btn):
             zl2.addWidget(b)
         self.zone_card.body.addWidget(zb2)
@@ -541,11 +557,12 @@ class ReducePerspective(QWidget):
         self.map_i0.toggled.connect(self.redraw_map)
         self.map_log.toggled.connect(self.redraw_map)
 
-        self.empty_state = EmptyState("No project open: the complete stacks of each holder appear here, ready for zones.",
+        self.empty_state = EmptyState("No project open. Open a beamtime: the complete stacks of each holder appear here, "
+                                      "ready to outline samples on.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="reduce",
                                       parent=self.body)
-        self.zone_state = EmptyState("No sample yet: choose Draw and drag over the stack.",
+        self.zone_state = EmptyState("No sample yet: choose Draw and drag over the map around your sample.",
                                      [("Propose zones", lambda: self.propose_zones(), True)], icon="reduce", parent=pc)
         explain_all([(self.load_all_btn, "reduce.load_all"), (self.scan_list, "reduce.scans"),
                      (self.new_zone_btn, "reduce.new_zone"), (self.del_zone_btn, "reduce.delete_zone"),
@@ -575,7 +592,8 @@ class ReducePerspective(QWidget):
         mark_advanced(self.load_all_btn, self.show_row,
                       self.propose_btn, self.stitch_btn, self.save_poly_btn, self.group_box,
                       self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
-        mark_easy(self.step4_line, self.add_check_btn, *self._badges)
+        mark_easy(self.step4_line, self.add_check_btn, self.map_caption, *self._badges)
+        session.check_queue_changed.connect(self._paint_next_link)
         on_mode_changed(self, self._mode_changed)
         self.update_actions()
 
@@ -601,6 +619,7 @@ class ReducePerspective(QWidget):
         super().resizeEvent(ev)
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self.fit_cards)
+        QTimer.singleShot(0, self, self._relabel_scans)
 
     def step_titles(self) -> list[str]:
         """The titles of the numbered step cards as shown ('1 · Scans of holder holderA', ...), Easy mode."""
@@ -610,8 +629,12 @@ class ReducePerspective(QWidget):
         return out
 
     def _mode_changed(self, adv: bool) -> None:
-        self.map_card.set_title("Stack map" if adv else "Region")
-        self.zone_card.set_title("Zone" if adv else "Reduce")
+        self.map_card.set_title(say("reduce.title.map"))
+        self.zone_card.set_title(say("reduce.title.zone"))
+        self.window_card.set_title(say("reduce.title.window"))
+        self.subtitle.setText(say("reduce.subtitle"))
+        self._relabel_scans()
+        self._paint_next_link()
         h = max(self.right_split.height(), 600)          # Easy: step 4 is short, the preview takes the rest
         # the splitter keeps every pane at its minimum (the preview's plots: preview.THREE_PANELS_PX); the page scrolls
         self.right_split.setSizes([int(0.3 * h), int(0.27 * h), int(0.43 * h)] if adv else [170, 0, h - 170])
@@ -664,12 +687,12 @@ class ReducePerspective(QWidget):
         z = ses.zone() if has else None
         loaded = [s for s in ses.stacks_of() if ses.stack_loaded(ses.stack_id(s)) is not None] if has else []
         set_enabled(self.new_zone_btn, has and h is not None, NO_PROJECT if not has else "this project has no holder")
-        set_enabled(self.del_zone_btn, z is not None, NO_PROJECT if not has else "select a zone first")
+        set_enabled(self.del_zone_btn, z is not None, NO_PROJECT if not has else say("reduce.no_zone"))
         set_enabled(self.clear_btn, z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys or
                                                            z.epolys),
-                    NO_PROJECT if not has else ("select a zone first" if z is None else "the zone is empty"))
+                    NO_PROJECT if not has else (say("reduce.no_zone") if z is None else say("reduce.zone_empty")))
         set_enabled(self.send_btn, z is not None and self.library is not None and bool(z.settings),
-                    NO_PROJECT if not has else ("select a zone first" if z is None else "load a scan that covers the zone"))
+                    NO_PROJECT if not has else (say("reduce.no_zone") if z is None else "load a scan that covers the zone"))
         set_enabled(self.load_all_btn, has and bool(ses.stacks_of()), NO_PROJECT if not has else "the holder has no complete stack")
         set_enabled(self.propose_btn, has and h is not None, NO_PROJECT)
         set_enabled(self.stitch_btn, len(loaded) >= 2,
@@ -677,19 +700,27 @@ class ReducePerspective(QWidget):
         set_enabled(self.load_poly_btn, has and h is not None, NO_PROJECT)
         one_poly = z is not None and len(z.polys) == 1 and not (z.rects or z.paint or z.erects or z.erase or z.epolys)
         set_enabled(self.save_poly_btn, one_poly,
-                    NO_PROJECT if not has else ("select a zone first" if z is None else
-                                                "John Bussey's file holds one polygon: the zone must be exactly one polygon"))
+                    NO_PROJECT if not has else (say("reduce.no_zone") if z is None else
+                                                "the file holds one polygon: the sample must be exactly one polygon"))
         set_enabled(self.rules_btn, has, NO_PROJECT)
         k, _m, _sd = self.region_count()
         set_enabled(self.add_check_btn, k > 0,
-                    NO_PROJECT if not has else ("pick a scan in step 1" if _sd is None else
-                                                "nothing selected: draw over the stack footprint"))
+                    NO_PROJECT if not has else ("pick a scan in step 1" if _sd is None else say("reduce.nothing")))
         self.scans_card.set_title(f"Scans of holder {h.name}" if h else "Scans of the holder")
         self.empty_state.set_shown(not has)
         hz = ses.holder_zones(create=False) if has else None
         self.zone_state.set_shown(has and h is not None and not (hz and hz.zones))
         self._caption()
         self._refresh_easy()
+        self._paint_next_link()
+
+    def _paint_next_link(self) -> None:
+        """'Go to Check ›' in the step-4 row while spectra wait in Check (Easy mode)."""
+        from aurora.app.theme import TOKENS
+        n = len(self.session.check_queue) if self.session.project is not None else 0
+        self.next_link.setText(f"<a href='check' style='color:{TOKENS['link']}'>Go to Check ›</a>")
+        self.next_link.setToolTip(f"{plural(n, 'spectrum')} waiting in Check" if n else "")
+        self.next_link.setVisible(n > 0 and not is_advanced())
 
     def _new_zone(self) -> None:
         if self.session.new_zone() is None:
@@ -719,19 +750,46 @@ class ReducePerspective(QWidget):
         self.scan_list.clear()
         for s in self.session.stacks_of(key):
             flags = ", ".join(s.flags)
-            it = QListWidgetItem(f"{s.time}  {s.label}  ·  {s.edge_text}  {s.energy_text}" + (f"   [{flags}]" if flags else ""))
-            it.setToolTip(it.text())
+            it = QListWidgetItem("")
+            it.setToolTip(f"{s.time}  {s.name}  ·  {s.edge_text}  {s.energy_text}" + (f"   [{flags}]" if flags else ""))
             it.setData(Qt.UserRole, self.session.stack_id(s))
+            it.setData(SCAN_ROLE, s)
             if flags:
                 set_item_tone(it, "warn")
             self.scan_list.addItem(it)
         self.scan_list.blockSignals(False)
+        self._relabel_scans()
         self._fill_zone_list()
         self.map.clear_overlays(); self.map.set_grid(None)
         self._clear_cards(); self.preview.set_traces([])
         self.update_actions()
         if self.scan_list.count():
             self.scan_list.setCurrentRow(0)
+
+    @staticmethod
+    def scan_row_text(s, label: str | None = None) -> str:
+        """'09:27 · alpha_beta · F K-edge · 670–735 eV' (+ the flags in words in Easy mode)."""
+        rng = (f"{s.e_min:.0f}–{s.e_max:.0f} eV" if s.n_energies and s.e_min == s.e_min else s.energy_text)
+        flags = (", ".join(s.flags) if is_advanced() else "; ".join(flag_words(f) for f in s.flags))
+        parts = [s.time, s.label if label is None else label, edge_words(s.edge_text), rng]
+        return " · ".join(p for p in parts if p) + (f"   [{flags}]" if flags else "")
+
+    def _relabel_scans(self) -> None:
+        """The scan rows at the list's width: only the label part is elided, the edge and the range stay whole."""
+        lst = self.scan_list
+        fm = lst.fontMetrics()
+        width = max(lst.viewport().width(), 120) - 2 * fm.horizontalAdvance("m")
+        for i in range(lst.count()):
+            it = lst.item(i)
+            s = it.data(SCAN_ROLE)
+            if s is None:
+                continue
+            full = self.scan_row_text(s)
+            if fm.horizontalAdvance(full) > width:
+                rest = fm.horizontalAdvance(self.scan_row_text(s, ""))
+                label = fm.elidedText(s.label, Qt.ElideRight, max(width - rest, fm.horizontalAdvance("m…")))
+                full = self.scan_row_text(s, label)
+            it.setText(full)
 
     def _scan_picked(self, cur, _prev=None) -> None:
         if cur is None:
@@ -1003,10 +1061,24 @@ class ReducePerspective(QWidget):
             if sel:
                 pix = members(z, sd.x, sd.y, sd.pitch)
                 self.map.draw_pixels(sd.x[pix], sd.y[pix], sd.pitch, curve(i))
+        self.map_caption.set_markup(self.map_caption_text(label))
         self.map_hint.setText(f"{sd.name}: {plural(sd.n_energies, 'energy')} x {sd.n_pix} px, pitch {sd.pitch[0]:.3f} x "
                               f"{sd.pitch[1]:.3f} mm, main line {sd.main}"
                               + (f", edge {sd.edge_text} {sd.edge_ev:.1f} eV" if sd.edge_ev else "") + f" · {sd.source}" + note)
         self._caption()
+
+    MAP_MODE_WORDS = {"above": "summed over the energies above the edge", "all": "summed over all energies",
+                      "jump": "the rise at the edge"}
+
+    def map_caption_text(self, line: str | None = None) -> str:
+        """Easy: what the colour of the stack map shows, in words (TermLabel markup)."""
+        line = line or self.map_line.currentText()
+        mode = self.map_mode.currentData()
+        how = (f"at {self.map_energy.value():.1f} eV" if mode == "at" else self.MAP_MODE_WORDS.get(mode, ""))
+        what = channel_words(line if line != xw.WINDOW_LABEL else "the step-2 window")
+        per = ", divided by the {{i0|beam intensity}}" if self.map_i0.isChecked() else ""
+        log = ", log scale" if self.map_log.isChecked() else ""
+        return f"Colour: {what}, {how}{per}{log} (brighter = more signal). Drag around your sample."
 
     def region_count(self) -> tuple[int, int, object]:
         """(K members of the current zone on the current stack, M points of the stack, the stack)."""
@@ -1021,13 +1093,14 @@ class ReducePerspective(QWidget):
         k, m, sd = self.region_count()
         z = self.session.zone() if self.session.project is not None else None
         if sd is None:
-            text = "Region: pick a scan in step 1" if self.session.project is not None else ""
+            text = say("reduce.caption.no_scan") if self.session.project is not None else ""
         elif k == 0:
-            text = "Region: nothing selected: draw over the stack footprint"
+            text = say("reduce.caption.empty")
         else:
-            text = f"Region: {shape_text(z)} · {k} of {m} points of {sd.name}"
+            text = say("reduce.caption.region", shape=shape_text(z), k=k, m=m, scan=sd.name)
         self.region_caption.setText(text)
-        self.window_card.set_region(members(z, sd.x, sd.y, sd.pitch) if (sd is not None and z is not None) else None)
+        self.window_card.set_region(members(z, sd.x, sd.y, sd.pitch) if (sd is not None and z is not None) else None,
+                                    label=z.label if z is not None else "")
         self.window_card.set_zone(z)
 
     def _hover(self, x: float, y: float) -> None:
@@ -1036,8 +1109,8 @@ class ReducePerspective(QWidget):
         if sd is not None:
             px, py = sd.pitch
             hit = np.where((np.abs(sd.x - x) <= px / 2) & (np.abs(sd.y - y) <= py / 2))[0]
-            if hit.size:
-                txt += f" · px {hit[0]}"
+            if hit.size and is_advanced():
+                txt += f" · pixel {hit[0]}"
         self.status_label.setText(txt)
 
     def _map_points(self):
@@ -1088,7 +1161,7 @@ class ReducePerspective(QWidget):
             return
         with self.session.edit(f"clear zone {z.id}"):
             z.rects, z.erects, z.paint, z.erase, z.polys, z.epolys = [], [], [], [], [], []
-        self.status_label.setText(f"zone {z.id} cleared: draw its region again")
+        self.status_label.setText(say("reduce.cleared", label=z.label, id=z.id))
 
     # ------------------------------------------------------------------ right-click menus
     def zone_menu(self, zid: int) -> QMenu:
@@ -1453,12 +1526,89 @@ class ReducePerspective(QWidget):
         sd = self.session.stack_loaded(sid)
         return easy_scan_settings(scan, self.session.flags_of(scan), labels=list(sd.labels) if sd is not None else None)
 
+    def settings_in_force(self, sid: str | None):
+        """The settings the spectrum of the current sample on `sid` is made with: the sample's own when it has some
+        for that scan, else the Easy defaults."""
+        if not sid:
+            return None
+        z = self.session.zone() if self.session.project is not None else None
+        st = z.settings.get(sid) if z is not None else None
+        return st if st is not None else self.easy_settings_for(sid)
+
+    def _line_words(self, st) -> str:
+        ch = self.current_choice()
+        line = (ch or {}).get("line") or (st.line if st is not None else "") or ""
+        return "all X-rays" if line in ("", xw.TOTAL_LABEL) else line
+
+    NORM_WORDS = {
+        "i0jump": "divided by the {{i0|beam intensity (I0)}}, and {{normalisation|scaled}} so that the rise at the edge "
+                  "is 1",
+        "i0": "divided by the {{i0|beam intensity (I0)}}",
+        "i0pre": "divided by the {{i0|beam intensity (I0)}}, with the part before the edge set to 0",
+        "area": "divided by the {{i0|beam intensity (I0)}} and {{normalisation|scaled}} to an area of 1",
+        "max": "divided by the {{i0|beam intensity (I0)}} and {{normalisation|scaled}} to a maximum of 1",
+        "raw": "kept as raw counts (not divided by the {{i0|beam intensity (I0)}})",
+    }
+
     def step4_text(self, sid: str | None = None) -> str:
-        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · / I0, edge jump = 1 · de-spike
-        k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)': the settings of the current sample on
-        the current stack, read-only (the Easy defaults until it has some). A flagged SDD still in the sum or an I0
-        flagged invalid still used is named. The zone mean is what the saved files hold (the / I0 traces of the zone
-        sum are the same); the de-spike, on in Easy, was off by default in his GUI, so the line says so."""
+        """Easy step 4 in one sentence (TermLabel markup): how the spectrum of the selected sample on this scan is made,
+        naming the signal, the detectors in the sum and the scaling. step4_detail() has the exact settings."""
+        sd = self.current_stack()
+        sid = sid or (sd.id if sd is not None else None)
+        st = self.settings_in_force(sid) if sid else None
+        if st is None:
+            return "Pick a scan in step 1: the way its spectrum is made is described here."
+        from aurora.core.flags import saturated_dets
+        scan = self.session.scan_of(sid)
+        sat = {int(d[3:]) - 1 for d in saturated_dets(self.session.flags_of(scan)) if str(d)[3:].isdigit()}
+        used = [i for i in range(4) if st.sdd[i]]
+        left = [i for i in range(4) if not st.sdd[i]]
+        line = self._line_words(st)
+        norm = self.NORM_WORDS.get(st.fluo_norm, self.NORM_WORDS["i0jump"])
+        spikes = " Single-point {{de-spike|spikes}} are removed." if st.despike else ""
+        if st.signal == "ipfy":
+            text = (f"The spectrum is an {{{{ipfy|inverse yield (IPFY)}}}}: the {{{{i0|beam intensity (I0)}}}} divided "
+                    f"by the {line} counts in the step-2 window (averaged over the outlined pixels, added over "
+                    f"{det_words([f'sdd{i + 1}' for i in used])}), {{{{normalisation|scaled}}}} so that the rise at the "
+                    f"edge is 1.{spikes}" + (" An electron-yield spectrum (TEY) is made too." if st.tey else ""))
+        elif not used:
+            why = "saturated" if left and set(left) <= sat else "left out"
+            text = (f"All four detectors {{{{saturated|{why}}}}} on this scan, so there is no fluorescence spectrum: "
+                    "only the {{tey|electron-yield spectrum (TEY)}} is usable." if why == "saturated" else
+                    "Every detector is left out of the sum, so there is no fluorescence spectrum: only the "
+                    "{{tey|electron-yield spectrum (TEY)}} is made.")
+        else:
+            if left:
+                outs = []
+                s_left = [i for i in left if i in sat]
+                o_left = [i for i in left if i not in sat]
+                if s_left:
+                    outs.append(f"{det_words([f'sdd{i + 1}' for i in s_left])} {{{{saturated|saturated}}}}: left out")
+                if o_left:
+                    outs.append(f"{det_words([f'sdd{i + 1}' for i in o_left])} left out")
+                dets = f"{det_words([f'sdd{i + 1}' for i in used])} ({'; '.join(outs)})"
+            else:
+                dets = "the four {{sdd|detectors}}"
+            what = "all the X-rays" if line == "all X-rays" else f"the {line} X-rays"
+            text = (f"The spectrum is {what} counted in the step-2 window, averaged over the outlined pixels "
+                    f"and added over {dets}, {norm}.{spikes}"
+                    + (" An {{tey|electron-yield spectrum (TEY)}} is made the same way." if st.tey else ""))
+            still = sorted(i for i in used if i in sat)
+            if still:
+                text += (f" {det_words([f'sdd{i + 1}' for i in still]).capitalize()} marked saturated but still in the "
+                         "sum: its fluorescence may be flattened.")
+        if st.i0_source == "good":
+            text += (" This scan's beam reading cannot be trusted: the average beam of the good scans of the holder is "
+                     "used instead.")
+        return text
+
+    def step4_detail(self, sid: str | None = None) -> str:
+        """'I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as the earlier SGM XAS GUI) · / I0, edge jump = 1 · de-spike
+        k = 6 (off by default in the earlier SGM XAS GUI) · SDD1-4 (SDD3 saturated, left out) · PFY F Kα': the exact
+        settings behind the step-4 sentence (its tooltip): those of the current sample on the current stack, read-only
+        (the Easy defaults until it has some). A flagged SDD still in the sum or an I0 flagged invalid still used is
+        named. The zone mean is what the saved files hold (the / I0 traces of the zone sum are the same); the de-spike,
+        on in Easy, was off by default in the earlier GUI, so the line says so."""
         from aurora.core.constants import DETS
         from aurora.core.flags import i0_invalid, saturated_dets
         sd = self.current_stack()
@@ -1484,10 +1634,26 @@ class ReducePerspective(QWidget):
             i0 = "I0 mcc ch1 (Au mesh)" + (" (flagged invalid, still used)" if bad_i0 else "")
         despike = "de-spike off"
         if st.despike:          # a session without a de-spike rule keeps the earlier one (no control sets it)
-            despike = (f"de-spike k = {st.k:g} (the earlier rule), John Bussey's default: off"
-                       if st.despike_mode == "classic" else f"de-spike k = {st.k:g} (John Bussey's default: off)")
-        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", "zone mean (John Bussey's reduction)",
-                           f"fluorescence {NORM_LABELS.get(st.fluo_norm, st.fluo_norm)}", despike, dets])
+            despike = (f"de-spike k = {st.k:g} (the earlier rule; off by default in the earlier SGM XAS GUI)"
+                       if st.despike_mode == "classic" else
+                       f"de-spike k = {st.k:g} (off by default in the earlier SGM XAS GUI)")
+        sig = ("IPFY " if st.signal == "ipfy" else "PFY ") + self._line_words(st)
+        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", "zone mean (as the earlier SGM XAS GUI)",
+                           f"fluorescence {NORM_LABELS.get(st.fluo_norm, st.fluo_norm)}", despike, dets, sig])
+
+    def ipfy_note(self) -> str:
+        """Step 2, when the spectrum is an inverse yield: the counted line belongs to another element than the edge's."""
+        sd = self.current_stack()
+        st = self.settings_in_force(sd.id) if sd is not None else None
+        if st is None or st.signal != "ipfy":
+            return ""
+        line = self._line_words(st)
+        el = line.split(" ")[0]
+        edge_el = (getattr(sd, "edge_text", "") or "").split(" ")[0]
+        name = ELEMENT_NAMES.get(el, el)
+        edge_name = ELEMENT_NAMES.get(edge_el, edge_el) or "the edge element"
+        return (f"{line} belongs to {name}, not to the edge element ({edge_name}): the spectrum is an inverse yield "
+                "(IPFY), the beam intensity divided by these counts. It rises at the edge although the counts dip.")
 
     def zone_differences(self, z: Zone | None = None) -> dict[str, list[str]]:
         """sid -> the fields of the zone's settings that differ from the Easy defaults (empty lists left out)."""
@@ -1504,7 +1670,9 @@ class ReducePerspective(QWidget):
 
     def _refresh_easy(self) -> None:
         adv = is_advanced()
-        self.step4_line.setText(self.step4_text())
+        self.step4_line.set_markup(self.step4_text())
+        self.step4_line.setToolTip(self.step4_detail())
+        self.window_card.set_note(self.ipfy_note())
         z = self.session.zone() if self.session.project is not None else None
         diffs = self.zone_differences(z) if (z is not None and not adv) else {}
         if diffs:
@@ -1559,7 +1727,7 @@ class ReducePerspective(QWidget):
         k, _m, sd = self.region_count()
         z = self.session.zone()
         if z is None or sd is None or k == 0:
-            self.status_label.setText("nothing selected: draw over the stack footprint")
+            self.status_label.setText(say("reduce.nothing"))
             return 0
         scan = self.session.scan_of(sd.id)
         with self.session.edit(f"add zone {z.id} to Check"):
@@ -1571,11 +1739,13 @@ class ReducePerspective(QWidget):
                 st.n = k
                 z.settings[sd.id] = st
         n = self.session.queue_for_check([CheckItem(self.session.current_holder, z.id, sd.id)])
-        # John Bussey's GUI asked for a label first: a default name is saved as it is, so say so
-        unnamed = (" · it is saved under this name: name the sample in the sample box"
+        # a default name is saved as it is (the earlier GUI asked for a label first), so say so
+        unnamed = (" · it is saved under this name: name the sample in the sample name box"
                    if DEFAULT_LABEL.match(z.label) else "")
-        self.status_label.setText(f"{z.label} on {short_time(sd.id) or sd.name} added to Check{unnamed}" if n else
+        self.status_label.setText(say("reduce.added", label=z.label, scan=short_time(sd.id) or sd.name,
+                                      waiting=len(self.session.check_queue)) + unnamed if n else
                                   f"{z.label} on {short_time(sd.id) or sd.name} is already in Check")
+        self._paint_next_link()
         return n
 
     # ------------------------------------------------------------------ batch settings: copy, paste, rules
@@ -1721,8 +1891,9 @@ class ReducePerspective(QWidget):
             t = zone_traces_cached(sd, pix, st, good)
             if t is None:
                 continue
-            label = f"{z.label} · {self.session.holder().name if self.session.holder() else ''} {short_time(sid) or sd.name}"
-            n += len(self.library.add_traces(label, t.E, t.sum, t.tey if st.tey else None, source=f"zone {z.id} of {sid}"))
+            from aurora.app.library import add_zone_traces
+            n += len(add_zone_traces(self.library, z, sid, t, st,
+                                     self.session.holder().name if self.session.holder() else "", sd.name))
         msg = f"{plural(n, 'trace')} sent to Compare" if n else "nothing to send: load the zone's scans first"
         if waiting:
             msg += f" ({plural(waiting, 'scan')} still reading its XRF windows: send again in a moment)"

@@ -10,6 +10,8 @@ pytest.importorskip("pyqtgraph")
 from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFileDialog,  # noqa: E402
                                QLineEdit, QSlider, QTabBar, QWidget)
 
+from PySide6.QtCore import Qt  # noqa: E402
+
 from aurora.app import mode  # noqa: E402
 
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider)
@@ -148,14 +150,17 @@ def test_advanced_shows_every_column_with_the_same_rows(qapp, demo):
     from demo_window import pump
     win = demo
     t = win.compare.table
-    before = [[(t.item(r, c).text() if t.item(r, c) else "", t.item(r, c).checkState() if t.item(r, c) else None)
-               for c in range(t.columnCount())] for r in range(t.rowCount())]
+    def cell(r, c):                     # the Signal cell shows words by mode; its data is the file's signal code
+        it = t.item(r, c)
+        if it is None:
+            return ("", None)
+        return (it.data(Qt.UserRole) if it.data(Qt.UserRole) else it.text(), it.checkState())
+    before = [[cell(r, c) for c in range(t.columnCount())] for r in range(t.rowCount())]
     reqs = [r.to_json() for r in win.library.requests]
     mode.set_advanced(True)
     pump(qapp, 3)
     assert not any(t.isColumnHidden(c) for c in range(t.columnCount()))
-    after = [[(t.item(r, c).text() if t.item(r, c) else "", t.item(r, c).checkState() if t.item(r, c) else None)
-              for c in range(t.columnCount())] for r in range(t.rowCount())]
+    after = [[cell(r, c) for c in range(t.columnCount())] for r in range(t.rowCount())]
     assert after == before and [r.to_json() for r in win.library.requests] == reqs
     mode.set_advanced(False)
     pump(qapp)
@@ -179,10 +184,11 @@ def test_easy_states_johns_defaults_and_says_why_a_row_failed(qapp, demo, tmp_pa
     assert [(r.key, r.show) for r in lib.requests] == [("A [sdd-scaled]", True), ("A [TEY]", False),
                                                        ("S [sdd-scaled]", True), ("S [TEY]", False)]
     st = cmp_.status.text()
-    assert "1 trace plotted" in st and "could not normalise S [sdd-scaled] (680–692 eV; pre (0 pts)" in st
-    assert "switch to Advanced mode" in st and "untick Show" in st
-    assert not cmp_.easy_note.isHidden() and "John Bussey's GUI used −10…−5 and +10…+34 eV" in cmp_.easy_note.text()
-    assert "John Bussey's GUI: sum free, negatives allowed, 685–705 eV" in win.fit.lcf_fixed.text()
+    # Easy draws the row 0 to 1 and says why in plain words (plain spec 5.6); Advanced names the windows below
+    assert "1 spectrum plotted" in st and "S could not be scaled the standard way" in st and "680–692 eV" in st
+    assert "In Advanced mode, Pre / Post set the ranges by hand" in st and "untick Show" in st
+    assert not cmp_.easy_note.isHidden() and "the earlier SGM XAS GUI used −10…−5 and +10…+34 eV" in cmp_.easy_note.text()
+    assert "the earlier SGM XAS GUI: sum free, negatives allowed, 685–705 eV" in win.fit.lcf_fixed.text()
     mode.set_advanced(True)
     pump(qapp)
     assert "set Pre / Post (eV from E0) on these rows" in cmp_.status.text() and cmp_.easy_note.isHidden()
@@ -203,10 +209,10 @@ def test_easy_texts_name_only_what_easy_can_do(qapp, monkeypatch):
         cmp_ = win.compare
         assert not mode.is_advanced()
         text = cmp_.empty_state.text()
-        assert "John Bussey" in text and "reference" not in text and "Reduce" not in text, text
+        assert "Save ticked → Compare" in text and "reference" not in text and "Reduce" not in text, text
         cmp_._add_folder()
         assert "_full_reduced.csv" in titles[-1] and "xanes" not in titles[-1] and "AURORA zone" not in titles[-1]
-        assert "Advanced mode also reads sgm_report _xanes.csv" in HELP["compare.add_folder"][0]
+        assert "Advanced mode also reads the summary spectra of an earlier analysis (_xanes.csv)" in HELP["compare.add_folder"][0]
         mode.set_advanced(True)
         assert "pick references" in cmp_.empty_state.text() and "send a zone from Reduce" in cmp_.empty_state.text()
         cmp_._add_folder()

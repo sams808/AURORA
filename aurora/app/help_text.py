@@ -15,13 +15,14 @@ from PySide6.QtWidgets import QLabel, QWidget
 # key -> (tooltip, accessible name, MANUAL.md anchor)
 HELP: dict[str, tuple[str, str, str]] = {
     # ------------------------------------------------------------------ main window
-    "main.mode": ("Easy mode: the basic processing path of John Bussey's GUI (reduce, check, compare, fit, report).\n"
-                  "Advanced mode: every option. Ctrl+Shift+A switches.", "Easy or Advanced mode",
-                  "11-easy-and-advanced-mode"),
+    "main.mode": ("Easy mode: the main steps with standard settings, and the values it uses stated.\n"
+                  "Advanced mode: every option, and the Maps page. Switching never changes a value. Ctrl+Shift+A "
+                  "switches.", "Easy or Advanced mode", "11-easy-and-advanced-mode"),
     "main.holder": ("The holder on screen. Choose another one here, or with Ctrl+PgUp / Ctrl+PgDown.", "holder",
                     "1-the-window"),
-    "main.save_state": ("Whether the zones are saved: 'unsaved' while a change waits for the autosave (under a "
-                        "second), 'saved HH:MM' once it is written, 'read-only' when edits here cannot be saved.",
+    "main.save_state": ("Whether your outlines and settings are saved: 'unsaved' while a change waits for the "
+                        "autosave (under a second), 'saved 15:16' once it is written (with the date when that was "
+                        "another day), 'read-only' when they cannot be saved here.",
                         "save state", "14-the-session-saving-undo-and-backups"),
     "main.undo": ("Undo the last zone, settings or good-I0 edit (Ctrl+Z). A brush stroke, or a run of edits of the "
                   "same kind, undoes at once.", "Undo", "14-the-session-saving-undo-and-backups"),
@@ -42,24 +43,30 @@ HELP: dict[str, tuple[str, str, str]] = {
                       "pixels and polygons as a zone here. Replace: the file's zones replace this holder's. Skip: keep "
                       "this holder as it is.", "what to do with this holder", "3-survey"),
     # ------------------------------------------------------------------ home
-    "home.open": ("Choose a folder: a beamtime folder (the one that holds raw/), a day or scan folder, or a loose "
-                  "folder of scans (Ctrl+O). A scan's .h5 file opens when dropped on the window.", "Open project",
-                  "2-home"),
+    "home.open": ("Open the folder of a beamtime: the one that contains a folder named raw. A day folder or one "
+                  "scan folder also works (Ctrl+O); a scan's .h5 file opens when dropped on the window.",
+                  "Open project", "2-home"),
     "home.all_days": ("A day or scan folder opened that day only: open the whole beamtime, every day of its raw "
                       "folder.", "Show every day", "2-home"),
     "home.reload": ("Read the project folder again: scans that arrived since the last read appear (F5).", "Reload",
                     "2-home"),
-    "home.col.scan": ("The scan folder name without its time prefix.", "Scan", "2-home"),
+    "home.col.scan": ("The scan folder's name, without its time (HHMMSS) at the front.", "Scan", "2-home"),
     "home.col.time": ("HH:MM of the scan folder.", "Time", "2-home"),
-    "home.col.kind": ("survey, stack or other.", "Kind", "2-home"),
-    "home.col.edge": ("The target edge read from the plan and the name (F K, O K, Se L3/L2, …).", "Edge", "2-home"),
-    "home.col.status": ("complete, in progress, aborted or test (see the status rules in the manual).", "Status",
-                        "2-home"),
-    "home.col.energies": ("First and last energy (eV) and the number of energy folders.", "Energies", "2-home"),
-    "home.col.points": ("Pixels per energy.", "Points", "2-home"),
-    "home.col.flags": ("From the sgm_report summary when present: saturated SDDs, I0 invalid.", "Flags", "2-home"),
-    "home.demo": ("Open the synthetic demo beamtime (made once in the user data folder): every perspective has data, "
-                  "no real beamtime needed.", "Open the demo beamtime", "21-opening-a-project"),
+    "home.col.kind": ("survey (one energy, the whole holder), stack (many energies, one area) or other.",
+                      "Kind", "2-home"),
+    "home.col.edge": ("The element and the absorption edge the scan was measured across (F K-edge: the energy "
+                      "where fluorine starts to absorb), read from the scan's plan and name.", "Edge", "2-home"),
+    "home.col.status": ("Complete: every planned energy was measured. In progress: files are still arriving. "
+                        "Aborted: stopped early. Test: a beamline check, not a sample.", "Status", "2-home"),
+    "home.col.energies": ("The X-ray energies the scan was recorded at: one energy for a survey; the first and "
+                          "last energy and their number for a stack.", "Energies", "2-home"),
+    "home.col.points": ("Pixels in each map of the scan (its measured spots).", "Pixels", "2-home"),
+    "home.col.flags": ("Warnings about the measurement: a detector that saturated (its fluorescence is not usable, "
+                       "the electron yield is), or a beam-intensity reading (I0) that cannot be trusted. From "
+                       "AURORA's own checks, and from an earlier analysis's summary files when the beamtime has "
+                       "them.", "Flags", "2-home"),
+    "home.demo": ("Open a small made-up beamtime, to try every step without your own data (written once into "
+                  "AURORA's data folder).", "Open the demo beamtime", "21-opening-a-project"),
     "home.tutorials": ("Open the tutorials: step-by-step walks through the demo beamtime.", "Read the tutorials",
                        "21-opening-a-project"),
     "home.recent": ("Projects opened before (also in File > Open recent). Double-click opens one; a greyed 'not "
@@ -73,9 +80,11 @@ HELP: dict[str, tuple[str, str, str]] = {
                   "21-opening-a-project"),
     # ------------------------------------------------------------------ survey
     "survey.holder": ("The holder whose plate map is shown (also chosen in the top bar).", "holder", "3-survey"),
-    "survey.channel": ("A fixed emission line, total XRF, TEY or I0.", "channel", "3-survey"),
+    "survey.channel": ("What the map shows: the X-rays of one emission line or all X-rays (total XRF) counted by "
+                       "the detectors, the electron yield (TEY), or the beam intensity (I0).", "channel", "3-survey"),
     "survey.sdd": ("The sum of the four detectors, or one detector.", "detector", "3-survey"),
-    "survey.per_i0": ("Divide by the mesh current (when the survey's I0 is usable).", "divide by I0", "3-survey"),
+    "survey.per_i0": ("Divide by the beam intensity (I0, the mesh current) when the survey's reading of it is "
+                      "usable.", "divide by I0", "3-survey"),
     "survey.log": ("Show log10 of the values.", "log scale", "3-survey"),
     "survey.invert": ("Flip the colour scale (high-energy surveys, where samples are darker than the plate).",
                       "invert the colour scale", "3-survey"),
@@ -126,8 +135,10 @@ HELP: dict[str, tuple[str, str, str]] = {
                         "41-scans-of-the-holder"),
     "reduce.scans": ("The complete stacks of the holder: pick one to load it (cached after the first read).",
                      "scans of the holder", "41-scans-of-the-holder"),
-    "reduce.new_zone": ("Start a new, empty zone; draw it on the map (Draw, then drag).", "New sample", "43-zones"),
-    "reduce.delete_zone": ("Delete the selected zone (its settings for every scan go with it).", "Delete", "43-zones"),
+    "reduce.new_zone": ("Start a new, empty sample, then draw its outline on the map (Draw, then drag).", "New sample",
+                        "43-zones"),
+    "reduce.delete_zone": ("Delete the selected sample: its outline, its name and its settings for every scan.",
+                           "Delete sample", "43-zones"),
     "reduce.propose": ("Zones from sgm_report's summary of the day, else from the bright pads of the survey map, as "
                        "a proposal to edit or delete.", "Propose zones", "43-zones"),
     "reduce.stitch": ("Join overlapping stacks (tiles) of the holder into one stack (after Load all).", "Stitch tiles",
@@ -139,8 +150,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "reduce.map_energy": ("The energy shown when the map mode is 'at energy'.", "map energy", "42-stack-map"),
     "reduce.map_i0": ("Divide the map by I0.", "map divided by I0", "42-stack-map"),
     "reduce.map_log": ("Show log10 of the map.", "map log scale", "42-stack-map"),
-    "reduce.label": ("The sample label: the sample-sheet IDs of the holder are offered; type anything.", "zone label",
-                     "44-the-zone-card"),
+    "reduce.label": ("The name of the sample: the names of the holder's sample sheet are offered; any name can be "
+                     "typed.", "sample name", "44-the-zone-card"),
     "reduce.group": ("The sample-sheet group; the report is organised by it.", "zone group", "44-the-zone-card"),
     "reduce.comment": ("Goes into the report caption and the CSV header.", "zone comment", "44-the-zone-card"),
     "reduce.send": ("Put the normalised fluorescence sum and TEY of every included scan into the Compare library.",
@@ -183,25 +194,25 @@ HELP: dict[str, tuple[str, str, str]] = {
     "preview.spikes": ("Mark the interpolated spikes.", "show spikes", "47-preview"),
     "preview.all_scans": ("Overlay every included scan of the sample.", "all scans of the sample", "47-preview"),
     # Reduce, WP3: map tools, XRF windows (step 2), Easy steps, batch settings
-    "reduce.clear": ("Remove the drawing of the selected sample (rectangles, polygons, painted pixels), to draw it again. "
-                     "John Bussey's 'Clear (full map)' went back to every point instead: draw a Rectangle over the "
-                     "whole map for that.",
+    "reduce.clear": ("Remove the outline of the selected sample to draw it again (the sample and its name stay). To "
+                     "take every pixel of the map instead (the earlier SGM XAS GUI's 'Clear (full map)'), draw a "
+                     "Rectangle over the whole map.",
                      "Clear the region", "42-stack-map"),
     "reduce.zones": ("The samples (zones) of the holder: pick one to edit it. A click inside a zone on the map also "
                      "selects it.", "samples of the holder", "43-zones"),
-    "reduce.load_polygon": ("Read a polygon ROI saved by John Bussey's GUI (<sample>_polygon_roi.json, at least three "
-                            "[x, y] vertices in mm) into a new sample.", "Load polygon", "43-zones"),
-    "reduce.save_polygon": ("Write the selected sample as John Bussey's <sample>_polygon_roi.json (a zone made of exactly "
-                            "one polygon).", "Save polygon", "43-zones"),
-    "reduce.window.preset": ("The emission window: a fixed line of config/roi_bins.json, the line of the edge (needs an "
-                             "SDD calibration), or custom windows set with the regions or the lo / hi boxes.",
-                             "XRF window preset", "48-xrf-windows"),
-    "reduce.window.lo": ("First channel of the window (included).", "window first channel", "48-xrf-windows"),
-    "reduce.window.hi": ("End of the window (excluded): 60 to 83 sums channels 60 to 82, as in John Bussey's GUI.",
+    "reduce.load_polygon": ("Read a polygon outline saved by the earlier SGM XAS GUI (<sample>_polygon_roi.json, "
+                            "at least three [x, y] corners in mm) into a new sample.", "Load polygon", "43-zones"),
+    "reduce.save_polygon": ("Write the selected sample as a <sample>_polygon_roi.json of the earlier SGM XAS GUI "
+                            "(a sample outlined by exactly one polygon).", "Save polygon", "43-zones"),
+    "reduce.window.preset": ("Which band of the emission spectrum is counted: a fixed window of the beamtime "
+                             "(config/roi_bins.json), the line of the edge element (needs a detector calibration), "
+                             "all X-rays, or a band you drag on the plot.", "which X-rays to count", "48-xrf-windows"),
+    "reduce.window.lo": ("First detector channel of the window (included).", "window first channel", "48-xrf-windows"),
+    "reduce.window.hi": ("End of the window (excluded): from 60 to 83 counts channels 60 to 82.",
                          "window end channel", "48-xrf-windows"),
-    "reduce.window.source": ("The emission spectrum shown: the whole stack summed over its energies, the survey of the "
-                             "holder, the pixels of the selected sample, or the survey points inside the selected "
-                             "sample (John Bussey's 'only inside region').", "emission spectrum source",
+    "reduce.window.source": ("The emission spectrum shown: the whole stack summed over its energies, the survey of "
+                             "the holder, the pixels of the selected sample, or the survey points inside the selected "
+                             "sample (the earlier SGM XAS GUI's 'only inside region').", "emission spectrum source",
                              "48-xrf-windows"),
     # zones: the tool bar of the Survey map and the stack map, the Survey's zone preview
     "zones.draw": ("Draw zones: drag on the map to add to the zone; right-drag erases (D).", "draw zones",
@@ -231,7 +242,7 @@ HELP: dict[str, tuple[str, str, str]] = {
     "zones.preview.open": ("Open this scan in Reduce with the zone selected.", "Open in Reduce", "3-survey"),
     "reduce.window.same": ("One window for all four detectors: dragging one region moves the four. Untick to set each "
                            "detector's window apart.", "same range for all detectors", "48-xrf-windows"),
-    "reduce.window.det": ("The detector whose window the lo / hi boxes edit when the windows are set apart.",
+    "reduce.window.det": ("The detector whose window the from / to boxes edit when the windows are set apart.",
                           "detector edited", "48-xrf-windows"),
     "reduce.window.remember": ("Save these windows as a default rule for the edge of this stack: scans of that edge "
                                "attached later use them (Rules…).", "Remember these windows", "48-xrf-windows"),
@@ -239,8 +250,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                                 "(config/roi_bins.json, created when missing; the previous file is kept as a backup): "
                                 "every scan offers it as a preset, and Maps draws its elemental map.",
                                 "Save as a fixed line", "48-xrf-windows"),
-    "reduce.add_to_check": ("Queue the selected sample on this scan for Check, with the Easy settings listed above "
-                            "(Ctrl+Return).", "Add to Check", "4-reduce"),
+    "reduce.add_to_check": ("Send the spectrum of the selected sample on this scan to Check, made as the sentence "
+                            "above says (Ctrl+Return).", "Add to Check", "4-reduce"),
     "reduce.reset_easy": ("Rewrite the settings that differ from the Easy defaults (named in the chip) in one step; Undo "
                           "brings them back.", "Reset to Easy defaults", "44-the-zone-card"),
     "reduce.copy": ("Copy this card's settings to all scans of the zone, to this scan in every zone of the holder, or "
@@ -312,31 +323,36 @@ HELP: dict[str, tuple[str, str, str]] = {
     "check.every": ("Probe every stack of every holder in one job (count rate, saturation, I0 validity), with progress "
                     "and Cancel. The results are kept in .aurora/qc.json.", "Run the checks on every holder",
                     "52-the-holder-checks-advanced"),
-    "check.queue": ("The spectra sent from Reduce with 'Add to Check': one row per sample region and scan, with John "
-                    "Bussey's sanity messages. Tick 'Looks OK' for the ones to save; right-click for more.",
+    "check.queue": ("The spectra sent from Reduce with Add to Check: one row per sample and scan, with AURORA's "
+                    "checks. Tick Looks OK for the ones to keep; right-click for more.",
                     "spectra to check", "51-spectra-to-check"),
     "check.tick_all": ("Tick 'Looks OK' on every row of the queue.", "Tick all", "51-spectra-to-check"),
     "check.untick_all": ("Untick 'Looks OK' on every row of the queue.", "Untick all", "51-spectra-to-check"),
-    "check.save": ("Write every ticked spectrum without a problem in John Bussey's formats (_full_reduced.csv, "
-                   "_absorption.csv, _polygon_roi.json, _gui_settings.json) to processed/reduced/<sample>/, then add "
-                   "the folders to Compare.", "Save ticked spectra to Compare", "51-spectra-to-check"),
-    "check.view": ("What the preview shows for the selected row (John Bussey's five views): the detector signals after "
-                   "cleaning; the fluorescence sum with its bad points; I0 and TEY each over its maximum; sum / I0 and "
-                   "TEY / I0; the / I0 traces scaled from 0 to 1.", "preview view", "51-spectra-to-check"),
+    "check.save": ("Save every ticked spectrum without a ✗ bad message as CSV files in processed/reduced/<sample>/ "
+                   "(_full_reduced.csv, _absorption.csv, _polygon_roi.json, _gui_settings.json: the format of the "
+                   "earlier SGM XAS GUI), then add them to Compare.",
+                   "Save ticked spectra to Compare", "51-spectra-to-check"),
+    "check.view": ("What the preview shows for the selected spectrum: the four detectors; their sum with the bad "
+                   "energies marked; the beam intensity and the electron yield; the spectra divided by the beam; "
+                   "the same scaled 0 to 1.", "preview view", "51-spectra-to-check"),
     "check.qcol.sample": ("The sample region (zone) drawn in Reduce.", "Sample", "51-spectra-to-check"),
     "check.qcol.scan": ("HH:MM and sample label of the scan.", "Scan", "51-spectra-to-check"),
-    "check.qcol.pts": ("Measurement points inside the region / points of the scan.", "Zone pts", "51-spectra-to-check"),
-    "check.qcol.bad": ("Energies flagged bad: spikes (interpolated), I0 below 20 % of its median, incomplete energies.",
-                       "Bad pts", "51-spectra-to-check"),
-    "check.qcol.messages": ("The sanity checks of John Bussey's GUI and AURORA's flags: ✓ ok, ! check, ✗ bad. Hover a chip "
-                            "for the messages.", "Messages", "51-spectra-to-check"),
-    "check.qcol.ok": ("Looks OK: the spectrum is saved by 'Save ticked → Compare' and goes into the report (the include "
-                      "tick of the scan). A row with a bad message starts unticked.", "Looks OK",
-                      "51-spectra-to-check"),
+    "check.qcol.pts": ("Pixels of the scan inside the outline, of all its pixels. More pixels give a less noisy "
+                       "spectrum.", "Pixels", "51-spectra-to-check"),
+    "check.qcol.bad": ("Energies repaired or left out: a spike (replaced by the value of its neighbours), a beam "
+                       "intensity below 20 % of its median, or a map that is missing.",
+                       "Bad energies", "51-spectra-to-check"),
+    "check.qcol.messages": ("AURORA's checks of this spectrum: ✓ ok, ! check (worth a look), ✗ bad (not saved). "
+                            "Hover a chip to read them.", "Messages", "51-spectra-to-check"),
+    "check.qcol.ok": ("Your verdict: ticked spectra are saved by Save ticked → Compare and go into the report. "
+                      "AURORA ticks the rows its checks found no problem with; a row with a ✗ bad message starts "
+                      "unticked.", "Looks OK", "51-spectra-to-check"),
     # ------------------------------------------------------------------ compare
-    "compare.add_folder": ("Add the spectra saved in a folder: John Bussey's _full_reduced.csv / _absorption.csv "
-                           "(the files Check saves); Advanced mode also reads sgm_report _xanes.csv and AURORA zone "
-                           "CSVs.", "Add saved spectra", "61-loading"),
+    "compare.add_folder": ("Add the spectra saved in a folder: the files Save ticked → Compare writes "
+                           "(processed/reduced/<sample>/), and the reduced files of the earlier SGM XAS GUI "
+                           "(_full_reduced.csv, _absorption.csv). Advanced mode also reads the summary spectra of "
+                           "an earlier analysis (_xanes.csv), AURORA zone CSVs and other column files.",
+                           "Add saved spectra", "61-loading"),
     "compare.reset_easy": ("Rewrite the columns Easy mode hides, on every row that differs, with the Easy defaults: Norm "
                            "larch, pre -20..-5 eV and post +15..+35 eV from E0, flattened, E0 from the derivative, "
                            "scale 1 (a trace normalised already keeps Norm none).", "Reset to Easy defaults",
@@ -348,8 +364,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.save_config": ("Save the whole library (files, shifts, normalisation, E0, colours, ticks) as a JSON file, "
                             "with the paths absolute and relative to it; traces without a file go to <name>_spectra.npz "
                             "next to it.", "Save config", "61-loading"),
-    "compare.load_config": ("Load a library saved with Save config… (or John Bussey's compare_config.json); it "
-                            "replaces the rows.", "Load config", "61-loading"),
+    "compare.load_config": ("Load a library saved with Save config… (or a compare_config.json of the earlier SGM "
+                            "XAS GUI); it replaces the rows.", "Load config", "61-loading"),
     "compare.export": ("Write a wide CSV of the shown traces as processed, the figure drawn again at the Figure size "
                        "(PNG, SVG, PDF) and the config JSON.", "Export", "64-diagnostics-and-export"),
     "compare.remove": ("Remove the selected rows.", "Remove", "62-the-table"),
@@ -371,8 +387,8 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.spacing": ("Offset between the stacked traces, in units of the normalised signal.", "spacing",
                         "63-stacked-plot"),
     "compare.labels": ("Label every trace at its right end.", "labels", "63-stacked-plot"),
-    "compare.signal_in_label": ("Add the signal (sdd-scaled, TEY, …) to the labels.", "signal in label",
-                                "63-stacked-plot"),
+    "compare.signal_in_label": ("Add the signal (fluorescence, TEY, …) to the labels.",
+                                "signal in label", "63-stacked-plot"),
     "compare.deriv": ("Plot the first derivative of the normalised signal.", "first derivative", "63-stacked-plot"),
     "compare.smooth": ("Smoothing width of the derivative, in points.", "derivative smoothing", "63-stacked-plot"),
     "compare.difference": ("Add the difference of the two selected rows (normalised A minus normalised B) as a new row.",
@@ -383,13 +399,15 @@ HELP: dict[str, tuple[str, str, str]] = {
                            "minimum prominence", "63-stacked-plot"),
     "compare.distance": ("Minimum distance between two marked peaks, in points.", "minimum distance",
                          "63-stacked-plot"),
-    "compare.col.show": ("Plotted.", "Show", "62-the-table"),
+    "compare.col.show": ("Draw this spectrum on the graph.", "Show", "62-the-table"),
     "compare.col.label": ("Editable; Rename and Duplicate act on the selected rows.", "Label", "62-the-table"),
-    "compare.col.signal": ("sdd-scaled: the four SDD signals each scaled to 0–1 (min-max), summed and divided by I0 "
-                           "(John Bussey's fluorescence signal); sdd_total: the summed counts / I0; TEY: total electron "
-                           "yield / I0; other files: their columns as named (sdd1…, PFY_…_over_I0).", "Signal",
-                           "62-the-table"),
-    "compare.col.shift": ("Added to the energy axis (calibration offsets), eV.", "Shift eV", "62-the-table"),
+    "compare.col.signal": ("Which signal of the saved spectrum the row plots: fluorescence (the usual choice: the four "
+                           "detector signals each scaled to 0–1 (min-max), summed and divided by I0), its plain sum "
+                           "÷ I0, electron yield (TEY, the surface) ÷ I0, inverse yield (IPFY) or one detector. Advanced "
+                           "mode adds the file's column name in parentheses.", "Signal", "62-the-table"),
+    "compare.col.shift": ("Moves the curve along the energy axis by this many eV, to correct an energy offset (for "
+                          "example between two beamtimes). Leave 0 unless the offset is known.",
+                          "Shift eV", "62-the-table"),
     "compare.col.norm": ("larch (two lines around E0), legacy (constant pre / post means over absolute windows), "
                          "tey_line (pre-edge line only), none.", "Norm", "62-the-table"),
     "compare.col.pre_lo": ("Start of the pre-edge window: eV from E0 (larch, tey_line); absolute eV for legacy "
@@ -405,7 +423,7 @@ HELP: dict[str, tuple[str, str, str]] = {
                             "62-the-table"),
     "compare.col.scale": ("Multiplier of this row in the stacked plot and its figure only; Fit, Difference and the CSV "
                           "use the trace unscaled.", "Scale", "62-the-table"),
-    "compare.col.fit": ("The row is available in Fit.", "Fit", "62-the-table"),
+    "compare.col.fit": ("Use this spectrum in Fit, as the target or as a reference.", "Fit", "62-the-table"),
     "compare.col.diag": ("The row's raw signal and fitted lines are shown in the diagnostics panel.", "Diag",
                          "62-the-table"),
     "compare.col.e0_mode": ("How E0 is found: deriv (maximum of the smoothed derivative, near the tabulated edge), half "
@@ -418,17 +436,17 @@ HELP: dict[str, tuple[str, str, str]] = {
                            "62-the-table"),
     "compare.colour": ("The colour of this trace in the plot and the exported figure: click to choose another.",
                        "trace colour", "62-the-table"),
-    "compare.default_shift": ("Energy shift given to every row added from now on (John Bussey's default shift).",
+    "compare.default_shift": ("Energy shift given to every row added from now on.",
                               "default shift for new rows", "62-the-table"),
     "compare.e0_smooth": ("Width of the Savitzky-Golay smoothing of the derivative that finds E0, eV.",
                           "E0 derivative smoothing", "62-the-table"),
     "compare.locate": ("Choose the folder the missing files moved to: they are found by name and every row gets its "
                        "spectrum back.", "Locate the missing files", "61-loading"),
     "compare.dismiss": ("Hide this message.", "Dismiss the message", "62-the-table"),
-    "compare.label_inset": ("Labels sit this many eV in from the right edge of the plot (John Bussey's label "
-                            "position); 0 = at the right edge.", "labels in from the right edge", "63-stacked-plot"),
-    "compare.figure_size": ("Size, font, PNG resolution and formats of every exported Compare and Fit figure "
-                            "(John Bussey's Plot size).", "Figure size", "64-diagnostics-and-export"),
+    "compare.label_inset": ("Labels sit this many eV in from the right edge of the plot; 0 = at the right edge.",
+                            "labels in from the right edge", "63-stacked-plot"),
+    "compare.figure_size": ("Size, font, PNG resolution and formats of every exported Compare and Fit figure.",
+                            "Figure size", "64-diagnostics-and-export"),
     "compare.fig_width": ("Figure width in inches: 3.5 for one column, 7.0 for two.", "figure width",
                           "64-diagnostics-and-export"),
     "compare.fig_height": ("Figure height in inches.", "figure height", "64-diagnostics-and-export"),
@@ -441,9 +459,10 @@ HELP: dict[str, tuple[str, str, str]] = {
     "compare.fig_pdf": ("Write a one-page PDF of the figure size with embedded TrueType text.", "PDF",
                         "64-diagnostics-and-export"),
     # ------------------------------------------------------------------ fit
-    "fit.target": ("The spectrum to fit (a row ticked Fit in Compare).", "target", "71-lcf-linear-combination-fit"),
-    "fit.components": ("The candidate components: tick the ones to combine.", "components",
-                       "71-lcf-linear-combination-fit"),
+    "fit.target": ("The spectrum to describe (a row ticked Fit in Compare).",
+                   "target", "71-lcf-linear-combination-fit"),
+    "fit.components": ("The reference spectra it may be made of (components): tick one or more.",
+                       "references", "71-lcf-linear-combination-fit"),
     "fit.lcf_lo": ("Lower end of the fit range (eV); blank = the Compare x range, else the whole common range.",
                    "fit range from", "71-lcf-linear-combination-fit"),
     "fit.lcf_hi": ("Upper end of the fit range (eV); blank = the Compare x range, else the whole common range.",
@@ -452,14 +471,17 @@ HELP: dict[str, tuple[str, str, str]] = {
     "fit.allow_neg": ("Allow negative coefficients.", "allow negative coefficients", "71-lcf-linear-combination-fit"),
     "fit.bootstrap": ("Refits on resampled residuals for the uncertainties; 0 = the covariance scaled by "
                       "√(reduced χ²), the Larch / Athena convention.", "bootstrap draws", "71-lcf-linear-combination-fit"),
-    "fit.run_lcf": ("Fit the target with the ticked components.", "Run LCF", "71-lcf-linear-combination-fit"),
-    "fit.export_lcf": ("Write the coefficients (with χ², reduced χ², N, p, R-factor, the uncertainty method, the "
-                       "flags and the F-tests in the header) and the curves as CSV, and the figure at the Figure size.",
+    "fit.run_lcf": ("Describe the target as a mix of the ticked references (linear combination fit, LCF).",
+                    "Run LCF", "71-lcf-linear-combination-fit"),
+    "fit.export_lcf": ("Write the coefficients (with the fit statistics: chi-square, reduced chi-square, N, p, the "
+                       "R-factor, the uncertainty method, the flags and the F-tests in the header) and the curves "
+                       "as CSV, and the figure at the Figure size.",
                        "Export figure and coefficients", "71-lcf-linear-combination-fit"),
     "fit.col.component": ("The component spectrum.", "component", "71-lcf-linear-combination-fit"),
     "fit.col.coefficient": ("Its weight in the linear combination.", "coefficient", "71-lcf-linear-combination-fit"),
-    "fit.col.uncertainty": ("Standard deviation over the bootstrap draws, or the covariance error scaled by "
-                            "√(reduced χ²) without a bootstrap.", "uncertainty", "71-lcf-linear-combination-fit"),
+    "fit.col.uncertainty": ("Standard deviation over the bootstrap draws, or the covariance error scaled by the "
+                            "square root of the reduced chi-square without a bootstrap.",
+                            "uncertainty", "71-lcf-linear-combination-fit"),
     "fit.mcr_lo": ("Lower end of the energy range (eV); blank = the whole common range.", "range from",
                    "72-pca--mcr-als"),
     "fit.mcr_hi": ("Upper end of the energy range (eV); blank = the whole common range.", "range to",
@@ -609,8 +631,11 @@ HELP: dict[str, tuple[str, str, str]] = {
                         "report author", "10-settings"),
     "settings.open_last": ("Open the last project when AURORA starts (on by default).",
                            "open the last project at start", "10-settings"),
-    "settings.advanced": ("Every option (Advanced mode); Easy mode shows the basic workflow (Ctrl+Shift+A).",
-                          "advanced mode", "10-settings"),
+    "settings.advanced": ("Every option (Advanced mode). Easy mode shows the main steps with standard settings "
+                          "(Ctrl+Shift+A).", "advanced mode", "10-settings"),
+    "settings.show_guide": ("Easy mode: the Getting started row on Home and the Next link of the top bar, which say what "
+                            "to do next at every step. Hide on the row turns it off; this box turns it on again.",
+                            "show the getting-started guide", "10-settings"),
     "settings.update_check": ("Ask GitHub once a day whether a newer AURORA exists. Nothing is downloaded. Off by "
                               "default.", "check for a newer AURORA at start", "10-settings"),
     "settings.k": ("De-spike threshold for new zone settings, in MADs (6).", "de-spike threshold k", "10-settings"),
@@ -632,12 +657,165 @@ HELP: dict[str, tuple[str, str, str]] = {
                      "Check the seams", "46-stitching-tiles"),
 }
 
+# Texts that read differently by mode: key -> (Easy, Advanced). Easy says it in plain words (the expert term in
+# parentheses where useful); Advanced keeps the precise term. say(key, **fields) picks the one of the current mode.
+EASY_TEXT: dict[str, tuple[str, str]] = {
+    # Reduce
+    "reduce.subtitle": ("Outline each sample on its map: AURORA adds up the pixels inside into one spectrum.",
+                        "draw the zones on the stack map, choose per scan what goes into the report"),
+    "reduce.title.window": ("Which X-rays to count", "XRF window"),
+    "reduce.title.map": ("Outline the sample", "Stack map"),
+    "reduce.title.zone": ("Send to Check", "Zone"),
+    "reduce.no_zone": ("select a sample first", "select a zone first"),
+    "reduce.zone_empty": ("the sample has no outline yet", "the zone is empty"),
+    "reduce.nothing": ("nothing outlined: drag over the map around your sample",
+                       "nothing selected: draw over the stack footprint"),
+    "reduce.cleared": ("{label}: outline removed, draw it again", "zone {id} cleared: draw its region again"),
+    "reduce.caption.no_scan": ("Pick a scan in step 1 first.", "Region: pick a scan in step 1"),
+    "reduce.caption.empty": ("Nothing outlined yet: drag over the map around your sample.",
+                             "Region: nothing selected: draw over the stack footprint"),
+    "reduce.caption.region": ("Region: {shape} · {k} of {m} pixels of {scan}", "Region: {shape} · {k} of {m} points of {scan}"),
+    "reduce.added": ("{label} on {scan} added to Check ({waiting} waiting)", "{label} on {scan} added to Check ({waiting} waiting)"),
+    "reduce.window.whole": ("No sample outlined yet: the X-rays of the whole map.",
+                            "nothing selected yet: the spectrum of the whole stack"),
+    "reduce.window.inside": ("The X-rays inside {label}: {k} pixels, all energies.",
+                             "inside the region ({k} points), all energies"),
+    "reduce.window.stack": ("The X-rays of the whole map: {n} pixels, all {e} energies.",
+                            "{name}: all {e} energies, {n} points"),
+    "reduce.window.no_raw": ("This stack has no raw detector spectra (stitched, or the files are missing): only the fixed "
+                             "windows can be used.", "no raw spectra for this stack (stitched or not found): the fixed bins only"),
+    # Check
+    "check.subtitle": ("Look at each spectrum before keeping it: untick the ones that look wrong, then save the rest.",
+                       "spectra to check · Looks OK · save to Compare"),
+    # Compare
+    "compare.subtitle": ("Saved spectra on one graph, each scaled so that its edge step is 1.",
+                         "normalise, shift, stack and compare reduced spectra"),
+    "compare.diag_title": ("How this spectrum was scaled", "Diagnostics of the selected row"),
+    # Fit
+    "fit.subtitle": ("Describe one spectrum as a mix of reference spectra: the rows ticked Fit in Compare, scaled as there.",
+                     "rows ticked 'Fit' in Compare, with their shifts and normalisation"),
+    "fit.lcf_title": ("Mix of references (LCF)", "Linear combination"),
+    "fit.components_label": ("references (tick)", "references / components (tick)"),
+    # Survey
+    "survey.subtitle": ("Where each sample and each measured area sits on the holder. Draw around a sample, or click a "
+                        "measured area to outline a sample in it in Reduce.", "plate map, scan footprints, zones"),
+    "survey.zones_title": ("Samples outlined on this holder", "Zones of the holder"),
+    "survey.zones_empty": ("No samples outlined on this holder yet. Choose Draw and drag around a sample on the map, or "
+                           "click a measured area (a rectangle) to outline a sample in Reduce.",
+                           "No zones on this holder yet."),
+    # Report
+    "report.zone_state": ("No sample outlined yet: the report is built from the samples outlined in Reduce and kept in "
+                          "Check.", "No zone yet: the report is built from the zones drawn in Reduce."),
+}
+
+
+def say(key: str, **fields) -> str:
+    """The text of EASY_TEXT[key] for the current mode, with its fields filled in."""
+    from aurora.app.mode import is_advanced
+    easy, adv = EASY_TEXT[key]
+    text = adv if is_advanced() else easy
+    return text.format(**fields) if fields else text
+
+
 # standard dialog buttons -> tooltip (by their text, without the mnemonic)
 BUTTON_TIPS = {
     "OK": "Apply and close", "Cancel": "Close without changing anything", "Close": "Close this window",
     "Help": "Open the manual at this dialog's section", "Bake": "Build the stitched stack from the ticked tiles",
     "Apply": "Apply without closing", "Save": "Save and close", "Yes": "Yes", "No": "No",
 }
+
+
+# HELP key -> the glossary terms its tooltip ends with ('What is …?' lines, at most two; aurora.glossary)
+HELP_TERMS: dict[str, tuple[str, ...]] = {
+    "main.mode": ("easy-mode",), "main.holder": ("holder",), "main.save_state": ("session",),
+    "home.open": ("beamtime",), "home.demo": ("beamtime",),
+    "home.col.kind": ("survey", "stack"), "home.col.edge": ("edge", "edge-name"), "home.col.status": ("status",),
+    "home.col.energies": ("stack",), "home.col.points": ("pixel",), "home.col.flags": ("saturated", "i0"),
+    "survey.footprints": ("footprint",), "survey.zones": ("zone",), "survey.channel": ("emission-line", "i0"),
+    "reduce.scans": ("stack", "status"),
+    "reduce.window.preset": ("xrf-window", "emission-line"),
+    "reduce.window.lo": ("channel",), "reduce.window.hi": ("channel",),
+    "reduce.window.source": ("emission-spectrum",),
+    "reduce.new_zone": ("zone",), "reduce.zones": ("zone",), "reduce.delete_zone": ("zone",), "reduce.clear": ("zone",),
+    "reduce.label": ("sample-sheet",),
+    "reduce.add_to_check": ("normalisation", "de-spike"),
+    "reduce.signal": ("fluorescence", "ipfy"),
+    "reduce.fluo": ("normalisation", "edge-step"), "reduce.tey_norm": ("normalisation", "edge-step"),
+    "reduce.tey": ("tey",),
+    "reduce.sdd": ("sdd", "saturated"), "maps.sdd": ("sdd", "saturated"),
+    "reduce.despike": ("de-spike",), "reduce.k": ("de-spike",),
+    "reduce.i0": ("i0", "good-i0"),
+    "reduce.pre": ("pre-post",), "reduce.post": ("pre-post",),
+    "preview.sdd": ("sdd",), "preview.sum": ("sdd",), "preview.tey": ("tey",), "preview.i0": ("i0",),
+    "preview.spikes": ("de-spike",),
+    "check.queue": ("looks-ok",), "check.qcol.ok": ("looks-ok",), "check.qcol.messages": ("chips",),
+    "check.qcol.pts": ("pixel",), "check.qcol.bad": ("bad-energy",),
+    "check.view": ("i0", "tey"), "check.save": ("reduced",),
+    "check.col.kcps": ("count-rate",), "check.col.high": ("count-rate",), "check.col.saturated": ("saturated",),
+    "check.col.i0": ("i0",), "check.col.i0_level": ("i0",),
+    "compare.col.signal": ("signal", "tey"), "compare.col.shift": ("shift",),
+    "compare.col.norm": ("normalisation", "pre-post"),
+    "compare.col.pre_lo": ("normalisation", "pre-post"), "compare.col.pre_hi": ("normalisation", "pre-post"),
+    "compare.col.post_lo": ("normalisation", "pre-post"), "compare.col.post_hi": ("normalisation", "pre-post"),
+    "compare.col.e0_mode": ("e0",), "compare.col.e0": ("e0",),
+    "compare.col.fit": ("lcf",), "compare.add_folder": ("reduced",),
+    "compare.references": ("reference",), "refs.folder": ("reference",),
+    "fit.target": ("lcf", "target-ref"), "fit.components": ("lcf", "target-ref"), "fit.run_lcf": ("lcf",),
+    "fit.export_lcf": ("r-factor", "chi2"),
+    "fit.col.coefficient": ("lcf",), "fit.col.uncertainty": ("bootstrap",), "fit.bootstrap": ("bootstrap",),
+    "fit.n_comp": ("pca-mcr",), "fit.pca": ("pca-mcr",), "fit.run_mcr": ("pca-mcr",),
+    "report.groups": ("group",), "report.appendix": ("appendices",), "report.maps": ("appendices",),
+    "settings.k": ("de-spike",), "settings.fluo": ("normalisation",), "settings.tey": ("normalisation",),
+}
+
+
+def help_terms(key: str):
+    """The glossary terms of a HELP key (aurora.glossary.Term), in the order of HELP_TERMS."""
+    from aurora.glossary import term
+    return [term(k) for k in HELP_TERMS.get(key, ())]
+
+
+def tooltip(key: str) -> str:
+    """HELP[key]'s tooltip, then a blank line and one 'What is …?' line per glossary term of HELP_TERMS[key]."""
+    from aurora.glossary import what_is
+    tip = HELP[key][0]
+    lines = [what_is(k) for k in HELP_TERMS.get(key, ())]
+    return tip + ("\n\n" + "\n".join(lines) if lines else "")
+
+
+def whats_this(key: str, tip: str | None = None) -> str:
+    """The What's This text: the tooltip, then the glossary words and the manual section ('… More: manual §4.5')."""
+    _t, _name, anchor = HELP[key]
+    tip = tooltip(key) if tip is None else tip
+    terms = help_terms(key)
+    words = f"Glossary: {', '.join(t.short for t in terms)} · " if terms else ""
+    return f"{tip}\n… {words}{manual_ref(anchor)}"
+
+
+def term_button(key: str, parent: QWidget | None = None):
+    """A small '?' next to a word that names a control: its tooltip says what the word means, a click opens the
+    glossary there. Left out of the Easy control budget and the manual parity (aurora_help_button)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSizePolicy, QToolButton
+    from aurora.glossary import definition, term, what_is
+    t = term(key)
+    b = QToolButton(parent)
+    b.setObjectName("termhelp")
+    b.setText("?")
+    b.setProperty("aurora_help_button", True)
+    b.setProperty("aurora_term", key)
+    b.setCursor(Qt.PointingHandCursor)
+    b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    b.setToolTip(f"{what_is(key)}\n(click: open the glossary)")
+    b.setAccessibleName(t.ask)
+    b.setAccessibleDescription(definition(key))
+    b.setStatusTip(what_is(key))
+
+    def _open() -> None:
+        from aurora.app.help import open_glossary
+        open_glossary(b, key)
+    b.clicked.connect(_open)
+    return b
 
 
 def manual_ref(anchor: str) -> str:
@@ -650,13 +828,13 @@ def manual_ref(anchor: str) -> str:
 def explain(widget: QWidget, key: str) -> QWidget:
     """Set the tooltip, accessible name, status tip and What's This text of a widget from HELP[key]."""
     from aurora.app.shortcuts import native_text
-    tip, name, anchor = HELP[key]
-    tip = native_text(tip)
+    _tip, name, _anchor = HELP[key]
+    tip = native_text(tooltip(key))
     widget.setToolTip(tip)
     widget.setProperty("aurora_tip", tip)          # widgets.set_enabled keeps it while the widget is disabled
     widget.setAccessibleName(name)
-    widget.setStatusTip(tip.split("\n")[0])
-    widget.setWhatsThis(f"{tip}\n… {manual_ref(anchor)}")
+    widget.setStatusTip(native_text(_tip).split("\n")[0])
+    widget.setWhatsThis(whats_this(key, tip))
     widget.setProperty("aurora_help_key", key)
     return widget
 
@@ -684,7 +862,7 @@ def header_tips(view, tips: dict[int, str]) -> None:
     from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QTreeWidget
     for col, key in tips.items():
         from aurora.app.shortcuts import native_text
-        tip = native_text(HELP[key][0]) if key in HELP else key
+        tip = native_text(tooltip(key)) if key in HELP else key
         if isinstance(view, QTableWidget):
             it = view.horizontalHeaderItem(col)
             if it is None:

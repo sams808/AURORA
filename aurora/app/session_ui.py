@@ -31,12 +31,20 @@ log = logging.getLogger("aurora.session")
 
 STATE_DETAIL = {
     "unsaved": "A change waits for the autosave: it is written to {path} within a second.",
-    "saved": "The zones are saved in {path}.",
-    "not saved": "The last save failed (the status line said why); AURORA tries again at the next change and when "
-                 "the window closes.",
+    "saved": "Your outlines and settings are saved in {path}.",
+    "not saved": "The last save failed: {why}. AURORA tries again at the next change and when the window closes.",
     "read-only": "This session is read-only (written by a newer AURORA, open in another AURORA, or in a folder that "
                  "cannot be written): edits here are not saved. Closing the window offers to export them to a file.",
 }
+# the read-only cases in words (Easy and Advanced; Advanced adds EXPORT_HINT, the action Easy mode hides)
+READ_ONLY_DETAIL = {
+    "folder": "AURORA cannot write in this beamtime folder: outlines drawn now are lost when AURORA closes. Copy the "
+              "beamtime folder to this computer and open the copy to keep your work.",
+    "newer": "This session was saved by a newer AURORA: edits here are not saved. Install the newer AURORA to keep "
+             "working on it.",
+    "other": "This session is open in another AURORA (or its lock was taken over): edits here are not saved.",
+}
+EXPORT_HINT = " Survey > Export zones… keeps them in a file."
 UNSAVED_TITLE = "Unsaved zone edits"
 UNSAVED_TEXT = ("The zone edits of {project} are not saved: {why}.\n\nExport zones… writes them to a zones_all.json "
                 "of your choice (Survey > Import zones… reads it back); Discard {then} without them.")
@@ -106,6 +114,8 @@ class SessionUI(QObject):
         session.reloaded.connect(self._on_reloaded)
         session.project_changed.connect(self._sync)
         window.installEventFilter(self)
+        from aurora.app.mode import on_mode_changed
+        on_mode_changed(self, lambda _a: self._paint(), call_now=False)     # the read-only detail reads by mode
         self._sync()
 
     # ------------------------------------------------------------------ menu entries
@@ -256,6 +266,21 @@ class SessionUI(QObject):
         self._paint()
         return True
 
+    def state_detail(self, word: str, path) -> str:
+        """The second line of the indicator's tooltip: what the state means and, read-only, why and what to do."""
+        from aurora.app.mode import is_advanced
+        ses = self.session
+        if word == "read-only":
+            kind = ("newer" if getattr(ses, "_newer", False) else "folder" if getattr(ses, "folder_read_only", False)
+                    else "other")
+            return READ_ONLY_DETAIL[kind] + (EXPORT_HINT if is_advanced() else "")
+        if word == "not saved":
+            from aurora.app.widgets import plain_error
+            why = getattr(ses, "_save_error", "") or "the reason is in the status line"
+            why = why.replace("the last save failed (", "").rstrip(")") if why.startswith("the last save failed (") else why
+            return STATE_DETAIL["not saved"].format(why=plain_error(why))
+        return STATE_DETAIL.get(word, "").format(path=path)
+
     def _on_state(self, state: str) -> None:
         self.state = state or ""
         self._paint()
@@ -271,7 +296,9 @@ class SessionUI(QObject):
         from aurora.app.theme import set_tone
         set_tone(lab, "warn" if word in ("not saved", "read-only") else None)      # edits at risk stand out
         path = self.session.session_file if self.session.project is not None else "session.json"
-        detail = STATE_DETAIL.get(word, "").format(path=path)
+        detail = self.state_detail(word, path)
+        from aurora.app.help_text import tooltip
         tip = HELP["main.save_state"][0]
-        lab.setToolTip(f"{tip}\n{detail}" if detail else tip)
+        more = tooltip("main.save_state")[len(tip):]
+        lab.setToolTip((f"{tip}\n{detail}" if detail else tip) + more)
         lab.setAccessibleDescription(state)

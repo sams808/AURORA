@@ -291,3 +291,85 @@ def scan_rows(scan, project=None, incomplete: list[tuple[float, str]] | None = N
     if scan.error:
         rows.append(("error", scan.error))
     return rows
+
+
+# ----------------------------------------------------------------------------- Easy mode: the same rows in plain words
+NOT_RECORDED = "not recorded"
+
+
+def what_it_is(scan) -> str:
+    """The first row of an Easy scan summary: what this scan is for, in one sentence."""
+    st = scan.status or ""
+    if scan.kind == "survey":
+        e = f" at {scan.e_min:.0f} eV" if scan.e_min == scan.e_min else ""
+        return f"A map of the whole holder{e}, used to find the samples."
+    if scan.kind == "stack":
+        if st == "complete":
+            n = scan.n_energies
+            rng = (f" ({scan.e_min:.0f}–{scan.e_max:.0f} eV)" if scan.e_min == scan.e_min and scan.e_max == scan.e_max
+                   else "")
+            return (f"A map of this area at {n} energies{rng}: outline a sample on it in Reduce to get its "
+                    "spectrum.")
+        if st == "aborted":
+            return "This stack stopped early: it is drawn on the Survey map but gives no spectrum."
+        if st == "in_progress":
+            return "Still being measured, or still being copied: Reload (F5) later."
+        if st == "test":
+            return "A beamline test, not a sample."
+    return ""
+
+
+def easy_project_rows(project, facts: ProjectFacts | None = None) -> list[tuple[str, str]]:
+    """project_rows in plain words (Easy mode): the layout row hidden, the calibration as the 'detector energy scale',
+    the ROI bins as 'emission windows', and what a missing optional file means."""
+    out = []
+    for key, val in project_rows(project, facts):
+        if key == "layout":
+            continue
+        if key == "holders" and val.startswith("none"):
+            val = "none: no survey found (each holder starts with a survey)"
+        elif key == "after midnight":
+            n = sum(len(d.continued) for d in project.days)
+            val = val.replace(f"{n} stack(s) continue", f"{n} {'stack continues' if n == 1 else 'stacks continue'}")
+        elif key == "calibration":
+            cal = project.calibration
+            key = "detector energy scale"
+            if cal is not None and cal.calibrated:
+                val = val.replace("(last updated", "(updated")
+            else:
+                val = "standard, 10 eV per channel (no config/sdd_calibration.json; fine for the fixed windows)"
+        elif key == "ROI bins":
+            key = "emission windows"
+            bins = project.roi_bins
+            if bins is not None and bins.labels:
+                where = shown_path(bins.path, project.root) if bins.path else "roi_bins.json"
+                val = f"{_names(bins.labels)} ({where})"
+            else:
+                val = ("none: AURORA counts all X-rays, or a window you set in Reduce step 2 (config/roi_bins.json is "
+                       "optional)")
+        elif key == "sample sheet" and val.startswith("none"):
+            val = ("none: type the sample names yourself (optional: a CSV file with a 'Sample ID' column in the "
+                   "beamtime folder)")
+        out.append((key, val))
+    return out
+
+
+def easy_scan_rows(scan, project=None, incomplete=None, check_error: str = "") -> list[tuple[str, str]]:
+    """scan_rows in plain words (Easy mode): 'what it is' first, rows without a recorded value hidden, pixels instead
+    of points."""
+    out = []
+    first = what_it_is(scan)
+    if first:
+        out.append(("what it is", first))
+    for key, val in scan_rows(scan, project, incomplete, check_error):
+        if val == NOT_RECORDED:
+            continue
+        if key == "estimated total":
+            val = val.replace("(num_maps × time per map", "(number of maps × time per map")
+        elif key == "grid" and scan.grid != (0, 0):
+            nx, ny = scan.grid
+            apart = f", {scan.pitch[0]:.3f} × {scan.pitch[1]:.3f} mm apart" if scan.pitch else ""
+            val = f"{nx} × {ny} pixels{apart} ({scan.n_points} measured)"
+        out.append((key, val))
+    return out
+

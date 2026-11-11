@@ -7,6 +7,8 @@ import pytest
 pytest.importorskip("pyqtgraph")
 from PySide6.QtCore import Qt  # noqa: E402
 
+from aurora.app import mode  # noqa: E402
+
 
 def _edge(E, e0=690.0, width=1.0, white=0.6, slope=0.002):
     return 0.2 + slope * (E - E[0]) + 1.0 / (1 + np.exp(-(E - e0) / width)) + white * np.exp(-((E - e0 - 2) / 1.5) ** 2)
@@ -38,7 +40,8 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     assert len(added) == 6 and cmp_.table.rowCount() == 6                       # sdd-scaled + TEY per sample
     assert [r.norm for r in lib.requests] == ["larch"] * 6
     qapp.processEvents()
-    assert "3 traces plotted" in cmp_.status.text()                              # TEY rows start hidden (John's rule)
+    # TEY rows start hidden (John's rule)
+    assert ("3 traces plotted" if mode.is_advanced() else "3 spectra plotted") in cmp_.status.text()
     assert [r.show for r in lib.requests] == [r.signal == "sdd-scaled" for r in lib.requests]
     # table edits propagate: hide the TEY rows, tick Fit on the sdd rows, shift one
     for i, r in enumerate(lib.requests):
@@ -49,22 +52,23 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     cmp_.table.item(0, cmp_.col("Shift eV")).setText("0.5")
     qapp.processEvents()
     assert lib.requests[0].shift == 0.5 and sum(r.show for r in lib.requests) == 3 and sum(r.fit for r in lib.requests) == 3
-    assert "3 traces plotted" in cmp_.status.text()
+    assert ("3 traces plotted" if mode.is_advanced() else "3 spectra plotted") in cmp_.status.text()
     cmp_.table.selectRow(0); cmp_.show_peaks.setChecked(True); qapp.processEvents()
-    assert "E0" in cmp_.diag.plotItem.titleLabel.text and "peak maxima" in cmp_.peaks_label.text()
+    assert ("E0" if mode.is_advanced() else "edge at") in cmp_.diag.plotItem.titleLabel.text and "peak maxima" in cmp_.peaks_label.text()
     out = cmp_.export(tmp_path / "comparison.csv")
     assert (tmp_path / "comparison.csv").exists() and (tmp_path / "comparison_config.json").exists()
     # LCF: target M from A and B
     fit.refresh()
-    fit.target.setCurrentText("M [sdd-scaled]")
-    for i in range(fit.components.count()):
-        it = fit.components.item(i); it.setCheckState(Qt.Checked if it.text() != "M [sdd-scaled]" else Qt.Unchecked)
+    fit.select_target("M", "sdd-scaled")
+    fit.check_components([fit.item_key(fit.components.item(i)) for i in range(fit.components.count())
+                          if fit.item_key(fit.components.item(i)) != "M [sdd-scaled]"])
     fit.bootstrap.setValue(20)
     fit.run_lcf()
     assert win.jobs.wait_idle(30000)
     r = fit.lcf_result
     assert r is not None and abs(r.total - 1) < 1e-6 and r.rmse < 0.05
-    coef = {fit.lcf_table.item(i, 0).text(): float(fit.lcf_table.item(i, 1).text()) for i in range(fit.lcf_table.rowCount())}
+    coef = {fit.lcf_table.item(i, 0).data(Qt.UserRole): float(fit.lcf_table.item(i, 1).text())
+            for i in range(fit.lcf_table.rowCount())}
     assert abs(coef["A [sdd-scaled]"] - 0.7) < 0.1 and abs(coef["B [sdd-scaled]"] - 0.3) < 0.1
     fit.export_lcf(tmp_path / "lcf.csv")
     assert (tmp_path / "lcf.csv").read_text().startswith("# LCF of M [sdd-scaled]")
@@ -77,7 +81,7 @@ def test_compare_and_fit(qapp, tmp_path, fake_project):
     assert m is not None and m.C.shape == (3, 2) and fit.prop_table.rowCount() == 3
     files = fit.export_mcr(tmp_path / "mcr", m, "MCR")
     assert all(p.exists() for p in files)
-    fit.itfa_sample.setCurrentText("A [sdd-scaled]"); fit.itfa_pct.setText("100, 0"); fit._add_target()
+    fit.select_key(fit.itfa_sample, "A [sdd-scaled]"); fit.itfa_pct.setText("100, 0"); fit._add_target()
     assert fit.targets.count() == 1
     fit.run_itfa()
     assert win.jobs.wait_idle(30000)
@@ -146,5 +150,6 @@ def test_scale_is_plot_only(qapp, tmp_path):
     qapp.processEvents()
     rf = next(r for r in lib.requests if r.key == "F [sdd-scaled]")
     assert np.nanmean(lib.process_row(rf).y[E > 715]) < 0
-    assert "the signal falls across the edge on F [sdd-scaled]" in cmp_.status.text()
+    assert ("the signal falls across the edge on F [sdd-scaled]" if mode.is_advanced() else
+            "The signal falls across the edge on F (fluorescence)") in cmp_.status.text()
     win.close()

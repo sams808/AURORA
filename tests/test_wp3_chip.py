@@ -105,7 +105,7 @@ def test_a_session_without_a_de_spike_rule_is_not_called_advanced(qapp, fake_pro
             z.settings[sid] = old
         pump(qapp)
         assert not rd.chip_box.isVisible(), rd.chip.toolTip()
-        assert "de-spike k = 6 (the earlier rule)" in rd.step4_line.text()
+        assert "de-spike k = 6 (the earlier rule" in rd.step4_line.toolTip()          # the settings line
         assert rd.reset_to_easy() == 0 and ses.zone(z.id).settings[sid].despike_mode == "classic"
     finally:
         close(win)

@@ -346,7 +346,9 @@ def test_a_held_file_on_save_ticked_is_one_calm_message(qapp, demo, monkeypatch,
     ck.save_btn.click()
     assert win.jobs.wait_idle(60000)
     pump(qapp)
-    assert error_dialogs == [] and len(warnings_shown) == 1 and "never writes here" in warnings_shown[0]
+    # (plain spec 5.9) a folder AURORA may not write: no dialog, the note says so and offers Compare without files
+    assert error_dialogs == [] and warnings_shown == [], warnings_shown
+    assert "AURORA never writes there" in ck.queue_note.text() and ck.unsaved_btn.isVisible()
     assert not folder.exists()
 
 

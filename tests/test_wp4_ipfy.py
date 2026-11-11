@@ -94,7 +94,11 @@ def test_ipfy_of_the_resonant_line_is_named_for_what_it_is(demo):
     assert np.allclose(t.sum, 1 / pfy.sum, rtol=1e-12, equal_nan=True)
     note = next((n for n in t.notes if n.startswith("IPFY of the resonant line")), None)
     assert note is not None and "F Kα" in note and "1 / PFY" in note, t.notes
-    assert ("warn", note) in qc.check_zone(t, sd)
+    # Check says it in plain words; the note itself is the message's source (shown in Advanced mode)
+    warn = [m for lv, m in qc.check_zone(t, sd) if lv == "warn" and getattr(m, "source", "") == note]
+    assert warn and str(warn[0]).startswith("inverse yield (IPFY) on the edge element's own line (F Kα)")
+    assert not any(str(m).startswith("inverse yield (IPFY): the spectrum is the beam intensity")
+                   for _lv, m in qc.check_zone(t, sd))                  # no 'rises at the edge' note for it
     to = zone_traces(sd, pix, ScanSettings(line="O Kα", fluo_norm="raw", signal="ipfy", despike=False))
     assert not any(n.startswith("IPFY of the resonant line") for n in to.notes)
     assert not any(n.startswith("IPFY of the resonant line") for n in pfy.notes)

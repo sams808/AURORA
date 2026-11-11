@@ -115,8 +115,12 @@ def test_project_summary_replaces_no_project_open(qapp, tmp_path):
     home.set_project(proj)
     pump(qapp)
     text = home.details.toPlainText()
-    assert "No project open" not in text and "holder" in text
-    for word in ("Days", "Holders", "Scans", "Calibration", "ROI bins", "Sample sheet", "double-click a stack"):
+    assert "No project open" not in text and "holder" in text.lower()
+    words = (("Days", "Holders", "Scans", "Calibration", "ROI bins", "Sample sheet", "double-click a complete stack")
+             if mode.is_advanced() else      # Easy: the same rows in words (plain spec 5.2)
+             ("Days", "Holders", "Scans", "Detector energy scale", "Emission windows", "Sample sheet",
+              "double-click a complete stack"))
+    for word in words:
         assert word in text, word
     assert "1 survey" in text and "1 complete" in text and "1 aborted" in text and "1 test" in text
     sheet = next(proj.root.glob("*.csv"))
@@ -168,7 +172,7 @@ def test_welcome_buttons_and_the_demo(qapp, user_data):
                                                                  "Read the tutorials"]
     assert all(b.toolTip() for b in es.buttons) and es.geometry().right() <= es.parentWidget().width()
     assert not home.recent_list.isVisible()                      # nothing opened yet
-    assert "No project open" in home.details.toPlainText()
+    assert ("No project open" if mode.is_advanced() else "Getting started") in home.details.toPlainText()
     es.buttons[1].click()                                        # Open the demo beamtime
     wait(qapp, win)
     assert "demo_beamtime" in win.crumb.text() and home.project.root == user_data.resolve()

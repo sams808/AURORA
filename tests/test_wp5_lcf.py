@@ -104,10 +104,8 @@ def test_bound_coefficient_is_flagged_in_the_table(qapp, tmp_path):
     lib.requests[-1].fit = True
     lib.changed.emit()
     fit.refresh()
-    fit.target.setCurrentText("glass [sdd-scaled]")
-    for i in range(fit.components.count()):
-        it = fit.components.item(i)
-        it.setCheckState(Qt.Checked if it.text() in ("NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "flat [x]") else Qt.Unchecked)
+    fit.select_target("glass", "sdd-scaled")
+    fit.check_components(["NaF [sdd-scaled]", "CaF2 [sdd-scaled]", "flat [x]"])
     fit.bootstrap.setValue(20)
     job = fit.run_lcf()
     assert job is not None and win.jobs.wait_idle(30000)
@@ -117,7 +115,9 @@ def test_bound_coefficient_is_flagged_in_the_table(qapp, tmp_path):
     assert r.at_bound[k] and fit.lcf_table.item(k, 3).text() == "at the 0 bound"
     assert fit.lcf_table.item(k, 1).background().color().name().upper() == TOKENS["warn_bg"].upper()
     assert "0 bound" in fit.lcf_table.item(k, 1).toolTip()
-    assert "χ²ν" in fit.lcf_info.text() and f"N {r.n_points} − p {r.n_params}" in fit.lcf_info.text()
+    from aurora.app import mode
+    full = fit.lcf_info.text() if mode.is_advanced() else fit.lcf_info.toolTip()      # Easy: the χ²ν line is the tooltip
+    assert "χ²ν" in full and f"N {r.n_points} − p {r.n_params}" in full
     assert "F-test (Hamilton)" in fit.lcf_detail.text()
     assert fit.lcf_chip.text().startswith("converged")
     # the export header carries everything

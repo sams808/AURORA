@@ -43,8 +43,8 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
     assert 0 < len(ws) <= 22, [type(w).__name__ for w in ws]
     titles = rd.step_titles()
     assert [t[:3] for t in titles] == ["1 ·", "2 ·", "3 ·", "4 ·"], titles
-    assert titles[0] == "1 · Scans of holder holderA" and titles[1] == "2 · XRF window"
-    assert titles[2] == "3 · Region" and titles[3] == "4 · Reduce"
+    assert titles[0] == "1 · Scans of holder holderA" and titles[1] == "2 · Which X-rays to count"
+    assert titles[2] == "3 · Outline the sample" and titles[3] == "4 · Send to Check"
     # step 3: the zone tool bar (Draw / Erase, Move, Rectangle, Brush, Lasso, Undo, Clear), New sample, Delete, the label
     bar = rd.toolbar
     shown = {s for s, b in bar.shape_buttons.items() if b.isVisible()}
@@ -53,13 +53,17 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
               rd.region_caption):
         assert w.isVisible()
     assert not rd.brush_n.isVisible()                       # the brush size shows with the brush only
-    assert rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 points of ")
+    assert rd.region_caption.text().startswith("Region: 1 rectangle · 12 of 12 pixels of ")
     # step 4: the read-only line and the primary 'Add to Check'; the preview keeps one toggle
     assert rd.step4_line.isVisible() and rd.add_check_btn.isVisible() and rd.add_check_btn.objectName() == "primary"
-    # the saved files hold the zone mean (John Bussey's reduction) and de-spiked values, which his GUI did not by default
-    assert rd.step4_line.text().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction)")
-    assert "de-spike k = 6 (John Bussey's default: off)" in rd.step4_line.text()
-    assert rd.step4_line.text().endswith("SDD1-4")
+    # the Easy sentence says how the spectrum is made; its tooltip keeps the exact settings line: the saved files
+    # hold the zone mean (John Bussey's reduction) and de-spiked values, which his GUI did not by default
+    assert "divided by the beam intensity (I0)" in rd.step4_line.plain_text()
+    assert "averaged over the outlined pixels" in rd.step4_line.plain_text()
+    assert not any(w in rd.step4_line.plain_text() for w in ("mcc", "Au mesh", "k =", "SDD1-4"))
+    tip = rd.step4_line.toolTip()
+    assert tip.startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as the earlier SGM XAS GUI)")
+    assert "de-spike k = 6 (off by default in the earlier SGM XAS GUI)" in tip and tip.endswith("SDD1-4 · PFY F Kα")
     assert rd.preview.all_scans.isVisible() and rd.preview.all_scans.text() == "all scans of the sample"
     assert not rd.preview.toggles.isVisible()
     # step 2: preset, spectrum, lo / hi
@@ -125,7 +129,8 @@ def test_a_saturated_sdd_is_off_and_named(qapp, fake_project):
         rd.add_to_check()
         st = ses.zone().settings[sid]
         assert st.sdd == [True, True, False, True]
-        assert "SDD1-4 (SDD3 saturated, left out)" in rd.step4_line.text()
+        assert "SDD1-4 (SDD3 saturated, left out)" in rd.step4_line.toolTip()
+        assert "detectors 1, 2 and 4 (detector 3 saturated: left out)" in rd.step4_line.plain_text()
         assert not rd.chip_box.isVisible()                      # the saturated SDD off is the Easy default
     finally:
         close(win)
@@ -139,8 +144,8 @@ def test_nothing_selected_away_from_the_footprint(qapp, fake_project):
         x0, x1, y0, y1 = sd.bbox
         rd.map.rect_drawn.emit(x1 + 2.0, x1 + 3.0, y1 + 2.0, y1 + 3.0)
         pump(qapp)
-        assert ses.zone() is not None and "nothing selected" in rd.region_caption.text()
-        assert not rd.add_check_btn.isEnabled() and "draw over the stack footprint" in rd.add_check_btn.toolTip()
+        assert ses.zone() is not None and "Nothing outlined yet" in rd.region_caption.text()
+        assert not rd.add_check_btn.isEnabled() and "drag over the map around your sample" in rd.add_check_btn.toolTip()
         assert rd.add_to_check() == 0 and not ses.check_queue
     finally:
         close(win)
@@ -178,7 +183,7 @@ def test_a_flag_found_by_check_after_the_zone_was_made(qapp, fake_project, monke
         assert za.settings[sid].sdd == [False, True, True, True] and "sdd" not in za.settings[sid].pinned
         assert zb.settings[sid].sdd == [True, True, True, True]           # pinned: kept
         assert ses.undo_stack.undoText().startswith("follow the new scan flags")
-        assert rd.step4_line.text().endswith("SDD1-4 (SDD1 saturated, left out)")
+        assert "SDD1-4 (SDD1 saturated, left out)" in rd.step4_line.toolTip()     # the settings line
         assert not rd.chip_box.isVisible()
         card = next(c for c in rd._cards if c.sid == sid)                 # the Advanced card shows it too
         assert [b.isChecked() for b in card.sdd] == [False, True, True, True]
@@ -186,7 +191,7 @@ def test_a_flag_found_by_check_after_the_zone_was_made(qapp, fake_project, monke
         assert any("left out of the sum" in m for _lv, m in row.messages), row.messages
         ses.select_zone(zb.id)
         pump(qapp)
-        assert rd.step4_line.text().endswith("SDD1-4 (SDD1 flagged saturated, still in the sum)")
+        assert "SDD1-4 (SDD1 flagged saturated, still in the sum)" in rd.step4_line.toolTip()
         assert rd.chip_box.isVisible() and "SDD1 on (flagged saturated)" in rd.chip.toolTip()
         ses.undo()                                            # one step brings SDD1 back into zone A's sum
         pump(qapp)
@@ -216,7 +221,7 @@ def test_a_summary_written_after_the_zone_flags_it_on_reload(qapp, fake_project)
         win.home.set_project(Project.discover(fake_project))            # Reload of the same folder
         pump(qapp)
         assert ses.zone(z.id).settings[sid].sdd == [True, True, False, True]
-        assert rd.step4_line.text().endswith("SDD1-4 (SDD3 saturated, left out)")
+        assert "SDD1-4 (SDD3 saturated, left out)" in rd.step4_line.toolTip()
     finally:
         close(win)
 
@@ -279,7 +284,7 @@ def test_johns_step_3_conveniences_in_easy(qapp, fake_project):
         rd.map.rect_drawn.emit(x0, x1, y0, y1)
         pump(qapp)
         assert ses.zone().label == "zone 1"
-        assert rd.add_to_check() == 1 and "name the sample in the sample box" in rd.status_label.text()
+        assert rd.add_to_check() == 1 and "name the sample in the sample name box" in rd.status_label.text()
         win.show_perspective("check")
         assert win.jobs.wait_idle(30000)
         pump(qapp)

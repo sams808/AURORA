@@ -8,11 +8,12 @@ figure again at the Figure size (aurora.core.figures), never a screen grab.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPushButton, QSizePolicy, QSpinBox, QSplitter,
@@ -20,20 +21,31 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 
 from aurora.app import jobs, nav
 from aurora.app.help import set_help_anchor
-from aurora.app.help_text import HELP, explain, explain_all, header_tips, labelled
+from aurora.app.help_text import HELP, explain, explain_all, header_tips, labelled, say
 from aurora.app.library import Library
-from aurora.app.mode import JOHN_DEFAULTS, mark_advanced, mark_advanced_tab, mark_easy
+from aurora.app.mode import JOHN_DEFAULTS, is_advanced, mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
 from aurora.app.theme import curve, dash, make_plot, min_height, on_theme_changed, role_pen
-from aurora.app.vocab import plural, unit_suffix
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, default_path,
-                                fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair, remember_dir,
-                                set_enabled, set_plot_hint, size_to_current_tab)
+from aurora.app.vocab import plural, signal_label, unit_suffix
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, default_dir,
+                                default_path, fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair,
+                                remember_dir, set_enabled, set_plot_hint, size_to_current_tab)
 from aurora.core.fit import (LcfResult, McrResult, PcaResult, common_grid, fit_status, itfa, lcf, mcr_als, pca,
                              prepare_matrix, same_matrix, unit_of)
 from aurora.core.io.textio import open_atomic
 
 TINT_ROLE = int(Qt.UserRole) + 0x7B0          # the tone of a tinted row (re-read after a theme change)
 RESAMPLE = (("moving blocks", "block"), ("single points (iid)", "iid"))
+LCF_CAPTION = ("Describes one spectrum (the {{target-ref|target}}) as a weighted sum of others (the references). Only the "
+               "spectra ticked Fit in Compare are offered.")
+LCF_MEANING = ("Each coefficient is the share of the target's signal that looks like that reference, roughly the share of "
+               "the element's atoms in that kind of surroundings. It is not a weight or mole fraction of the compound. "
+               "± is the spread over {n} refits on resampled data ({{{{bootstrap|bootstrap}}}}). A smaller "
+               "{{{{r-factor|R-factor}}}} means a closer fit.")
+LCF_MEANING_COV = ("Each coefficient is the share of the target's signal that looks like that reference, roughly the share "
+                   "of the element's atoms in that kind of surroundings. It is not a weight or mole fraction of the "
+                   "compound. ± comes from the fit itself (no {{bootstrap|bootstrap}}). A smaller {{r-factor|R-factor}} "
+                   "means a closer fit.")
+UNUSABLE_TIP = "not available: it could not be scaled in Compare (energies do not reach past the edge)"
 
 
 def _component_index(i: int) -> int:
@@ -85,6 +97,8 @@ def _chip() -> Chip:
 
 
 class FitPerspective(QWidget):
+    fitted = Signal()                     # an LCF result arrived (the getting-started guide)
+
     def __init__(self, library: Library, parent: QWidget | None = None):
         super().__init__(parent)
         self.lib = self.library = library
@@ -104,7 +118,7 @@ class FitPerspective(QWidget):
         root.setSpacing(12)
         head = QHBoxLayout()
         h1 = QLabel("Fit"); h1.setObjectName("h1")
-        sub = ElidedLabel("rows ticked 'Fit' in Compare, with their shifts and normalisation", Qt.ElideRight)
+        self.subtitle = sub = ElidedLabel(say("fit.subtitle"), Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
         self.figure_btn = QPushButton("Figure size…"); self.figure_btn.clicked.connect(self._figure_options)
@@ -129,7 +143,8 @@ class FitPerspective(QWidget):
         root.addWidget(self.body, 1)
         self.taskbar = TaskBar(self)
         root.addWidget(self.taskbar)
-        self.empty_state = EmptyState("No spectrum is ticked 'Fit' in Compare yet: the fits work on those rows.",
+        self.empty_state = EmptyState("Nothing to fit yet: in Compare, tick Fit on the spectra to use (the target and "
+                                      "at least one reference).",
                                       [("Go to Compare", lambda: nav.go(self, "compare"))], icon="fit", parent=self.body)
         library.changed.connect(self.refresh)
         on_theme_changed(self, lambda _s: self.redraw())
@@ -138,7 +153,8 @@ class FitPerspective(QWidget):
         for page in (self.mcr_page, self.itfa_page, self.peaks_page):
             mark_advanced_tab(self.tabs, page)
         mark_advanced(self.lcf_options, self.lcf_detail)
-        mark_easy(self.lcf_fixed)
+        mark_easy(self.lcf_fixed, self.lcf_caption, self.lcf_meaning, self.lcf_help)
+        on_mode_changed(self, lambda _a: self._mode_texts())
         for w in (self.sum_one, self.allow_neg):
             w.toggled.connect(self._fixed_text)
         self.bootstrap.valueChanged.connect(self._fixed_text)
@@ -155,14 +171,14 @@ class FitPerspective(QWidget):
                  f"± from {n} bootstrap draws" if n else "± from the covariance (no bootstrap)",
                  "fit range: the Compare x range when the boxes are blank"]
         j = JOHN_DEFAULTS["lcf"]
-        parts.append(f"John Bussey's GUI: {'sum to 1' if j['sum_to_one'] else 'sum free'}, "
+        parts.append(f"the earlier SGM XAS GUI: {'sum to 1' if j['sum_to_one'] else 'sum free'}, "
                      f"{'negatives allowed' if j['allow_negative'] else 'no negatives'}, "
                      f"{j['fit_range'][0]:g}–{j['fit_range'][1]:g} eV")
         self.lcf_fixed.setText(" · ".join(parts))
 
     def update_actions(self) -> None:
         n = len(self.curves())
-        set_enabled(self.lcf_btn, n >= 2, "tick at least two rows 'Fit' in Compare (a target and a component)")
+        set_enabled(self.lcf_btn, n >= 2, "tick Fit on at least two rows in Compare (a target and a reference)")
         set_enabled(self.lcf_export_btn, self.lcf_result is not None, "run LCF first")
         set_enabled(self.pca_btn, n >= 2, "tick at least two rows 'Fit' in Compare")
         set_enabled(self.mcr_btn, n >= 2, "tick at least two rows 'Fit' in Compare")
@@ -262,38 +278,137 @@ class FitPerspective(QWidget):
         self._range_hint()
         super().showEvent(e)
 
+    # ---- the rows by key ('NaF [sdd-scaled]', as in the exports) and as shown ('NaF [fluorescence]')
+    def shown_names(self, keys) -> dict[str, str]:
+        """{key: text on screen}: the signal in words (Advanced: 'fluorescence (sdd-scaled)'); two keys that would
+        read the same keep their code ('NaF [fluorescence · sdd_total]')."""
+        adv = is_advanced()
+        out, seen = {}, {}
+        for k in keys:
+            m = re.match(r"^(.*) \[(.*)\]$", k)
+            out[k] = f"{m.group(1)} [{signal_label(m.group(2), adv)}]" if m else k
+            seen.setdefault(out[k], []).append(k)
+        for text, ks in seen.items():
+            if len(ks) > 1:
+                for k in ks:
+                    m = re.match(r"^(.*) \[(.*)\]$", k)
+                    if m:
+                        out[k] = f"{m.group(1)} [{signal_label(m.group(2))} · {m.group(2)}]"
+        return out
+
+    def shown(self, key: str) -> str:
+        return getattr(self, "_shown", {}).get(key, key)
+
+    @staticmethod
+    def item_key(it) -> str:
+        k = it.data(Qt.UserRole) if it is not None else None
+        return str(k) if k else (it.text() if it is not None else "")
+
+    @staticmethod
+    def combo_key(combo) -> str:
+        k = combo.currentData()
+        return str(k) if k else combo.currentText()
+
+    @staticmethod
+    def select_key(combo, key: str) -> bool:
+        """Show the row of a key ('glass [sdd-scaled]') or of its shown text in a Fit list."""
+        i = combo.findData(key)
+        if i < 0:
+            i = combo.findText(key)
+        if i >= 0:
+            combo.setCurrentIndex(i)
+        return i >= 0
+
+    def select_target(self, label: str, signal: str = "sdd-scaled") -> bool:
+        return self.select_key(self.target, f"{label} [{signal}]")
+
+    def select_trace(self, label: str, signal: str = "sdd-scaled") -> bool:
+        return self.select_key(self.pk_trace, f"{label} [{signal}]")
+
+    def check_components(self, pairs) -> None:
+        """Tick exactly these references: [(label, signal code)] or keys."""
+        keys = {p if isinstance(p, str) else f"{p[0]} [{p[1]}]" for p in pairs}
+        for i in range(self.components.count()):
+            it = self.components.item(i)
+            if it.flags() & Qt.ItemIsEnabled:
+                it.setCheckState(Qt.Checked if self.item_key(it) in keys else Qt.Unchecked)
+
+    def unusable(self) -> list[str]:
+        """Rows ticked Fit whose scaling failed in Compare (no finite values): listed greyed, not offered."""
+        return [f"{r.label} [{r.signal}]" for r, _s, nr in self.fit_rows() if not np.isfinite(nr.y).any()]
+
+    def _fill_combo(self, combo, names: list[str], bad: list[str]) -> None:
+        cur = self.combo_key(combo) if combo.count() else ""
+        combo.blockSignals(True)
+        combo.clear()
+        for n in names:
+            combo.addItem(self.shown(n), n)
+        for n in bad:
+            combo.addItem(self.shown(n), n)
+            item = combo.model().item(combo.count() - 1)
+            if item is not None:
+                item.setEnabled(False)
+                item.setToolTip(UNUSABLE_TIP)
+        if cur:
+            self.select_key(combo, cur)
+        combo.blockSignals(False)
+
+    def _mode_texts(self) -> None:
+        self.subtitle.setText(say("fit.subtitle"))
+        self.lcf_card.set_title(say("fit.lcf_title"))
+        self.components_label.setText(say("fit.components_label"))
+        h = self.lcf_table.horizontalHeaderItem(0)
+        if h is not None:
+            h.setText("component" if is_advanced() else "reference")
+        self.refresh()
+        if self.lcf_result is not None:
+            self._show_lcf_info()
+            self._fill_lcf_table()
+            self._draw_lcf()
+
     def refresh(self) -> None:
         names = [c[0] for c in self.curves()]
-        cur = self.target.currentText()
-        self.target.blockSignals(True); self.target.clear(); self.target.addItems(names)
-        if cur in names:
-            self.target.setCurrentText(cur)
-        self.target.blockSignals(False)
-        checked = {self.components.item(i).text() for i in range(self.components.count()) if self.components.item(i).checkState() == Qt.Checked}
+        bad = self.unusable()
+        self._shown = self.shown_names(names + bad)
+        self._fill_combo(self.target, names, bad)
+        checked = {self.item_key(self.components.item(i)) for i in range(self.components.count())
+                   if self.components.item(i).checkState() == Qt.Checked}
         self.components.clear()
         for n in names:
-            it = QListWidgetItem(n); it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it = QListWidgetItem(self.shown(n)); it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setData(Qt.UserRole, n)
             it.setCheckState(Qt.Checked if (n in checked or not checked) else Qt.Unchecked)
             self.components.addItem(it)
+        for n in bad:
+            it = QListWidgetItem(self.shown(n))
+            it.setData(Qt.UserRole, n)
+            it.setFlags(it.flags() & ~Qt.ItemIsEnabled & ~Qt.ItemIsUserCheckable)
+            it.setToolTip(UNUSABLE_TIP)
+            self.components.addItem(it)
         self.mcr_info.setText(f"{plural(len(names), 'spectrum', 'spectra')} ticked for the fits in Compare")
-        cur = self.pk_trace.currentText(); self.pk_trace.blockSignals(True); self.pk_trace.clear(); self.pk_trace.addItems(names)
-        if cur in names:
-            self.pk_trace.setCurrentText(cur)
-        self.pk_trace.blockSignals(False)
-        self.itfa_sample.clear(); self.itfa_sample.addItems(names)
+        self._fill_combo(self.pk_trace, names, [])
+        self._fill_combo(self.itfa_sample, names, [])
         self._range_hint()
         self.update_actions()
 
     # ------------------------------------------------------------------ LCF
     def _lcf_tab(self) -> QWidget:
         w = QWidget(); lay = QHBoxLayout(w)
-        left = Card("Linear combination", help_anchor="71-lcf-linear-combination-fit")
+        self.lcf_card = left = Card(say("fit.lcf_title"), help_anchor="71-lcf-linear-combination-fit")
+        self.lcf_caption = TermLabel(LCF_CAPTION)          # Easy: what LCF does
+        self.lcf_caption.setObjectName("muted")
+        left.body.addWidget(self.lcf_caption)
         self.target = QComboBox()
         self.target.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.target.setMinimumContentsLength(14)
-        left.body.addWidget(labelled("target", self.target, "fit.target")); left.body.addWidget(self.target)
+        from aurora.app.help_text import term_button
+        self.lcf_help = term_button("lcf")                  # Easy: 'What is LCF (linear combination fit)?'
+        trow = QHBoxLayout(); trow.setSpacing(6)
+        trow.addWidget(labelled("target", self.target, "fit.target")); trow.addWidget(self.lcf_help); trow.addStretch(1)
+        left.body.addLayout(trow); left.body.addWidget(self.target)
         self.components = QListWidget()
-        left.body.addWidget(labelled("components (tick)", self.components, "fit.components"))
+        self.components_label = labelled(say("fit.components_label"), self.components, "fit.components")
+        left.body.addWidget(self.components_label)
         left.body.addWidget(self.components, 1)
         rng = QHBoxLayout()
         self.lcf_lo = QLineEdit(); self.lcf_lo.setPlaceholderText("auto"); self.lcf_hi = QLineEdit(); self.lcf_hi.setPlaceholderText("auto")
@@ -321,7 +436,7 @@ class FitPerspective(QWidget):
         lay.addWidget(left, 1)
         right = QSplitter(Qt.Vertical)
         pc = Card("Target, fit and residual", help_anchor="71-lcf-linear-combination-fit")
-        self.lcf_plot = make_plot(x="energy (eV)", legend="inside"); self.lcf_plot.getViewBox().disableAutoRange()
+        self.lcf_plot = make_plot(x="energy (eV)", legend="outside"); self.lcf_plot.getViewBox().disableAutoRange()
         pc.body.addWidget(self.lcf_plot, 1)
         min_height(self.lcf_plot, 150)
         right.addWidget(pc)
@@ -329,11 +444,15 @@ class FitPerspective(QWidget):
         self.lcf_chip = _chip()
         rc.body.addWidget(self.lcf_chip)
         self.lcf_table = QTableWidget(0, 4)
-        self.lcf_table.setHorizontalHeaderLabels(["component", "coefficient", "±", "note"])
+        self.lcf_table.setHorizontalHeaderLabels(["reference" if not is_advanced() else "component", "coefficient", "±",
+                                                  "note"])
         self.lcf_table.setAccessibleName("LCF coefficients")
         header_tips(self.lcf_table, {0: "fit.col.component", 1: "fit.col.coefficient", 2: "fit.col.uncertainty",
                                      3: "fit.col.note"})
         rc.body.addWidget(self.lcf_table, 1)
+        self.lcf_meaning = TermLabel("")                   # Easy: what a coefficient, ± and the R-factor mean
+        self.lcf_meaning.setObjectName("muted")
+        rc.body.addWidget(self.lcf_meaning)
         self.lcf_info = QLabel(""); self.lcf_info.setObjectName("muted"); self.lcf_info.setWordWrap(True); rc.body.addWidget(self.lcf_info)
         self.lcf_detail = QLabel(""); self.lcf_detail.setObjectName("muted"); self.lcf_detail.setWordWrap(True)
         rc.body.addWidget(self.lcf_detail)
@@ -355,8 +474,9 @@ class FitPerspective(QWidget):
         if self._busy("fit:lcf", self.lcf_info, "LCF"):
             return None
         curves = self.curves_with_err()
-        tname = self.target.currentText()
-        comps = [self.components.item(i).text() for i in range(self.components.count()) if self.components.item(i).checkState() == Qt.Checked and self.components.item(i).text() != tname]
+        tname = self.combo_key(self.target)
+        comps = [self.item_key(self.components.item(i)) for i in range(self.components.count())
+                 if self.components.item(i).checkState() == Qt.Checked and self.item_key(self.components.item(i)) != tname]
         if tname not in curves:
             self.lcf_info.setText("add spectra in Compare and tick 'Fit' first"); return None
         if not comps:
@@ -382,10 +502,9 @@ class FitPerspective(QWidget):
         if isinstance(r, Exception):
             self.lcf_info.setText(str(r)); return
         self.lcf_result = r; self._lcf_names = (tname, comps); self._lcf_origin = origin
+        self.fitted.emit()
         self._fill_lcf_table()
-        self.lcf_info.setText(f"χ²ν {r.redchi:.3g} = χ² {r.chi2:.4g} / (N {r.n_points} − p {r.n_params}) · R-factor "
-                              f"{r.r_factor:.3g} · sum of coefficients {r.total:.3f} · {r.E[0]:.1f}–{r.E[-1]:.1f} eV "
-                              f"({origin})")
+        self._show_lcf_info()
         self.lcf_detail.setText(self._lcf_detail_text(r, comps))
         self._draw_lcf()
         self.update_actions()
@@ -411,6 +530,26 @@ class FitPerspective(QWidget):
             lines.append(f)
         return "\n".join(lines)
 
+    def _show_lcf_info(self) -> None:
+        """The fit statistics: plain in Easy mode, the full χ²ν line in Advanced mode; the meaning line (Easy)."""
+        r = self.lcf_result
+        origin = getattr(self, "_lcf_origin", "")
+        if r is None:
+            return
+        _t, comps = self._lcf_names
+        fixed = ", sum fixed to 1" if self.sum_one.isChecked() else ""
+        full = (f"χ²ν {r.redchi:.3g} = χ² {r.chi2:.4g} / (N {r.n_points} − p {r.n_params} free: "
+                f"{plural(len(comps), 'reference')}{fixed}) · R-factor {r.r_factor:.3g} · sum of "
+                f"coefficients {r.total:.3f} · {r.E[0]:.1f}–{r.E[-1]:.1f} eV ({origin})")
+        if is_advanced():
+            self.lcf_info.setText(full)
+            self.lcf_info.setToolTip("")
+        else:                                   # plain words; the full statistics stay in the tooltip
+            self.lcf_info.setText(f"R-factor {r.r_factor:.2g} (smaller = closer fit) · coefficients sum to {r.total:.3f} · "
+                                  f"fitted over {r.E[0]:.1f}–{r.E[-1]:.1f} eV ({origin})")
+            self.lcf_info.setToolTip(full)
+        self.lcf_meaning.set_markup(LCF_MEANING.format(n=r.n_draws) if r.n_draws else LCF_MEANING_COV)
+
     def _fill_lcf_table(self) -> None:
         r = self.lcf_result
         if r is None or self._lcf_names is None:
@@ -430,8 +569,9 @@ class FitPerspective(QWidget):
                 note, why = "at the 0 bound", "the coefficient sits at the 0 bound: this component is not needed, or a negative one would fit better"
             elif und[i]:
                 note, why = "undetermined", "σ > |value|: the data do not determine this coefficient"
-            cells = [QTableWidgetItem(c), QTableWidgetItem(f"{r.coefficients[i]:.4f}"),
+            cells = [QTableWidgetItem(self.shown(c)), QTableWidgetItem(f"{r.coefficients[i]:.4f}"),
                      QTableWidgetItem(f"{u:.4f}" if np.isfinite(u) else "–"), QTableWidgetItem(note)]
+            cells[0].setData(Qt.UserRole, c)                # the row's key ('NaF [sdd-scaled]', as in the CSV)
             for k, it in enumerate(cells):
                 if note:
                     tint(it, "warn", why)
@@ -447,11 +587,11 @@ class FitPerspective(QWidget):
             return
         set_plot_hint(self.lcf_plot, None)
         tname, comps = self._lcf_names
-        self.lcf_plot.plot(r.E, r.target, pen=role_pen("target", 2), name=f"target {tname}")
+        self.lcf_plot.plot(r.E, r.target, pen=role_pen("target", 2), name=f"target {self.shown(tname)}")
         self.lcf_plot.plot(r.E, r.fit, pen=role_pen("fit", 1.6), name="linear combination")
         for i, c in enumerate(comps):
             k = _component_index(i)
-            self.lcf_plot.plot(r.E, r.coefficients[i] * r.components[i], pen=pg.mkPen(curve(k), width=1, style=dash(k)), name=f"{r.coefficients[i]:.2f} x {c}")
+            self.lcf_plot.plot(r.E, r.coefficients[i] * r.components[i], pen=pg.mkPen(curve(k), width=1, style=dash(k)), name=f"{r.coefficients[i]:.2f} x {self.shown(c)}")
         resid = r.target - r.fit - 0.2 * (np.nanmax(r.target) - np.nanmin(r.target))
         self.lcf_plot.plot(r.E, resid, pen=role_pen("resid", 1), name="residual (offset)")
         _set_range(self.lcf_plot, [float(r.E[0]), float(r.E[-1])], [r.target, r.fit, resid])
@@ -730,7 +870,7 @@ class FitPerspective(QWidget):
         if not pct or any(v < 0 for v in pct) or sum(pct) > 100.0001:
             self.itfa_status.setText("each ITFA target needs non-negative percentages that sum to at most 100"); return
         it = QListWidgetItem(f"{self.itfa_sample.currentText()} = {', '.join(f'{v:g}' for v in pct)} %")
-        it.setData(Qt.UserRole, (self.itfa_sample.currentText(), pct))
+        it.setData(Qt.UserRole, (self.combo_key(self.itfa_sample), pct))
         self.targets.addItem(it)
 
     def _clear_itfa(self) -> None:
@@ -860,7 +1000,7 @@ class FitPerspective(QWidget):
     def run_peaks(self) -> None:
         from aurora.core import fit as core_fit
         curves = {n: (E, y) for n, E, y in self.curves()}
-        name = self.pk_trace.currentText()
+        name = self.combo_key(self.pk_trace)
         if name not in curves:
             self.pk_info.setText("tick a trace 'Fit' in Compare first"); return
         E, y = curves[name]

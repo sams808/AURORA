@@ -251,10 +251,11 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc = rd.window_card
         sd = ses.stack_loaded(sid)
         assert [wc.preset.itemText(i) for i in range(wc.preset.count())] == [
-            "F Kα (fixed bins)", "O Kα (fixed bins)", "total XRF (fixed bins)", "custom"]   # no calibration: no edge line
-        assert wc.preset.currentText() == "F Kα (fixed bins)" and wc.choice() == {"line": "F Kα", "roi": None}
+            "F Kα (fixed window)", "O Kα (fixed window)", "all X-rays (total XRF)",
+            "custom (drag the band on the plot)"]                                           # no calibration: no edge line
+        assert wc.preset.currentText() == "F Kα (fixed window)" and wc.choice() == {"line": "F Kα", "roi": None}
         assert [tuple(r.getRegion()) for r in wc.regions] == [(60, 74), (61, 75), (62, 76), (63, 77)]
-        assert "10 eV/ch nominal" in wc.ev_label.text()
+        assert "10 eV per channel, not calibrated" in wc.ev_label.text()      # Easy words (Advanced: 10 eV/ch nominal)
         x0, x1, y0, y1 = sd.bbox
         rd.map.rect_drawn.emit(x0, x1, y0, y1)
         pump(qapp)
@@ -266,10 +267,11 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc.regions[1].setRegion((50, 70))
         pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(49, 69), (50, 70), (51, 71), (52, 72)]
-        assert (wc.lo.value(), wc.hi.value()) == (49, 69) and wc.preset.currentText() == "custom"
+        assert (wc.lo.value(), wc.hi.value()) == (49, 69) and wc.preset.currentData() == ("custom", "")
         wc.set_window(None, 50, 70)                    # det None: the same window for all four
         pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(50, 70)] * 4
+        assert (wc.lo.value(), wc.hi.value()) == (50, 70) and wc.preset.currentData() == ("custom", "")
         wc.commit_now()
         pump(qapp)
         st = z.settings[sid]
@@ -325,7 +327,7 @@ def test_easy_nudges_keep_the_per_detector_windows(qapp, tmp_path):
         pump(qapp)
         expect = {"sdd1": [59, 75], "sdd2": [60, 76], "sdd3": [61, 77], "sdd4": [62, 78]}
         assert wc.windows() == expect and ses.zone().settings[sid].roi == expect
-        assert wc.ev_label.text().startswith("SDD1: channels 59:75")
+        assert wc.ev_label.text().startswith("Detector 1 (SDD1): 590–750 eV (channels 59 to 74")   # Easy words
         # the same with the hidden 'same range' unticked (left so by Advanced): Easy still moves all four
         wc.same_range.setChecked(False)
         wc.det.setCurrentIndex(2)
@@ -374,8 +376,8 @@ def test_line_of_the_edge_offered_with_a_calibration(qapp, fake_project):
     try:
         wc = win.reduce.window_card
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items[0] == "total XRF (fixed bins)" and items[1].startswith("line of the edge: F Kα 676.8 eV")
-        assert "(calibrated)" in wc.ev_label.text()
+        assert items[0] == "all X-rays (total XRF)" and items[1].startswith("line of the edge element: F Kα 676.8 eV")
+        assert "calibrated)" in wc.ev_label.text() and "not calibrated" not in wc.ev_label.text()
         wc.preset.setCurrentIndex(1)
         st = None
         z = win.session.zone()
@@ -416,14 +418,14 @@ def test_a_roi_bins_line_the_stack_lacks_is_read_from_the_raw_spectra(qapp, fake
         sd = ses.stack_loaded(sid)
         assert sd.labels == ["total XRF"] and sd.source.startswith("sgm_report cache ") and not sd.window_note
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items == ["total XRF (fixed bins)", "F Kα (fixed bins)", "custom"]
+        assert items == ["all X-rays (total XRF)", "F Kα (fixed window)", "custom (drag the band on the plot)"]
         rd.map.rect_drawn.emit(*sd.bbox)
         pump(qapp)
         wc.preset.setCurrentIndex(1)
         pump(qapp)
         st = ses.zone().settings[sid]
         assert st.line == "F Kα" and st.roi == {"sdd1": [60, 74], "sdd2": [61, 75], "sdd3": [62, 76], "sdd4": [63, 77]}
-        assert wc.preset.currentText() == "F Kα (fixed bins)"
+        assert wc.preset.currentText() == "F Kα (fixed window)"
         win.jobs.wait_idle(30000)
         pump(qapp)
         rd.update_preview()
@@ -463,17 +465,17 @@ def test_without_roi_bins_easy_offers_johns_window_and_says_what_total_xrf_is(qa
         ses, rd = win.session, win.reduce
         wc = rd.window_card
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
-        assert items == ["total XRF (fixed bins)", "John Bussey's 60:83 (F Kα)", "custom"]
-        assert wc.preset.currentText() == "total XRF (fixed bins)"
-        assert "total XRF holds every emission line, not only the F Kα of the edge" in wc.ev_label.text()
-        assert "John Bussey's GUI started with 60:83" in wc.ev_label.text()
+        assert items == ["all X-rays (total XRF)", "standard 60:83 (F Kα)", "custom (drag the band on the plot)"]
+        assert wc.preset.currentText() == "all X-rays (total XRF)"
+        assert "every emission line, not only the F Kα of the edge" in wc.ev_label.text()
+        assert "the earlier SGM XAS GUI started with 60:83" in wc.ev_label.text()          # Easy: no person name
         rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
         pump(qapp)
         wc.preset.setCurrentIndex(1)
         pump(qapp)
         st = ses.zone().settings[sid]
         assert st.line == "F Kα" and st.roi == {d: [60, 83] for d in DETS}
-        assert wc.preset.currentText() == "John Bussey's 60:83 (F Kα)" and "every emission line" not in wc.ev_label.text()
+        assert wc.preset.currentText() == "standard 60:83 (F Kα)" and "every emission line" not in wc.ev_label.text()
         # the preset combo takes the card's width (the label keeps its own), so its text is not cut at 1500 x 940
         win.resize(1500, 940)
         pump(qapp)

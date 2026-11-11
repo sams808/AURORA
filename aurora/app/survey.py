@@ -29,12 +29,12 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import nav, shortcuts
-from aurora.app.help_text import explain, explain_all, labelled
+from aurora.app.help_text import explain, explain_all, labelled, say
 from aurora.app.mapview import MapView, scale_label
-from aurora.app.mode import is_advanced, mark_advanced
+from aurora.app.mode import is_advanced, mark_advanced, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.theme import FOOTPRINTS, MAP_OVERLAY, curve, on_theme_changed, swatch_icon
-from aurora.app.vocab import det_items, plural, unit_suffix
+from aurora.app.vocab import channel_words, det_items, plural, unit_suffix
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path, guarded_write,
                                 notify_saved, overlay_host, pair, remember_dir, set_enabled)
 from aurora.app.zone_preview import ZonePreviewCard
@@ -46,7 +46,8 @@ from aurora.core.zones import zone_bbox
 
 SHEET_ANCHOR = "24-the-sample-sheet"             # MANUAL.md: what a sample sheet holds and where it goes
 
-FOOTPRINT_LABELS = {"complete": "complete", "aborted": "aborted", "in_progress": "in progress", "test": "test"}
+FOOTPRINT_LABELS = {"complete": "complete", "aborted": "stopped early (aborted)", "in_progress": "in progress",
+                    "test": "beamline test"}
 NO_SURVEY_MAP = ("This holder has no survey map: no survey was recorded before these stacks. Reduce works on the "
                  "stacks directly.")
 NO_SHEET = "No sample sheet: names are typed by hand."
@@ -99,7 +100,7 @@ class FootprintLegend(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         lay = FlowLayout(self, spacing=6)
-        cap = QLabel("footprints:"); cap.setObjectName("muted")
+        cap = QLabel("measured areas (stacks):"); cap.setObjectName("muted")
         lay.addWidget(cap)
         self._icons: dict[str, QLabel] = {}
         for status, text in FOOTPRINT_LABELS.items():
@@ -161,7 +162,7 @@ class SurveyPerspective(QWidget):
 
         head = QHBoxLayout()
         h1 = QLabel("Survey"); h1.setObjectName("h1")
-        sub = ElidedLabel("plate map, scan footprints, zones", Qt.ElideRight); sub.setObjectName("muted")
+        self.subtitle = sub = ElidedLabel(say("survey.subtitle"), Qt.ElideRight); sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
         self.holder_combo = QComboBox()
         self.holder_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -251,6 +252,9 @@ class SurveyPerspective(QWidget):
         self.zone_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.zone_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.zone_table.itemSelectionChanged.connect(self._zone_row_selected)
+        self.zone_table.verticalHeader().setVisible(False)          # the '#' column numbers the zones already
+        self.zone_table.horizontalHeader().setStretchLastSection(True)
+        self.zone_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._fit_zone_table()                          # its header and two zones, at every Text size
         on_theme_changed(self.zone_table, lambda _s: self._fit_zone_table())
         zc.body.addWidget(self.zone_table, 1)
@@ -316,6 +320,7 @@ class SurveyPerspective(QWidget):
         self.clip.valueChanged.connect(self.redraw_map)
 
         self.no_map_state = EmptyState(NO_SURVEY_MAP, [], icon="survey", parent=self.map)
+        self.zones_state = EmptyState(say("survey.zones_empty"), [], icon="survey", parent=self.zone_table)
         self.empty_state = EmptyState("No project open: the plate map of each holder appears here.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="survey",
@@ -340,6 +345,8 @@ class SurveyPerspective(QWidget):
         on_theme_changed(self, lambda _s: self.redraw_map())
         # Easy mode: the plate map with fixed display settings, footprints, hover readout, samples, sketch
         mark_advanced(self.options_row, self.import_btn, self.export_btn, self.grid_btn)
+        on_mode_changed(self, lambda _a: (self.subtitle.setText(say("survey.subtitle")), self.update_actions(),
+                                          self.redraw_map()), call_now=False)
         self.update_actions()
 
     def update_actions(self) -> None:
@@ -367,8 +374,14 @@ class SurveyPerspective(QWidget):
         set_enabled(self.remove_sketch_btn, own and not why,
                     why or "this sketch is a file of the beamtime folder: AURORA removes only the copy it made")
         title = holder_title(h)
-        self.zones_card.set_title(f"Zones of {'the ' if title == BEFORE_SURVEY else ''}{title}" if h else
-                                  "Zones of the holder")
+        if is_advanced():
+            self.zones_card.set_title(f"Zones of {'the ' if title == BEFORE_SURVEY else ''}{title}" if h else
+                                      "Zones of the holder")
+        else:
+            self.zones_card.set_title(say("survey.zones_title"))
+        hz = self.session.holder_zones(create=False) if has else None
+        self.zones_state.set_content(say("survey.zones_empty"))
+        self.zones_state.set_shown(has and h is not None and not (hz and hz.zones))
         self.samples_card.set_title(("Samples (sample sheet)" if title == BEFORE_SURVEY else
                                      f"Samples on {title} (sample sheet)") if h else "Samples on the holder (sample sheet)")
 
@@ -485,8 +498,15 @@ class SurveyPerspective(QWidget):
         if outside:
             notes.append(outside)
         note = "; ".join(notes)
-        self.hint.setText(f"{plural(sv.n, 'point')} at {sv.energy:.1f} eV, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm"
-                          + (f" · {note}" if note else "") + (f" · {self._grid_note}" if self._grid_note else ""))
+        what = (channel_words(self.channel.currentText()) + f" at {sv.energy:.1f} eV"
+                + (", divided by the beam intensity" if self.per_i0.isChecked() else "")
+                + (", log scale" if self.log.isChecked() else ""))
+        bright = "darker = more signal" if self.invert.isChecked() else "brighter = more signal"
+        if is_advanced():
+            text = (f"Colour: {what} · {plural(sv.n, 'point')}, pitch {sv.pitch[0]:.2f} x {sv.pitch[1]:.2f} mm")
+        else:
+            text = f"Colour: {what} ({bright}) · {plural(sv.n, 'pixel')}, {sv.pitch[0]:.2f} mm apart"
+        self.hint.setText(text + (f" · {note}" if note else "") + (f" · {self._grid_note}" if self._grid_note else ""))
 
     # ------------------------------------------------------------------ the first view (PM-02)
     def _survey_rect(self):

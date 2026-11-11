@@ -48,17 +48,21 @@ headless listing and the tree agree.
 ## Tutorial 2: draw zones and reduce a stack
 
 1. In Reduce, step **1 · Scans of holder holderA** lists the complete stack; it is selected.
-2. Step **2 · XRF window** shows the emission spectrum with the preset *F Kα (fixed bins)*: **lo** 60 and **hi** 74
-   channels on SDD1 (hi excluded). Keep it.
-3. Step **3 · Region**: with **Draw** and **Rectangle** chosen (or **Lasso**, and draw around the area), drag over the
-   left half of the map. The caption reads *Region: 1 rectangle · 6 of 12 points of 092758_alpha_beta_f_k_stack*. Pick the sample
-   label `1 alpha` (offered from the sample sheet) in the **sample** box above the map.
+2. Step **2 · Which X-rays to count** shows the emission spectrum with the preset *F Kα (fixed window)*: **from** 60
+   and **to** 74 channels on SDD1 (to excluded). Keep it.
+3. Step **3 · Outline the sample**: with **Draw** and **Rectangle** chosen (or **Lasso**, and draw around the area),
+   drag over the left half of the map. The caption reads *Region: 1 rectangle · 6 of 12 pixels of
+   092758_alpha_beta_f_k_stack*. Pick the sample name `1 alpha` (offered from the sample sheet) in the **sample name**
+   box above the map.
 4. Press **Ctrl+Z**: the label goes back to *zone 1* (**Edit > Undo** names each step); press it again and the zone
    disappears; **Ctrl+Y** twice brings both back. The top bar shows *unsaved*, then *saved* with the time.
 5. **New sample**, then drag over the right half; label `2 beta`. A click inside the first zone selects it again.
    (Without **New sample**, a stroke that does not touch the selected zone starts a new zone by itself.)
-6. Step **4 · Reduce** states the settings in force (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (John Bussey's reduction) · fluorescence /
-   I0, edge jump = 1 · de-spike k = 6 (John Bussey's default: off) · SDD1-4*). Select zone 1 and press **Add to Check**; do the same for zone 2.
+6. Step **4 · Send to Check** says in one sentence how the spectrum is made (*The spectrum is the F Kα X-rays counted
+   in the step-2 window, averaged over the outlined pixels and added over the four detectors, divided by the beam
+   intensity (I0), …*); its tooltip has the exact settings (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as the
+   earlier SGM XAS GUI) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (off by default in the earlier SGM XAS GUI)
+   · SDD1-4 · PFY F Kα*). Select zone 1 and press **Add to Check**; do the same for zone 2.
 7. *Advanced*: switch with **Ctrl+Shift+A**. The cards lose their numbers; the **Zone** card shows **group**, filled
    from the sample sheet when the label was picked (`Group 1` for zone 1, `Group 2` for zone 2). The scan card below shows **include** ticked, SDD1–4 ticked,
    line F Kα, fluorescence */ I0, edge jump = 1*, **de-spike** with k = 6, I0 own. Untick **SDD3** and watch the
@@ -95,7 +99,8 @@ undone, and everything is saved automatically.
 1. Go to Check. **Spectra to check** lists the two regions sent with **Add to Check** in Tutorial 2. Each row reads
    *✓ ok* and *no problem found*; select one, and the messages under the preview read *region contains 6 of 12
    measurement points* and *no bad points*.
-2. Select a row and switch **view** to *fluorescence sum and its bad points*, then to *sum / I0 and TEY / I0*.
+2. Select a row and switch **view** to *sum of the detectors, bad energies marked*, then to *fluorescence and TEY
+   divided by the beam (I0)*.
 3. Press **Save ticked → Compare**: the two spectra are written in John Bussey's format to
    `processed/reduced/1 alpha/` and `processed/reduced/2 beta/`, and Compare lists them.
 4. *Advanced*: **Run the checks on holder holderA** (in **Scans of holder holderA**). The table fills with the I0 level, the
@@ -114,10 +119,11 @@ This tutorial uses the demo's `processed/reduced/` folder: NaF, CaF2 and LiF, an
 (0.5 NaF + 0.3 CaF2 + 0.2 LiF) and `mixture 2` (0.2 + 0.5 + 0.3), plus the two spectra saved in Tutorial 4 (`1 alpha`
 has the NaF edge, `2 beta` 0.6 CaF2 + 0.4 LiF). Any folder of reduced CSVs works the same way.
 
-1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a sdd-scaled row (the four SDDs each
-   scaled to 0–1, summed, / I0: John Bussey's fluorescence signal) and a TEY row; the TEY rows start with **Show**
-   unticked, as in John Bussey's GUI, so the plot holds the seven sdd-scaled traces, the two zones of Tutorial 4
-   included. In Easy mode only John-format files are read;
+1. Compare, **Add saved spectra…** → `processed/reduced`. Each file gives a fluorescence row (sdd-scaled: the four SDDs
+   each scaled to 0–1, summed, / I0, John Bussey's fluorescence signal) and an electron yield (TEY) row; Easy mode
+   shows the words, Advanced mode adds the column name. The TEY rows start with **Show** unticked, as in John Bussey's
+   GUI, so the plot holds the seven fluorescence traces, the two zones of Tutorial 4 included. In Easy mode only
+   John-format files are read;
    Advanced mode also reads AURORA zone CSVs and sgm_report `_xanes.csv`.
 2. *Advanced*: select every sdd-scaled row, set **pre** and **post** to −20, −5 and 15, 35 in the windows row under the
    table and **Apply**. Norm stays `larch`. In the **E0** column choose `row:NaF [sdd-scaled]` on the other rows: they

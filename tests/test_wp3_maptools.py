@@ -187,7 +187,7 @@ def test_lasso_and_polygon_draw_polygon_zones(qapp, win):
     z = ses.zone()
     assert z is not None and len(z.polys) == 1 and len(z.polys[0]) >= 3 and not z.rects
     assert ses.zone().members[win.sid] == TRIANGLE_MEMBERS
-    assert rd.region_caption.text().startswith(f"Region: polygon with {len(z.polys[0])} vertices · 6 of 12 points")
+    assert rd.region_caption.text().startswith(f"Region: polygon with {len(z.polys[0])} vertices · 6 of 12 pixels")
     # Esc cancels a lasso in progress
     ses.select_zone(None)
     vb = rd.map.vb

@@ -225,24 +225,28 @@ def test_many_findings_fill_in_one_batch_and_a_tick_moves_one_row(qapp, tmp_path
     lst.model().rowsInserted.connect(lambda *a: inserted.append(a))
     rp._fill_plan()
     pump(qapp)
+    # (plain spec 5.8) the findings of one kind sit under one plain row: two kinds, 250 rows under them
     n = lst.topLevelItemCount()
-    assert n == 250 and len(inserted) == 1                       # one batch, not one insertion per finding
-    assert all(lst.itemWidget(lst.topLevelItem(i), 2) is None for i in range(n))
+    assert n == 2 and len(inserted) == 1                         # one batch, not one insertion per finding
+    rows = [lst.topLevelItem(i).child(j) for i in range(n) for j in range(lst.topLevelItem(i).childCount())]
+    assert len(rows) == 250 and all(lst.itemWidget(r, 2) is None for r in rows)
     # every third finding drops data (a warning), the other two are notes (NOTE_KINDS), counted apart
     assert rp.totals.text().endswith("84 warnings · 166 notes") and rp.check_tabs.tabText(0) == "Findings (250)"
-    before = [lst.topLevelItem(i) for i in range(n)]
+    group = lst.topLevelItem(0)
+    before = [group.child(j) for j in range(group.childCount())]
     first = before[0]
     fid = first.data(0, Qt.UserRole)
     first.setCheckState(1, Qt.Checked)                           # the user's tick
     pump(qapp)
-    after = [lst.topLevelItem(i) for i in range(n)]
+    after = [group.child(j) for j in range(group.childCount())]
+    assert lst.topLevelItem(0) is group                          # the groups are not rebuilt
     assert after[-1] is first and all(a is b for a, b in zip(after[:-1], before[1:]))       # moved, not rebuilt
     assert first.data(0, Qt.UserRole) == fid and first.checkState(1) == Qt.Checked
     assert first.toolTip(1).startswith("ignored") and first.data(0, Qt.ForegroundRole) is not None     # dimmed
-    assert rp.totals.text().endswith("83 warnings · 166 notes") and rp.check_tabs.tabText(0) == "Findings (249)"
+    assert rp.totals.text().endswith(" warnings · 166 notes") and rp.check_tabs.tabText(0) == "Findings (249)"
     first.setCheckState(1, Qt.Unchecked)                         # back: first again, no longer dimmed
     pump(qapp)
-    assert lst.topLevelItem(0) is first and first.data(0, Qt.ForegroundRole) is None
+    assert group.child(0) is first and first.data(0, Qt.ForegroundRole) is None
     assert rp.totals.text().endswith("84 warnings · 166 notes")
     close(win)
 

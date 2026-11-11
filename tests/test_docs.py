@@ -24,6 +24,7 @@ FILES = {
     "MANUAL.md": DOCS / "MANUAL.md",
     "USER_GUIDE.md": DOCS / "USER_GUIDE.md",
     "TUTORIALS.md": DOCS / "TUTORIALS.md",
+    "GLOSSARY.md": DOCS / "GLOSSARY.md",
 }
 FENCE = re.compile(r"```.*?```", re.S)
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
@@ -69,7 +70,7 @@ def test_readme_links_the_bundled_manuals():
             assert "aurora/resources/docs" in targets[doc], f"{name} links {doc} outside aurora/resources/docs"
 
 
-@pytest.mark.parametrize("name", ["INSTALL.md", "MANUAL.md", "USER_GUIDE.md", "TUTORIALS.md"])
+@pytest.mark.parametrize("name", ["INSTALL.md", "MANUAL.md", "USER_GUIDE.md", "TUTORIALS.md", "GLOSSARY.md"])
 def test_no_raw_angle_brackets_outside_code(name):
     """The Help browser reads the manuals as Markdown with HTML: a bare <name> outside code is a tag, and the text
     after it disappears (the rest of a section, or of the page). Placeholders belong in backticks."""

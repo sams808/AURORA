@@ -49,7 +49,8 @@ def test_a_fresh_window(qapp, fake_project):
         assert not win.pages[key].empty_state.isVisible(), key
     win.show_perspective("reduce")
     pump(qapp)
-    assert win.reduce.zone_state.isVisible() and "Draw" in win.reduce.zone_state.text()    # no zone yet: the tool bar
+    zs = win.reduce.zone_state                                  # no zone yet: the tool bar, in plain words
+    assert zs.isVisible() and "Draw" in zs.text() and "drag over the map" in zs.text()
     assert win.reduce.new_zone_btn.isEnabled()
     win.show_perspective("check")
     pump(qapp)
@@ -92,11 +93,13 @@ def test_advanced_buttons_of_an_empty_state(qapp):
     win.show()
     win.show_perspective("compare")
     pump(qapp)
-    refs = win.compare.empty_state.buttons[1]
-    assert refs.text() == "References…" and not refs.isVisible()      # References… is an Advanced control
+    es = win.compare.empty_state
+    # References… is an Advanced control: Easy offers what it can do (saved spectra, Check) instead
+    assert [b.text() for b in es.buttons] == ["Add saved spectra…", "Go to Check"]
     mode.set_advanced(True)
     pump(qapp)
-    assert refs.isVisible()
+    refs = es.buttons[1]
+    assert refs.text() == "References…" and refs.isVisible()
     mode.set_advanced(False)
     win.close()
 

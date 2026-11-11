@@ -42,8 +42,17 @@ Contents
   The save indicator reads *unsaved* while a change waits for the autosave (it is
   written within a second), *saved 12:03* once it is on disk, and *read-only* when the session cannot be saved (a
   session.json written by a newer AURORA, the project open in another AURORA, a folder that cannot be written); it is empty until the project has a session file.
+  A save made on an earlier day reads with its date (*saved 2026-11-08 15:16*). In Easy mode, once a project is open,
+  a muted *Next* link left of the indicator names the next step (*Next: Check – look at each spectrum in Check, then
+  press Save ticked → Compare.*; a click goes there; on that page it reads *Here: …*). It follows the *Getting started*
+  row of Home (2.6) and Settings can hide both.
+- **Read-only banner**: under the top bar, when AURORA cannot write in the beamtime folder (a locked drive, a share
+  without write access, a protected folder): *This beamtime folder is read-only for AURORA …*, with what to do (copy
+  the beamtime to this computer and open the copy) and **Dismiss**. Check then offers **Show in Compare without
+  saving** (5.1) and Report disables **Build the report** while its folder cannot be written (9.1).
 - *Rail* (left): the eight perspectives, **Home** to **Report**, in the order of a normal workflow; **Ctrl+1** …
-  **Ctrl+8** open them, and the tooltip of each rail button names its shortcut. **Settings** sits at the bottom.
+  **Ctrl+8** open them, and the tooltip of each rail button names its shortcut and what the page is for (*Survey
+  (Ctrl+2): the map of each holder: where the samples and the measured areas are*). **Settings** sits at the bottom.
   Every perspective keeps its state when you switch.
 - **Cards**: every panel has a title and a small **?** that opens this manual at the panel's section. **F1** (**Help
   on this page**) opens the section of the current perspective, or of the current tab in Fit and Maps.
@@ -56,12 +65,13 @@ Contents
 
 ### 1.1 Easy and Advanced mode
 
-AURORA starts in **Easy mode**, the basic path of John Bussey's SGM XAS GUI: open the beamtime, draw the samples in
-Reduce, check the spectra, compare them, fit them with LCF, build the report. Easy mode shows the controls of that
-path and states the values it uses where they matter (for example *± from 200 bootstrap draws* in Fit). **Advanced
+AURORA starts in **Easy mode**, the main steps with standard settings (the basic path of John Bussey's SGM XAS GUI):
+open the beamtime, outline the samples in Reduce, check the spectra, compare them, fit them with LCF, build the report.
+Easy mode shows the controls of that path in plain words (the expert term in parentheses: *beam intensity (I0)*,
+*electron yield (TEY)*) and states the values it uses where they matter (for example *± from 200 bootstrap draws* in Fit). **Advanced
 mode** shows every option and the Maps perspective. Three entry points switch the mode, and all three do the same:
 **View > Advanced mode**, the mode button at the right of the top bar, and **Ctrl+Shift+A**; the Settings check box
-*advanced mode* is a fourth. The status line confirms the mode (*Easy mode: the basic path of John Bussey's GUI* or
+*advanced mode* is a fourth. The status line confirms the mode (*Easy mode: the main steps with standard settings* or
 *Advanced mode: every option*), and the choice is kept for the next start.
 
 Switching never changes a value and never writes the session: a value chosen in Advanced mode stays in force in Easy
@@ -72,14 +82,14 @@ in Report, and the same chip over the Compare library).
 |---|---|---|
 | Home | the scan tree, the project summary and the scan analysis summary | the Kind column, the folder, kind and label rows, the sgm_report notes, the full table of h5 attributes, the SDD geometry, the full error of a failed open |
 | Survey | the holder, the plate map with footprints and zones, the zone tool bar (**Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**), the **Zone preview** (scan, **Open in Reduce**), the footprint legend, the sample-sheet rows, the sketch when the holder has one, **Load a sketch…** | channel, SDD, **/ I0**, **log**, **invert**, clip, **footprints**, **zones**, **Import zones…**, **Export zones…**, **Grid of zones…**; **Polygon** and **every stroke starts a new zone** in the tool bar; **Show** in the **Zone preview** |
-| Reduce | the four numbered steps: **Scans of holder holderA**, **XRF window** (preset, lo, hi), **Region** (the zone tool bar: **Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**; **New sample**, **Delete**, the sample label), **Reduce** (the settings line, **Add to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **Polygon** and **every stroke starts a new zone** in the tool bar, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview's **Show** menu |
-| Check | **Spectra to check** (**Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder holderA** (**Run the checks on holder holderA**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
+| Reduce | the four numbered steps: **Scans of holder holderA**, **Which X-rays to count** (preset, from, to, the caption), **Outline the sample** (the zone tool bar: **Draw**, **Erase**, **Move**, **Rectangle**, **Brush** and its size, **Lasso**, **Undo**, **Clear**; **New sample**, **Delete sample**, the sample name, the colour caption), **Send to Check** (one sentence of how the spectrum is made, **Add to Check**, **Go to Check**, **Load polygon…**); the **Preview** with **all scans of the sample** | **Load all**; **Polygon** and **every stroke starts a new zone** in the tool bar, the show row; spectrum of, **same range for all detectors**, for, **Remember windows for F K**; group, comment, **Send the zone's traces to Compare**, **Rules…**, **Propose zones**, **Stitch…**, **Save polygon…**; the per-scan settings cards with **Copy to…**; the preview's **Show** menu |
+| Check | **Spectra to check** (what AURORA ticked and what to look for, **Tick all**, **Untick all**, **Save ticked → Compare**) and **Preview of the selected spectrum** | **Scans of holder holderA** (**Run the checks on holder holderA**, **Run the checks on every holder**), **I0 of the holder's scans (per-pixel mean)**, **The four detectors on the selected zone**, the I0 explorer |
 | Compare | the columns Show, Fit, Label, Signal, Shift eV and Colour; **Add saved spectra…** (John Bussey's files only); **Figure size…**; **Export…**; x range; **Remove**, **▲** **▼**, **Show all**, **Hide all** | the Norm, Pre / Post, E0, E0 eV, Flatten, Spacing, Scale and Diag columns; **Add CSV…**, **References…**, **Save config…**, **Load config…**, **Remove sample**, **Rename**, **Duplicate**; default shift for new rows; the windows row; the plot options; the peaks |
-| Fit | the **LCF** tab with its fixed options stated; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
+| Fit | the **LCF** tab (**Mix of references (LCF)**) with its fixed options stated and the meaning of a coefficient; **Figure size…** | the **PCA / MCR-ALS**, **ITFA** and **Peaks** tabs; the LCF options (**force coefficients to sum to 1**, **allow negative coefficients**, bootstrap, resample) and the uncertainty and F-test detail |
 | Maps | not shown (**Ctrl+7** says *Maps is part of Advanced mode (Ctrl+Shift+A)*) | the whole perspective |
 | Report | **Options** (title, output, author, what the report covers, **Build the report**), **Check before building** (**Findings**, **Contents**), **Pages** | preset, PNG, **Appendix A: the four detectors per zone**, **Appendix B: plate maps with the zones**, the **Scope** tab, the page **zoom** |
 | Menus | every entry except those on the right | **File > Restore zones from a backup…**, **File > Re-reduce the stack with the project ROI bins**, **Edit > History…** (and **View > Go to > Maps**) |
-| Settings | appearance, text size, report author, the last project at start, advanced mode, the update check | the de-spike threshold, the two default normalisations, the map colour map, the reference spectra folder |
+| Settings | appearance, text size, report author, the last project at start, advanced mode, the update check, the getting-started guide | the de-spike threshold, the two default normalisations, the map colour map, the reference spectra folder |
 
 ### 1.2 Appearance, long tasks and exports
 
@@ -120,7 +130,8 @@ program, no permission) gives one calm dialog that names it.
 - **View**: **Advanced mode** (**Ctrl+Shift+A**), **Appearance**, **Text size**, **Previous holder** (**Ctrl+PgUp**),
   **Next holder** (**Ctrl+PgDown**), **Go to** (**Ctrl+1** … **Ctrl+8**; Maps only in Advanced mode), **Full screen**
   (**F11**; Control-Command-F on macOS, where F11 shows the desktop).
-- **Help**: **User guide**, **Manual**, **Tutorials**, **Installation and sharing**; **Help on this page** (**F1**);
+- **Help**: **User guide**, **Glossary** (every word AURORA uses, in plain language, 1.5), **Manual**, **Tutorials**,
+  **Installation and sharing**; **Help on this page** (**F1**);
   **Keyboard shortcuts** (**Ctrl+/**, generated from the window, so it always lists every shortcut); **What's this?**
   (**Shift+F1**, then click a control to read what it does); **Open the demo beamtime**; **Run self-test…** (checks
   every part of this installation on a synthetic beamtime in the background, with its progress and **Cancel** in the
@@ -193,6 +204,23 @@ Vocabulary used throughout:
 | line | an emission window in the SDD spectrum: F Kα, O Kα, … from `config/roi_bins.json`, the total XRF, or custom XRF windows |
 | I0 | the Au-mesh current (mcc channel 1); the photodiode is channel 2, TEY channel 4 |
 
+### 1.5 Glossary and the 'What is …?' lines
+
+**Help > Glossary** (Easy and Advanced mode) opens `GLOSSARY.md`: every word AURORA shows, in plain language, with
+why it matters and where it appears (beamtime, survey, stack, measured area, sample outline, pixel, absorption edge,
+E0, edge step, normalisation, I0, TEY, fluorescence, inverse yield, the detectors, saturation, the emission window,
+de-spike, the Check views and chips, LCF, R-factor, bootstrap, the report's appendices, …). It is generated from
+`aurora/glossary.py` (`python -m aurora.glossary --write`; `--check` fails when the file is stale), and the report's
+*How to read the figures* uses the same sentences.
+
+- The tooltip of a control whose text uses such a word ends with one *What is …?* line per word (for the Flags column
+  of Home: *What is a saturated detector? …* and *What is I0? …*); What's This (**Shift+F1**) names the glossary words
+  before the manual section.
+- Underlined words in the Easy captions (Reduce steps 2 to 4, Check, Fit) are links: hovering one shows its *What is
+  …?* line, a click (or **Tab** then **Enter**) opens the glossary at that word.
+- A small **?** next to a word that names a control opens the glossary there; like the cards' **?**, it is not counted
+  as a control.
+
 ## 2. Home
 
 Open a beamtime with **File > Open project…**, the **Open project…** button, **File > Open recent**, by dropping a
@@ -219,8 +247,8 @@ holders and scans:
 | Edge | the target edge read from the plan and the name (F K, O K, Se L3/L2, …) |
 | Status | complete, in progress, aborted, test |
 | Energies | first–last eV and the number of energy folders |
-| Points | pixels per energy |
-| Flags | from the sgm_report summary and AURORA's own checks when present: saturated SDDs, high count rate, I0 invalid |
+| Pixels | pixels in each map of the scan |
+| Flags | from the sgm_report summary and AURORA's own checks when present: saturated SDDs, high count rate, I0 invalid; Easy mode says it in words (*detectors 1 and 2 saturated*, *beam reading (I0) not usable*), the codes are in the cell's tooltip |
 
 Status rules: *complete* when every planned energy folder is there; *in progress* when folders are still arriving
 (touched within the last 25 min); *aborted* when fewer energies than planned and untouched for 25 min; *test* when
@@ -240,7 +268,7 @@ Double-click a scan to open it in Reduce. **Reload** rescans the folder (new sca
 without reopening). The sgm_report `summary.json` of a day, when present, feeds the flags and the zone proposals.
 
 The folder layout AURORA expects is in 2.3, the sample sheet (optional) in 2.4, and the SDD calibration and the
-other optional files in 2.5.
+other optional files in 2.5. Easy mode's *Getting started* panel and row are in 2.6.
 
 ### 2.1 Opening a project
 
@@ -287,6 +315,13 @@ Selecting a scan shows its **Scan** panel, the scan analysis summary John Bussey
 | Energy regions | the planned energies as regions of constant step, for example *680–685 eV in 0.5 eV steps; 685–700 eV in 0.1 eV steps; 700–730 eV in 0.2 eV steps* |
 | Energy folders | found vs planned, the planned energies without a folder, and the incomplete maps (a map with fewer points than the grid, SDD files shorter than the mcc file, or a missing file), checked in the background |
 | Flags | from the sgm_report summary and AURORA's own checks |
+
+In Easy mode the scan summary starts with a row *What it is* (*A map of this area at 66 energies (670–735 eV): outline a
+sample on it in Reduce to get its spectrum.*), leaves out the rows that were not recorded, and says pixels instead of
+points (*4 × 3 pixels, 0.250 × 0.250 mm apart*). The project summary names the calibration *detector energy scale*
+(*standard, 10 eV per channel* without `config/sdd_calibration.json`) and the ROI bins *emission windows*, and says what
+a missing optional file means (*none: type the sample names yourself*). The Edge column reads *F K-edge*, and a holder's
+aborted and test scans are *not used* (they are drawn on the Survey map, not offered in Reduce).
 
 A survey shows its energy instead of the time and energy rows. Advanced mode adds the folder, kind and label, the
 sgm_report notes, the full table of h5 attributes and the SDD geometry for the date.
@@ -404,6 +439,23 @@ calibration…** copies a chosen file into `config/` (checked first; the previou
 channel*, *config/sdd_calibration.json, incomplete (sdd2–sdd4 missing: nominal)* or *config/sdd_calibration.json
 (updated 2025-03-13 14:06:43)*.
 
+### 2.6 Getting started
+
+In Easy mode, before a project is open, the right panel of Home is *Getting started*: what AURORA does, what a
+beamtime folder looks like (a folder with `raw/<day>/<scan>`, the optional `config/` and sample sheet; 2.3 has the
+full layout), the seven
+steps in one line each, and links to the glossary and to the quick start of the user guide. While a folder is read,
+the panel over the tree says *Reading* with the folder's name and the count of scans read. Advanced mode lists the kinds of folder that open
+instead.
+
+Once a project is open, a row **Getting started** sits under the page title: the steps as chips (*✓ Open › ✓ Survey ›
+Reduce › …*, done ones ticked, the next one highlighted), the next step in one sentence and one button for it (*Go to
+Survey*, **Go to Reduce**, **Go to Check**, **Go to Compare**, *Go to Report*; **Reload** when the beamtime has no
+complete stack yet; **Open folder** once the report is built). It follows you: open a beamtime, look at the survey,
+outline a sample, **Add to Check**, **Save ticked → Compare**, look at Compare, build the report. **Hide** turns the
+row and the top bar's *Next* link off; Settings (*show the getting-started guide (Easy mode)*) turns them on again.
+Advanced mode never shows them.
+
 ## 3. Survey
 
 ![Survey](img/survey.png)
@@ -427,15 +479,19 @@ The **Survey map**: the plate map of the holder chosen in the **Holder** list (o
 - Right-click on a zone: **Rename…**, **Duplicate**, **Delete**, **Copy geometry**, **Zoom to zone**, and *Open … in
   Reduce* for each complete stack it covers (the scan named). Right-click on the map outside the zones: **Fit view**
   (the first view again), **Load a sketch…** and **Remove the sketch**.
-- Hovering prints x, y, the footprint and the zone under the cursor.
+- Hovering prints x, y, the footprint and the zone under the cursor. The line under the map says what the colour
+  shows (*Colour: fluorine X-rays (F Kα) counted by the detectors at 720.0 eV, divided by the beam intensity, log
+  scale (brighter = more signal) · 80 pixels, 0.20 mm apart*); the legend reads *measured areas (stacks): complete ·
+  stopped early (aborted) · in progress · beamline test*.
 - The first view of a holder holds the survey map and every footprint and zone of the holder; when some lie outside
   the survey map, the line under the map says so (*1 measured area lies outside the survey map*).
-- The cards on the right show **Zones of holder holderA**, the **Zone preview**, the **Sketch** when the holder has
-  one, and **Samples on holder holderA (sample sheet)**: the rows of the sample sheet that belong to the holder. At
-  the smallest window the column scrolls rather than squeezing the preview. Without a sample sheet the samples card
-  is one line, *No sample sheet: names are typed by hand.*, with a link to 2.4 (*How to add one*), **New sample
-  sheet…** and **Choose sample sheet…**; a sheet with no row for the holder says so and names the holders it lists
-  (*The sample sheet lists no sample on holder holderA (its holders: …)*).
+- The cards on the right show **Zones of holder holderA** (Easy: **Samples outlined on this holder**, with *No samples
+  outlined on this holder yet …* while it has none), the **Zone preview**, the **Sketch** when the holder has one, and
+  **Samples on holder holderA (sample sheet)**: the rows of the sample sheet that belong to the holder. At the
+  smallest window the column scrolls rather than squeezing the preview. Without a sample sheet the samples card is one
+  line, *No sample sheet: names are typed by hand.*, with a link to 2.4 (*How to add one*), **New sample sheet…** and
+  **Choose sample sheet…**; a sheet with no row for the holder says so and names the holders it lists (*The sample
+  sheet lists no sample on holder holderA (its holders: …)*).
 - The map opens on the channel of sgm_report's summary when there is one, else on the emission line of the edge most
   stacks of the holder measured (when the survey has that fixed line), else on the first fixed line, else on the
   total.
@@ -539,10 +595,11 @@ layout)*).
 Reduce is the zone tool: zones (samples) are drawn on the stack map of one scan, in mm, so that every scan of the
 holder that covers the area attaches to the zone automatically.
 
-In Easy mode the perspective shows the four steps of John Bussey's GUI as numbered cards: **1 · Scans of holder holderA**
-(the complete stacks of the holder chosen in the top bar), **2 · XRF window**, **3 · Region** and **4 · Reduce**, plus
-the **Preview**. Advanced mode shows the same cards without numbers (the third is titled **Stack map**, the fourth
-**Zone**) and every control. Switching never changes a value: a setting made in Advanced stays in force in Easy, and
+In Easy mode the perspective shows the four steps of John Bussey's GUI as numbered cards, in plain words: **1 · Scans
+of holder holderA** (the complete stacks of the holder chosen in the top bar, each row *09:27 · alpha_beta · F K-edge ·
+670–735 eV*), **2 · Which X-rays to count**, **3 · Outline the sample** and **4 · Send to Check**, plus the
+**Preview**. Advanced mode shows the same cards without numbers (titled **XRF window**, **Stack map** and **Zone**) and
+every control. Switching never changes a value: a setting made in Advanced stays in force in Easy, and
 the chip *advanced settings in use* says so (4.4).
 
 ### 4.1 Scans of the holder
@@ -614,7 +671,8 @@ appear at the end of the list.
 
 ### 4.3 Zones
 
-**New sample**, **Delete** and the **sample** label sit above the map, with the list of the holder's samples
+**New sample**, **Delete sample** and the **sample name** box sit above the map, with the list *Samples on this
+holder*
 (number, label, group, number of attached scans) beside it. Selecting a zone shows its outline on the map and its
 card on the right. **Propose zones**, **Stitch…**, **Load polygon…** and **Save polygon…** are in the zone card
 (Advanced; **Load polygon…** in Easy mode too, as John Bussey's step 3 had it).
@@ -631,7 +689,11 @@ holder's main line; then the saved rules, 4.9). The status line says, for exampl
 loaded)*, and the report includes every attached scan without **Load all**. When a stack is read from an sgm_report
 cache that holds fewer pixels than its .h5, the zone's pixels are recomputed on the cache's coordinates.
 
-**Delete** removes the selected zone without asking; the status line says *zone 3 deleted · Ctrl+Z to undo*.
+**Delete sample** removes the selected zone without asking (the zone's right-click menu calls it **Delete**); the
+status line says *zone 3 deleted · Ctrl+Z to undo*. In Easy mode a caption above the map says what its colour shows
+(*Colour: fluorine X-rays (F Kα) counted by the detectors, summed over the energies above the edge, divided by the beam
+intensity (brighter = more signal). Drag around your sample.*), and the caption under it counts the pixels (*Region: 1
+rectangle · 6 of 12 pixels of …*).
 
 **Propose zones** adds a first guess of zones to correct or delete: when the day has an sgm_report summary, the
 zones sgm_report found (one square of the right area per distinct name); otherwise the bright pads of the survey map
@@ -640,13 +702,20 @@ undo step, and the session is backed up just before.
 
 ### 4.4 The zone card
 
-- Easy mode (**4 · Reduce**): a read-only line of the settings used, for example *I0 mcc ch1 (Au mesh) · TEY mcc ch4 ·
-  zone mean (John Bussey's reduction) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (John Bussey's default: off) · SDD1-4 (SDD3 saturated, left out)*, and **Add to
-  Check** (**Ctrl+Return**), which queues the selected sample on the current scan for Check (disabled while the region
-  holds no point), and **Load polygon…** (4.3). A sample still called *zone 1* is saved under that name: the status
-  line says so (John Bussey's GUI asked for a label). Settings that do not exist yet are made from the Easy defaults.
-  A flagged SDD that is still in the sum is named (*SDD1 flagged saturated, still in the sum*), and so is an I0
-  flagged invalid that is still used.
+- Easy mode (**4 · Send to Check**): one sentence that says how the spectrum is made, with its words linked to the
+  glossary, for example *The spectrum is the F Kα X-rays counted in the step-2 window, averaged over the outlined
+  pixels and added over detectors 1, 2 and 4 (detector 3 saturated: left out), divided by the beam intensity (I0), and scaled so that the
+  rise at the edge is 1. Single-point spikes are removed. An electron-yield spectrum (TEY) is made the same way.* An
+  inverse yield starts *The spectrum is an inverse yield (IPFY): …*; a scan with every detector saturated says that only
+  the electron yield is usable. The exact settings are in its tooltip (*I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as
+  the earlier SGM XAS GUI) · fluorescence / I0, edge jump = 1 · de-spike k = 6 (off by default in the earlier SGM XAS
+  GUI) · SDD1-4 (SDD3 saturated, left out) · PFY F Kα*: the saved files hold the zone mean, John Bussey's reduction). **Add to Check**
+  (**Ctrl+Return**) queues the selected sample on the current scan for Check (disabled while the outline holds no
+  pixel); the status line counts what waits (*1 alpha on 09:27 added to Check (1 waiting)*) and the link **Go to
+  Check** appears next to the button. Settings that do not exist yet are made from the Easy defaults.
+  A sample still called *zone 1* is saved under that name: the status line says so (John Bussey's GUI asked for a
+  label). **Load polygon…** (4.3) sits next to **Add to Check**. A flagged SDD that is still in the sum is named
+  (*SDD1 flagged saturated, still in the sum*), and so is an I0 flagged invalid that is still used.
 - When a sample's settings differ from the Easy defaults (set in Advanced, or by a rule), Easy mode shows the chip
   *advanced settings in use*; its tooltip lists the fields (*fluorescence normalisation: / I0, maximum = 1; SDD3
   off*). **Reset to Easy defaults** rewrites them in one step (**Edit > Undo** brings them back). Switching modes
@@ -706,12 +775,16 @@ A plate measured as several overlapping stacks (tiles) becomes one stack with **
 
 ### 4.7 Preview
 
-Three linked panels for the current zone and selected scan: fluorescence (the four detectors and their sum, spikes
-marked), TEY, I0 (zone sum). **all scans of the sample** overlays every included scan; Easy mode keeps only this
+Three linked panels for the current zone and selected scan, each with its title: *Fluorescence of the sample (each
+detector and their sum)* (*Inverse yield (IPFY) of the sample* for an inverse yield), *Electron yield (TEY): the
+surface* and *Beam intensity (I0) during the scan*, in arbitrary units (*arb. units*). The legend sits at the bottom
+right (*SDD1* … *SDD4*, *sum of the detectors in use*, a red dot for *repaired points (spikes)* while the
+fluorescence panel shows some). **all scans of the sample** overlays every included scan; Easy mode keeps only this
 toggle, Advanced adds the **Show** menu: *SDDs*, *sum*, *TEY*, *I0* and *spikes*. The hover readout is the line under
-the plots. The preview follows a stroke while it is drawn, on the current scan (at most every 0.15 s; on a scan large
-enough to make it slow, without the de-spike, then only when you let go: the map's line then says *preview updates
-when you let go (large scan)*); the release draws the zone as written. The three panels keep room for readable ticks (about 300 px
+the plots; the line under it says what the grey bands are (the energy ranges before and after the edge used to scale
+the spectrum) while they are drawn. The preview follows a stroke while it is drawn, on the current scan (at most every
+0.15 s; on a scan large enough to make it slow, without the de-spike, then only when you let go: the map's line then
+says *preview updates when you let go (large scan)*); the release draws the zone as written. The three panels keep room for readable ticks (about 300 px
 at Normal text, the fluorescence panel at least 110 px): at the smallest window the page scrolls rather than squeezing
 them. A shorter preview (the Survey's **Zone preview**) shows the fluorescence only; below 260 px the TEY and I0 panels
 hide so the fluorescence takes the height (*TEY and I0 panels* in the **Show** menu brings them back). An empty
@@ -723,20 +796,24 @@ In the coherent de-spike mode the sum may carry spike markers of its own.
 
 ### 4.8 XRF windows
 
-Step 2 of John Bussey's GUI. The **XRF window** card shows the emission spectrum (log scale) of the stack summed over
-its energies (*the whole stack*); in Advanced, **spectrum of** also offers the *survey*, the pixels *inside the
-region*, and the survey points inside the selected sample (*survey, inside the zone*: John Bussey's "XRF from survey,
-only inside region"; the whole survey, and why, when the zone holds no survey point). The first time, the raw spectra are read in the background (**Cancel** in the progress strip) and cached under
+Step 2 of John Bussey's GUI. The **XRF window** card (Easy: **Which X-rays to count**) shows the emission spectrum (log
+scale) of the stack summed over its energies (*the whole stack*); in Easy mode it shows the pixels of the selected
+sample once it is outlined (*The X-rays inside 1 alpha: 12 pixels, all energies.*), and a caption says what the plot
+is and to keep the preset of your element. In Advanced, **spectrum of** offers the whole stack, the *survey*, the
+pixels *inside the region*, and the survey points inside the selected sample (*survey, inside the zone*: John Bussey's
+"XRF from survey, only inside region"; the whole survey, and why, when the zone holds no survey point). When the
+spectrum is an inverse yield (a line of another element than the edge's), Easy mode adds a note: *O Kα belongs to
+oxygen, not to the edge element (fluorine): the spectrum is an inverse yield (IPFY) …*. The first time, the raw spectra are read in the background (**Cancel** in the progress strip) and cached under
 `.aurora/cache/<day>/<scan>/_emission_cache.npz`.
 
-- **preset**: every fixed line of `config/roi_bins.json` (*F Kα (fixed bins)*; a line the stack was reduced without
-  is summed from the raw spectra with the same bins), the *line of the edge* (the xraydb emission line ± 1.5 σ at
-  each detector's calibrated channel, σ from roi_bins.json, the rule of sgm_report's fixed bins, so a line of
-  roi_bins.json gets its own bins; without an SDD calibration it is offered on the nominal 10 eV per channel,
-  *nominal calibration, check the peak*, when neither a fixed line of that name nor John Bussey's 60:83 holds the
-  edge's line, for example O Kα), *John Bussey's 60:83
-  (F Kα)* when no fixed line or calibration gives the edge's line (his GUI's default window, which holds F Kα at the
-  nominal 10 eV / channel; not offered for an edge whose line it does not hold), and *custom*. Without roi_bins.json a
+- **preset**: every fixed line of `config/roi_bins.json` (*F Kα (fixed window)*, *all X-rays (total XRF)*; a line
+  the stack was reduced without is summed from the raw spectra with the same bins), the *line of the edge element*
+  (the xraydb emission line ± 1.5 σ at each detector's calibrated channel, σ from roi_bins.json, the rule of
+  sgm_report's fixed bins, so a line of roi_bins.json gets its own bins; without an SDD calibration it is offered on
+  the nominal 10 eV per channel, *nominal calibration, check the peak*, when neither a fixed line of that name nor the
+  standard 60:83 holds the edge's line, for example O Kα), *standard 60:83 (F Kα)* when no fixed line or calibration
+  gives the edge's line (John Bussey's GUI's default window, which holds F Kα at the nominal 10 eV / channel; not
+  offered for an edge whose line it does not hold), and *custom (drag the band on the plot)*. Without roi_bins.json a
   stack has the total XRF only, which holds every emission line, not just the edge's: the line below the boxes says
   so, and the card says *No fixed emission lines for this beamtime: AURORA uses the total fluorescence. To follow one
   element, drag the window over its peak.*
@@ -747,10 +824,12 @@ only inside region"; the whole survey, and why, when the zone holds no survey po
   elemental map. A line of that name already there is replaced only after a question. Not offered in a protected
   folder.
 - Four draggable windows, one per detector, in the series colours and dashes. **same range for all detectors**
-  (Advanced, on by default): dragging one, or a change of **lo** or **hi**, moves all four by as many channels (windows that differ per detector, such as a line's fixed bins, keep their offsets; Easy mode always works so, and the line below the boxes names the four windows); ticking it gives all four the shown window; untick it to set each detector apart (**for** chooses the
+  (Advanced, on by default): dragging one, or a change of **from** or **to**, moves all four by as many channels (windows that differ per detector, such as a line's fixed bins, keep their offsets; Easy mode always works so, and the line below the boxes names the four windows); ticking it gives all four the shown window; untick it to set each detector apart (**for** chooses the
   detector the boxes edit).
-- **lo** and **hi** in channels; hi is excluded, John Bussey's convention (60 and 83 sum channels 60 to 82). The line
-  below gives the eV equivalent from the calibration, or *10 eV/ch nominal* without one.
+- **from** and **to** in detector channels; to is excluded, John Bussey's convention (60 and 83 sum channels 60 to
+  82). The line below gives the eV equivalent from the calibration: Easy mode *All four detectors: 600–740 eV
+  (channels 60 to 73, 10 eV per channel, not calibrated)*, Advanced *SDD1: channels 60:74 = 600–740 eV (10 eV/ch
+  nominal)*.
 - The chosen window goes into the settings of the selected sample's scans of the same edge (one edit) and is used by
   new samples of the holder. A fixed line keeps the stack's reduced bins; custom windows (and the line of the edge)
   are summed from the raw spectra, per detector and energy, and cached under `.aurora/cache/<day>/<scan>/_xrf_windows/`.
@@ -783,26 +862,43 @@ four detectors on a zone and the I0 explorer. On a short window in Advanced mode
 
 ### 5.1 Spectra to check
 
-The card **Spectra to check** holds one row per sample region (zone) and scan:
+The card **Spectra to check** holds one row per sample and scan. In Easy mode two lines above the table say what
+AURORA ticked (*AURORA ticked Looks OK where its own checks found no problem; untick any spectrum that looks wrong to
+you.*) and what to look for (one rise at the edge, then a roughly level curve; four detector curves of the same shape;
+no single point far off the curve; a flat or very noisy curve means the outline missed the sample).
 
 | Column | Meaning |
 |---|---|
 | Sample | the zone drawn in Reduce |
 | Scan | HH:MM and sample label of the scan |
-| Zone pts | measurement points inside the region / points of the scan |
-| Bad pts | energies flagged bad: spikes (interpolated), I0 below 20 % of its median, incomplete energies |
+| Pixels | pixels of the scan inside the outline, of all its pixels (*6 of 12*) |
+| Bad energies | energies repaired or left out: a spike (replaced by the value of its neighbours), a beam intensity below 20 % of its median, a missing map |
 | Messages | chips *✓ ok*, *! check*, *✗ bad* (hover a chip for its messages), then the most important message |
 | Looks OK | the spectrum is saved by **Save ticked → Compare** and goes into the report (it is the scan's *include* tick) |
 
-The messages are the checks of John Bussey's GUI, ported: the region contains 0 measurement points (bad); only N
-points, noisy (fewer than 3); a ticked SDD with no finite values or a signal zero everywhere (bad: check its window,
-or leave a dead detector out of the sum on the scan card in Advanced mode; John Bussey's GUI only warned of a zero
-signal);
+The messages are the checks of John Bussey's GUI, ported, in plain words with the expert term in parentheses (the
+same text in both modes; Advanced mode adds where a flag came from, *(sgm_report)* or *(AURORA check)*): the outline
+holds no pixel of the scan (bad); only N pixels, noisy (fewer than 3); a ticked SDD with no finite values or a signal
+zero everywhere (bad: check its window in step 2 of Reduce, or leave a dead detector out of the sum on the scan card in
+Advanced mode; John Bussey's GUI only warned of a zero signal);
 N missing energy points; I0 zero or missing at N energies; I0 varying by more than a factor 3 over the scan; TEY
 without finite values; more than 10 % of the points flagged bad. AURORA adds the scan's flags with their source (SDD
 saturated, high count rate, I0 invalid; from sgm_report or from AURORA's own check) and a note when spikes were found
 within three energy steps of the edge. The thresholds (fewer than 3 points, a factor 3, more than 10 %) are those of
 John Bussey's GUI.
+
+The Messages column shows the first ✗ bad message, else the first ! check one, else the inverse-yield note
+(*inverse yield (IPFY): the spectrum is the beam intensity ÷ the O Kα counts; the detector curves dip at the edge
+while the spectrum rises*), else *no problem found*. A sum left without any detector (all saturated) is a ! check row
+that stays ticked: its electron-yield spectrum is valid. The preview's **view** list reads *the four detectors (spikes
+repaired)*, *sum of the detectors, bad energies marked*, *beam intensity (I0) and electron yield (TEY)*, *fluorescence
+and TEY divided by the beam (I0)* and *the same, scaled 0 to 1*; in Easy mode the line under it names the window
+(*F Kα window*), and where the counts were read is its tooltip.
+
+When the beamtime folder cannot be written, **Save ticked → Compare** writes nothing and says so (*Not saved: this
+beamtime folder is read-only …*), and **Show in Compare without saving** adds the ticked spectra to Compare in memory
+(they are lost when AURORA closes). After a save the note reads *1 spectrum saved in processed/reduced/ and added to
+Compare (2 rows) · Open folder · Go to Compare*, the file names in its tooltip.
 
 A row with a bad message starts unticked. A row whose scan cannot be read shows *✗ bad* with the reason (and the error
 is reported once). **Tick all** and **Untick all** change every row. Right-click a row for *Show the region in Reduce*
@@ -893,7 +989,8 @@ Unlike his GUI's default (its *Detect spikes* is off), the files of Easy mode ho
 
 ![Compare](img/compare.png)
 
-A **Library** of spectra, each row one trace, a **Stacked plot** and the **Diagnostics of the selected row**.
+A **Library** of spectra, each row one trace, a **Stacked plot** and the **Diagnostics of the selected row** (Easy:
+**How this spectrum was scaled**).
 
 The library belongs to the project: it is saved in `<project>/.aurora/library.json` (rows, files, settings) and
 `library_spectra.npz` (the traces without a file of their own: zone traces from Reduce, differences) a moment after
@@ -929,7 +1026,7 @@ defaults** rewrites them (a trace normalised already, such as a zone trace from 
 | Show | plotted |
 | Fit | the row is available in Fit |
 | Label | editable; **Rename** and **Duplicate** act on the selected rows; ink text with a swatch of the trace's colour and dash |
-| Signal | a list of the file's signals. John Bussey's files give *sdd-scaled* (the four SDD signals each scaled to 0–1 by their own minimum and maximum, summed, then divided by I0: his fluorescence signal), *sdd_total* (the summed counts / I0) and *TEY* (total electron yield / I0); other files give their columns as named (sdd1…, PFY_…_over_I0) |
+| Signal | the signal of the file the row plots, in words: *fluorescence* (John Bussey's *sdd-scaled*: the four SDD signals each scaled to 0–1 by their own minimum and maximum, summed, then divided by I0), *fluorescence, plain sum* (*sdd_total*, the summed counts / I0), *electron yield (TEY)* (total electron yield / I0), *inverse yield (IPFY)*, *detector 1 (SDD1)*; other files give their columns as named (sdd1…, PFY_…_over_I0); Advanced mode adds the file's column name (*fluorescence (sdd-scaled)*); a cell can be typed as the word or the column name |
 | Norm | larch (two lines around E0), legacy (constant pre / post means over absolute windows), tey_line (pre-edge line only), none (a list) |
 | Shift eV | added to the energy axis (calibration offsets) |
 | Pre lo / hi, Post lo / hi | the fitting windows: eV from E0 for larch and tey_line; absolute eV for legacy, where a blank window reads *auto 15 %* / *auto 20 %* (the first 15 % and the last 20 % of the scan, John Bussey's defaults) |
@@ -971,7 +1068,16 @@ are kept with the library.
 
 The diagnostics panel shows the raw signal of the selected row with its pre-edge and post-edge lines, E0 (dotted) and
 the tabulated edge (dashed); its title gives the normalisation, E0 and how it was found, and the edge step; the line
-under it names the tabulated edge and any note.
+under it names the tabulated edge and any note. Easy mode says it in words: the title *CaF2 · fluorescence · edge at
+700.8 eV · edge step 1.7*, the note *Edge position (E0): 700.8 eV, where the spectrum rises fastest; 4.1 eV above the
+table value for the F K-edge (696.7 eV, dashed line). Scaled so that …*; a row that could not be scaled reads *Edge
+step: not measured: no energies after the edge in the standard ranges …*.
+
+In Easy mode no row is dropped silently: a row that cannot be scaled the standard way (its energies do not reach far
+enough before or after the edge) is drawn scaled 0 to 1, dashed, with *(not scaled)* in its label, and the status line
+says why (*1 alpha could not be scaled the standard way: its energies (680–692 eV) do not reach far enough after the
+edge (F K-edge at about 697 eV). It is drawn scaled 0 to 1 instead (dashed).*). Advanced mode leaves it out and says
+*normalisation failed (all NaN) for: …: adjust the pre / post windows*.
 
 **Figure size…** opens **Export figure: size and formats**, which sets the size of every exported Compare and Fit
 figure (John Bussey's Plot size): **width** and **height** in inches (3.5 × 4.5 by default; presets **3.5 in (one
@@ -1008,11 +1114,21 @@ in Compare (6.4).
 
 ### 7.1 LCF (linear combination fit)
 
-The card **Linear combination**: **target**, the ticked **components (tick)**, **fit range (eV)**, **force coefficients to sum to
+The card **Linear combination** (Easy: **Mix of references (LCF)**, with a caption that says what LCF does):
+**target**, the ticked **references (tick)** (Advanced: **references / components (tick)**), **fit range (eV)**, **force coefficients to sum to
 1** and **allow negative coefficients** (Advanced), **bootstrap** draws and **resample** (Advanced), **Run LCF**. When
 the fit range boxes are blank, LCF uses the Compare x range (shown in the boxes as *670 (Compare)*), else the whole
 common range. Easy mode states the options in force in a read-only line, for example *coefficients sum to 1 · no
-negative coefficients · ± from 200 bootstrap draws · fit range: the Compare x range when the boxes are blank · John Bussey's GUI: sum free, negatives allowed, 685–705 eV*. These are AURORA's defaults: John Bussey's LCF tab left the sum free, allowed negative coefficients and fitted 685–705 eV.
+negative coefficients · ± from 200 bootstrap draws · fit range: the Compare x range when the boxes are blank · the
+earlier SGM XAS GUI: sum free, negatives allowed, 685–705 eV*. These are AURORA's defaults: John Bussey's LCF tab
+left the sum free, allowed negative coefficients and fitted 685–705 eV. Under
+the coefficients, Easy mode says what they mean: each coefficient is the share of the target's signal that looks like
+that reference, roughly the share of the element's atoms in that kind of surroundings, not a weight or mole fraction
+of the compound; ± is the spread over the bootstrap refits; a smaller R-factor means a closer fit. Its result line
+reads *R-factor 5.8e-05 (smaller = closer fit) · coefficients sum to 1.000 · fitted over 660.0–740.0 eV*; Advanced
+mode gives *χ²ν … = χ² … / (N … − p … free: 2 references, sum fixed to 1)*. The lists show the signal in words (*NaF
+[fluorescence]*); the files keep the column names (*NaF [sdd-scaled]*). A row ticked Fit that could not be scaled in
+Compare is listed greyed, not offered.
 
 The fit is weighted (1/σ²): σ is the spectrum's own uncertainty when it carries one, otherwise it is estimated from the
 target's point-to-point scatter (second differences), and the result says which. Results (**Coefficients**): the
@@ -1180,9 +1296,15 @@ three cards: **Options**, **Check before building** and **Pages**.
   **Browse…**). Each build goes into its own folder inside it, so nothing earlier is overwritten (9.3). A folder that
   cannot be written (read-only, protected) gives one calm message that names it and points to **Browse…**.
 - A muted line names the author: *Author: A. Name, from Settings* or *Author: A. Name, from the system account*, or *No
-  author line (Settings > report author)*.
-- Easy mode states what the report contains, read-only, for example *The report covers every holder and all groups,
-  with Appendix A (the four detectors) and Appendix B (plate maps); Final preset, figures at 600 dpi.* A choice made in
+  author line (Settings > report author)*; Easy mode: *Author: A. Name (from your computer account; change it in
+  Settings > report author)*.
+- Easy mode states what the report contains, read-only, for example *The report will hold one page per sample group
+  (all groups, every holder) with the spectra ticked Looks OK, then each detector separately (Appendix A), the holder
+  maps with your outlines (Appendix B) and the quality notes (Appendix C). Figures at print quality (600 dpi). Compare
+  and Fit results are not in it: use Export… in Compare and Fit.* (Advanced: *The report covers every holder and all
+  groups, with Appendix A (the four detectors) and Appendix B (plate maps); Final preset, figures at 600 dpi.*)
+- When the output folder cannot be written (a protected or read-only folder), **Build the report** is disabled and
+  the card says *The report folder cannot be written: choose another with Browse…*. A choice made in
   Advanced mode stays in force and is named there (*chosen in Advanced mode*).
 - Advanced mode adds **preset** (*Final* or *Draft*), **PNG** (the figure resolution, in dpi), **Appendix A: the four
   detectors per zone** and **Appendix B: plate maps with the zones**.
@@ -1203,7 +1325,10 @@ findings are not counted; a note, shown with the muted dot, drops no data and is
 - **Findings** (the number of open findings in the tab title). Each row has an icon, the Finding, an **Ignore** tick
   and a **Show** button that opens Reduce on that holder and zone (and selects the scan when the finding names one).
   Double-clicking a row, or Enter, does the same. An ignored finding is dimmed, sorted last, and remembered with the session
-  (session.json `ui` block, key `preflight_ignored`). The check looks for:
+  (session.json `ui` block, key `preflight_ignored`). Several findings of one kind are one row in plain words, for
+  example *5 measurements (complete stacks) have no sample outlined: they will not be in the report*, with the findings
+  under it (collapsed when there are more than three; the kind's title is its tooltip), the kinds of the holder on
+  screen first. The check looks for:
   - zones without a group (they go under *Ungrouped*);
   - zones without an included scan (left out);
   - included scans on which the zone has no pixel, and scans not found in the project (left out);
@@ -1275,7 +1400,7 @@ each entry no longer built and each new one.
 ## 10. Settings
 
 The Settings dialog (**Settings** on the rail, or **File > Settings…**) holds the few defaults that are not per scan.
-Its **Help** button opens this section. Easy mode shows the first six rows; Advanced mode adds the others.
+Its **Help** button opens this section. Easy mode shows the first seven rows; Advanced mode adds the others.
 
 | Setting | Effect |
 |---|---|
@@ -1283,7 +1408,8 @@ Its **Help** button opens this section. Easy mode shows the first six rows; Adva
 | text size | normal, large or larger (13, 15 or 17 px); applied at once (also **View > Text size**) |
 | report author | printed in the page footers and the PDF metadata. Blank by default: AURORA then uses the full name of the system account (Windows display name, macOS / Linux account name); when the system has none, the first report build asks once (blank or Cancel builds without an author line, a name typed there is kept here) |
 | open the last project at start | on by default; an unreachable last project gives a calm note on Home and never blocks the start |
-| advanced mode | every option (Advanced) or the basic path of John Bussey's GUI (Easy, the default); also **View > Advanced mode**, the top-bar button and **Ctrl+Shift+A** |
+| advanced mode | every option (Advanced) or the main steps with standard settings (Easy, the default); also **View > Advanced mode**, the top-bar button and **Ctrl+Shift+A** |
+| show the getting-started guide (Easy mode) | on by default: the *Getting started* row on Home and the *Next* link of the top bar (2.6); **Hide** on the row turns it off, this row on again |
 | check GitHub for a newer AURORA at start (once a day) | off by default; when on, AURORA asks GitHub at most once a day and shows a notice when a newer release exists (nothing is downloaded); **Help > Check for updates…** asks at any time |
 | de-spike threshold k (Advanced) | default for new zone settings, in MADs (6) |
 | default fluorescence normalisation, default TEY normalisation (Advanced) | defaults for new zone settings (/ I0, edge jump = 1) |
@@ -1390,6 +1516,17 @@ beamtime's own reduction, and the Reduce map line names its source *sgm_report c
 Re-reduce the stack with the project ROI bins** (Advanced) reduces that stack from `raw/` with the project's windows.
 
 ## 13. Troubleshooting
+
+When a result looks wrong (the quick start of the user guide has the same table):
+
+| What you see | What it means | What to do |
+|---|---|---|
+| a flat or very noisy spectrum | the outline missed the sample, or holds very few pixels | draw the outline again over a bright part of the map |
+| a curve drawn dashed in Compare, *not scaled* | its energies do not reach far enough before or after the edge | nothing to fix in AURORA: the scan did not cover the edge; it is shown scaled 0 to 1 |
+| *inverse yield (IPFY)* in Check, and detector curves that dip | the window counts another element's X-rays; the spectrum is computed as beam ÷ counts and rises at the edge | normal; choose the line of the edge element in step 2 to count its own X-rays |
+| detector curves of different heights | the four detectors see the sample from different angles | normal when their shapes agree |
+| *saturated* detectors, or *no detector left in the sum* | too many X-rays for those detectors | use the electron-yield (TEY) spectrum of that scan |
+| *read-only* in the top bar, a banner about a read-only folder | AURORA cannot write in the beamtime folder | copy the beamtime folder to this computer and open the copy |
 
 - **Plots are empty, maps are blank**: PySide6 older than 6.10 paints no pyqtgraph items. The installers ship a
   recent version; from source, install in a fresh environment (`INSTALL.md`).

@@ -17,7 +17,8 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPersistentModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QTimer, QUrl, Qt
+from PySide6.QtCore import (QEvent, QPersistentModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QTimer, QUrl, Qt,
+                            Signal)
 from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
                                QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
@@ -25,8 +26,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav
-from aurora.app.help_text import explain_all, header_tips, labelled
-from aurora.app.mode import mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
+from aurora.app.help_text import explain, explain_all, header_tips, labelled, say
+from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.vocab import plural
 from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, fit_height,
@@ -74,6 +75,8 @@ class _ShowDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
         from aurora.app.theme import TOKENS
         super().paint(painter, option, index)            # the row's background and selection (the cell has no text)
+        if not index.siblingAtColumn(0).data(Qt.UserRole):  # a kind's parent row: no finding to show
+            return
         down = self._pressed is not None and self._pressed == index
         b = QRectF(self.button_rect(option.rect, option.font)).adjusted(0.5, 0.5, -0.5, -0.5)
         painter.save()
@@ -88,6 +91,8 @@ class _ShowDelegate(QStyledItemDelegate):
 
     def editorEvent(self, event, model, option, index) -> bool:
         kind = event.type()
+        if not index.siblingAtColumn(0).data(Qt.UserRole):  # a kind's parent row has no button
+            return super().editorEvent(event, model, option, index)
         if kind not in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick):
             return super().editorEvent(event, model, option, index)
         inside = (event.button() == Qt.LeftButton
@@ -138,7 +143,38 @@ def _in_or_above(path, folder: Path) -> bool:
     return p == f or f in p.parents or p in f.parents
 
 
+OUT_READ_ONLY = "The report folder cannot be written: choose another with Browse…"
+KIND_ROLE = int(Qt.UserRole) + 21               # the kind of a parent row of the Findings tree
+# what several findings of one kind mean, in plain words ('{n}' is their number; the kind title is the row's tooltip)
+FINDING_PLAIN = {
+    "uncovered_stack": "{n} measurements (complete stacks) have no sample outlined: they will not be in the report",
+    "no_included": "{n} samples have no scan kept for the report: they are left out",
+    "no_pixels": "{n} outlines hold no pixel of a scan kept for them: that scan is left out",
+    "no_settings": "{n} scans cover an outline but were never sent to Check: they are left out",
+    "saturated_ticked": "{n} spectra still add a saturated detector",
+    "good_i0_empty": "{n} scans ask for the average beam of the good scans, but no scan is marked good (Advanced: "
+                     "Check)",
+    "scan_missing": "{n} scans named in the outlines are not in this beamtime",
+    "ungrouped": "{n} samples have no group (groups come from the sample sheet)",
+    "label_not_in_sheet": "{n} sample names are not in the sample sheet",
+    "duplicate_label": "{n} sample names appear on several holders of one group",
+    "sheet_row_no_zone": "{n} samples of the sample sheet have no outline yet",
+}
+
+
+def finding_plain(kind: str, n: int) -> str:
+    """The parent row of n findings of one kind ('12 measurements (complete stacks) have no sample outlined: …')."""
+    text = FINDING_PLAIN.get(kind)
+    if text is None:
+        return f"{n} × {core_report.FINDING_KINDS.get(kind, kind)}"
+    return text.format(n=n)
+SUBTITLE = {False: "One PDF with every kept spectrum, one page per sample group.",
+            True: "the final report, organised by sample group, from the zones and their settings"}
+
+
 class ReportPerspective(QWidget):
+    built = Signal(str)                   # the folder of a finished build (the getting-started guide)
+
     def __init__(self, session: Session, parent: QWidget | None = None):
         super().__init__(parent)
         self.session = session
@@ -154,7 +190,7 @@ class ReportPerspective(QWidget):
         root.setSpacing(12)
         head = QHBoxLayout()
         h1 = QLabel("Report"); h1.setObjectName("h1")
-        sub = ElidedLabel("the final report, organised by sample group, from the zones and their settings", Qt.ElideRight)
+        self.subtitle = sub = ElidedLabel(SUBTITLE[False], Qt.ElideRight)
         sub.setObjectName("muted")
         head.addWidget(h1); head.addWidget(sub, 1)
         root.addLayout(head)
@@ -173,6 +209,9 @@ class ReportPerspective(QWidget):
         left.body.addLayout(r2)
         self.author_line = QLabel(""); self.author_line.setObjectName("muted"); self.author_line.setWordWrap(True)
         left.body.addWidget(self.author_line)
+        self.out_note = QLabel(OUT_READ_ONLY); self.out_note.setObjectName("muted"); self.out_note.setWordWrap(True)
+        self.out_note.hide()                           # the output folder cannot be written (Build is disabled)
+        left.body.addWidget(self.out_note)
 
         self.scope_box = QWidget()                     # preset, dpi and appendices: Advanced
         sl = QVBoxLayout(self.scope_box); sl.setContentsMargins(0, 0, 0, 0)
@@ -226,6 +265,7 @@ class ReportPerspective(QWidget):
         left.body.addWidget(self.status)
         left.body.addStretch(0)                        # takes the room of the hidden options in Easy mode only
         self.left_split.addWidget(fit_height(left))   # the wrapped scope and author lines keep their height
+        self.options_card = left
 
         check = Card("Check before building", help_anchor="92-check-before-building")
         self.totals = QLabel("no project open"); self.totals.setWordWrap(True)
@@ -311,7 +351,7 @@ class ReportPerspective(QWidget):
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="report",
                                       parent=self.body)
-        self.zone_state = EmptyState("No zone yet: the report is built from the zones drawn in Reduce.",
+        self.zone_state = EmptyState(say("report.zone_state"),
                                      [("Go to Reduce", lambda: nav.go(self, "reduce"))], icon="report", parent=self.body)
         self.groups.setAccessibleName("groups to include")
         self.holders.setAccessibleName("holders to include")
@@ -349,6 +389,12 @@ class ReportPerspective(QWidget):
         on_mode_changed(self, lambda adv: adv or self.zoom.setCurrentIndex(0), call_now=False)     # Easy: fit width
         mark_advanced_tab(self.check_tabs, self.scope_page)
         mark_easy(self.scope_line)
+        on_mode_changed(self, lambda _a: (self.subtitle.setText(SUBTITLE[is_advanced()]), self._scope_text(),
+                                          self._author_text(),
+                                          self.zone_state.set_content(say("report.zone_state"),
+                                                                      [("Go to Reduce", lambda: nav.go(self, "reduce"))])),
+                        call_now=False)
+        self.out_dir.textChanged.connect(lambda _t: self.update_actions())
         self._scope_text()
         self.update_actions()
 
@@ -359,8 +405,11 @@ class ReportPerspective(QWidget):
         has = self.session.project is not None
         busy = jobs.of(self).job("report") is not None
         zones = self.has_zones()
-        set_enabled(self.build_btn, has and zones and not busy,
-                    NO_PROJECT if not has else ("the report is being built" if busy else "draw a zone in Reduce first"))
+        blocked = has and self.out_blocked()
+        set_enabled(self.build_btn, has and zones and not busy and not blocked,
+                    NO_PROJECT if not has else ("the report is being built" if busy else
+                                                OUT_READ_ONLY if blocked else "draw a zone in Reduce first"))
+        self.out_note.setVisible(blocked)
         built = self._result is not None
         pages = len(self._result.page_pngs) if built else 0
         set_enabled(self.prev_btn, built and self._page > 0, "build the report first" if not built else "this is the first page")
@@ -370,6 +419,24 @@ class ReportPerspective(QWidget):
         set_enabled(self.current_holder_btn, has and self.session.current_holder is not None, NO_PROJECT)
         self.empty_state.set_shown(not has)
         self.zone_state.set_shown(has and not zones)
+
+    def out_blocked(self) -> bool:
+        """The output folder cannot be written: a protected folder (raw/, AURORA_PROTECT_DIRS) or a refused write."""
+        text = self.out_dir.text().strip()
+        if not text:
+            return False
+        from aurora.core.io.safety import is_protected
+        out = Path(text)
+        try:
+            if is_protected(out):
+                return True
+        except (OSError, ValueError):
+            return False
+        probe = out
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        import os
+        return probe.exists() and not os.access(probe, os.W_OK)
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
@@ -405,9 +472,32 @@ class ReportPerspective(QWidget):
         apps = [name for name, box in (("Appendix A (the four detectors)", self.appendix), ("Appendix B (plate maps)", self.maps))
                 if box.isChecked()]
         preset = "Final" if self.preset_key() == "final" else "Draft"
-        self.scope_line.setText(f"The report covers {holders} and {groups}"
-                                + (", with " + " and ".join(apps) if apps else ", without Appendix A or B")
-                                + f"; {preset} preset, figures at {self.dpi.value()} dpi.")
+        if is_advanced():
+            self.scope_line.setText(f"The report covers {holders} and {groups}"
+                                    + (", with " + " and ".join(apps) if apps else ", without Appendix A or B")
+                                    + f"; {preset} preset, figures at {self.dpi.value()} dpi.")
+            return
+        parts = []
+        if self.appendix.isChecked():
+            parts.append("each detector separately (Appendix A)")
+        if self.maps.isChecked():
+            parts.append("the holder maps with your outlines (Appendix B)")
+        parts.append("the quality notes (Appendix C)")
+        then = ", ".join(parts[:-1]) + f" and {parts[-1]}" if len(parts) > 1 else parts[0]
+        quality = "print quality" if self.dpi.value() >= 300 else "draft quality"
+        self.scope_line.setText(f"The report will hold one page per sample group ({groups}, {holders}) with the spectra "
+                                f"ticked Looks OK, then {then}. Figures at {quality} ({self.dpi.value()} dpi). Compare "
+                                "and Fit results are not in it: use Export… in Compare and Fit.")
+        QTimer.singleShot(0, self, self.fit_options)
+
+    def fit_options(self) -> None:
+        """The Options card as tall as its wrapped lines at its width (the splitter ignores word wrap)."""
+        from aurora.app.widgets import fit_to_content
+        fit_to_content(getattr(self, "options_card", None))
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        QTimer.singleShot(0, self, self.fit_options)
 
     def _project_changed(self, project) -> None:
         self.out_dir.setText(str(project.root / "reports" / "aurora"))
@@ -521,7 +611,11 @@ class ReportPerspective(QWidget):
 
     def _author_text(self) -> None:
         name, source = self.author()
-        if name:
+        if name and not is_advanced():
+            self.author_line.setText(f"Author: {name} (Settings > report author)" if source == "Settings" else
+                                     f"Author: {name} (from your computer account; change it in Settings > report "
+                                     "author)")
+        elif name:
             self.author_line.setText(f"Author: {name}, from {source}")
         else:
             self.author_line.setText("No author line (Settings > report author)")
@@ -595,7 +689,9 @@ class ReportPerspective(QWidget):
         self._fill_plan()
 
     def _plan_failed(self, text: str) -> None:
-        self.totals.setText("the check before building could not run: " + (text.strip().splitlines() or ["?"])[-1])
+        from aurora.app.widgets import plain_error
+        root = self.session.project.root if self.session.project is not None else None
+        self.totals.setText("the check before building could not run: " + plain_error(text, root))
 
     def _plan_end(self, _state: str) -> None:
         if self._plan_again:
@@ -640,8 +736,13 @@ class ReportPerspective(QWidget):
             it.setData(SHOW_COL, Qt.AccessibleTextRole, "Show in Reduce")
             self._tone_finding(it, f.id in ign)
             items.append(it)
-        self._wrap_rows(items)
-        lst.addTopLevelItems(items)
+        tops = self._group_findings(plan, ign, items)
+        self._wrap_rows(items + [t for t in tops if t.childCount()])
+        lst.setRootIsDecorated(any(t.childCount() for t in tops))
+        lst.addTopLevelItems(tops)
+        for t in tops:
+            if t.childCount():
+                t.setExpanded(t.childCount() <= 3)
         lst.blockSignals(False)
         self._findings = {f.id: f for f in plan.findings}
         for g, zs in plan.by_group().items():
@@ -667,6 +768,36 @@ class ReportPerspective(QWidget):
                 hi.setText(2, str(sum(int(hi.child(j).text(2)) for j in range(hi.childCount()))))
         self.contents.expandAll()
         self._count_findings(ign)
+
+    def _group_findings(self, plan, ign: set[str], items: list) -> list:
+        """The top-level rows: one finding alone stays a row of its own; several findings of one kind go under one
+        parent row in plain words ('5 measurements (complete stacks) have no sample outlined: …', the kind's title
+        in its tooltip). Kinds of the holder on screen first, kinds whose findings are all ignored last."""
+        from aurora.app.theme import status_icon
+        by_id = {f.id: f for f in plan.findings}
+        groups: dict[str, list] = {}
+        for it in items:
+            groups.setdefault(by_id[it.data(0, Qt.UserRole)].kind, []).append(it)
+        cur = self.session.current_holder
+        first = {k: i for i, k in reversed(list(enumerate(by_id[it.data(0, Qt.UserRole)].kind for it in items)))}
+        kinds = sorted(groups, key=lambda k: (all(it.data(0, Qt.UserRole) in ign for it in groups[k]),
+                                              not any(by_id[it.data(0, Qt.UserRole)].holder == cur for it in groups[k]),
+                                              first[k]))
+        tops = []
+        for kind in kinds:
+            rows = groups[kind]
+            if len(rows) == 1:
+                tops.append(rows[0])
+                continue
+            n_open = sum(1 for it in rows if it.data(0, Qt.UserRole) not in ign)
+            parent = QTreeWidgetItem([finding_plain(kind, len(rows)), "", ""])
+            parent.setToolTip(0, f"{core_report.FINDING_KINDS.get(kind, kind)} ({n_open} not ignored)")
+            parent.setIcon(0, status_icon(by_id[rows[0].data(0, Qt.UserRole)].tone if n_open else "muted"))
+            parent.setFlags(parent.flags() & ~Qt.ItemIsEditable & ~Qt.ItemIsUserCheckable)
+            parent.setData(0, KIND_ROLE, kind)
+            parent.addChildren(rows)
+            tops.append(parent)
+        return tops
 
     def _count_findings(self, ign: set[str]) -> None:
         plan = self._plan
@@ -695,7 +826,11 @@ class ReportPerspective(QWidget):
         width = max(60, lst.header().sectionSize(0) - lst.iconSize().width() - 24)
         shown = items is None
         if shown:
-            items = [lst.topLevelItem(i) for i in range(lst.topLevelItemCount())]
+            items = []
+            for i in range(lst.topLevelItemCount()):
+                top = lst.topLevelItem(i)
+                items.append(top)
+                items.extend(top.child(j) for j in range(top.childCount()))
         model = lst.model()
         model.blockSignals(shown)       # one layout below instead of one per row (each re-measured its row)
         try:
@@ -713,6 +848,8 @@ class ReportPerspective(QWidget):
         if col != 1:
             return
         fid = item.data(0, Qt.UserRole)
+        if not fid:                                         # a kind's parent row has no tick of its own
+            return
         ign = self.ignored()
         if item.checkState(1) == Qt.Checked:
             ign.add(fid)
@@ -729,8 +866,10 @@ class ReportPerspective(QWidget):
             return
         ign = self.ignored()
         order = [f.id for f in self._order(plan, ign)]
+        if lst.rootIsDecorated() and self._ignore_in_group(fid, ign, order):          # grouped rows: move in place
+            return
         ids = [lst.topLevelItem(i).data(0, Qt.UserRole) for i in range(lst.topLevelItemCount())]
-        if fid not in ids or sorted(ids) != sorted(order):
+        if lst.rootIsDecorated() or fid not in ids or sorted(ids) != sorted(order):
             self._fill_plan()
             return
         i, j = ids.index(fid), order.index(fid)
@@ -749,6 +888,38 @@ class ReportPerspective(QWidget):
             self._fill_plan()
             return
         self._count_findings(ign)
+
+    def _ignore_in_group(self, fid: str, ign: set[str], order: list[str]) -> bool:
+        """One tick in a grouped list: the row moves to its sorted place inside its kind (ignored ones last), its
+        parent row recounts, nothing else is rebuilt. False when the row is not inside a group (a refill decides)."""
+        from aurora.app.theme import status_icon
+        lst = self.preflight_list
+        for i in range(lst.topLevelItemCount()):
+            top = lst.topLevelItem(i)
+            kids = [top.child(j) for j in range(top.childCount())]
+            ids = [k.data(0, Qt.UserRole) for k in kids]
+            if fid not in ids:
+                continue
+            lst.blockSignals(True)
+            item = kids[ids.index(fid)]
+            self._tone_finding(item, fid in ign)
+            want = sorted(ids, key=order.index)
+            a, b = ids.index(fid), want.index(fid)
+            if a != b:
+                current = lst.currentItem() is item
+                top.takeChild(a)
+                top.insertChild(b, item)
+                if current:
+                    lst.setCurrentItem(item)
+            n_open = sum(1 for x in ids if x not in ign)
+            kind = top.data(0, KIND_ROLE)
+            top.setToolTip(0, f"{core_report.FINDING_KINDS.get(kind, kind)} ({n_open} not ignored)")
+            if not n_open:
+                top.setIcon(0, status_icon("muted"))
+            lst.blockSignals(False)
+            self._count_findings(ign)
+            return True
+        return False
 
     def _jump_item(self, item: QTreeWidgetItem) -> None:
         self._jump_id(item.data(0, Qt.UserRole))
@@ -822,6 +993,7 @@ class ReportPerspective(QWidget):
 
     def _on_done(self, result: ReportResult) -> None:
         self._result = result
+        self.built.emit(str(result.folder or result.pdf.parent))
         ch = ReportBuilder.changes_lines(result.changes, limit=3)
         self.status.setText(f"{result.folder.name if result.folder else result.pdf.parent.name}: "
                             f"{plural(result.pages, 'page')}, {plural(result.entries, 'zone spectrum', 'zone spectra')}, "

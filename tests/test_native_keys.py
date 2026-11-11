@@ -64,7 +64,7 @@ def test_the_window_texts_go_through_it(qapp, monkeypatch):
     win = MainWindow()
     try:
         title = dict(PERSPECTIVES)["reduce"]
-        assert win.rail_buttons["reduce"].toolTip() == f"{title} (<Ctrl+3>)"
+        assert win.rail_buttons["reduce"].toolTip().startswith(f"{title} (<Ctrl+3>): ")   # then what the page is for
         assert win.perspective_hint("maps").endswith("(<Ctrl+Shift+A>)")
         assert "Ctrl+Shift+A" in HELP["main.mode"][0] and "<Ctrl+Shift+A>" in win.findChild(type(win.mode_btn),
                                                                                              "modebtn").toolTip()

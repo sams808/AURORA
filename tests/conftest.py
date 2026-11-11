@@ -24,6 +24,17 @@ def system_font_dir() -> str | None:
 if system_font_dir():
     os.environ.setdefault("QT_QPA_FONTDIR", system_font_dir())
 
+# Offscreen Qt draws text with FreeType, which keeps one C stdio stream open per font face it loads (a glyph such as
+# a check mark makes it walk the fallback fonts, and every help page adds faces). The C runtime allows 512 streams by
+# default on Windows; past that numpy's tofile cannot get a FILE* ('_fdopen failed') and a later test fails while
+# writing its fake beamtime. The real application draws with DirectWrite and never gets near the limit.
+if sys.platform.startswith("win"):
+    try:
+        import ctypes
+        ctypes.CDLL("ucrtbase")._setmaxstdio(8192)
+    except (OSError, AttributeError):
+        pass
+
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "allow_excepthook: the test expects exceptions to reach sys.excepthook")

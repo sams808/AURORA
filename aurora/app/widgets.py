@@ -6,6 +6,9 @@
 - TaskBar: the progress strip of a perspective (bar, message, elapsed time, Cancel; Esc cancels).
 - EmptyState: a small card centred over a panel that says what to do next, with one or two buttons.
 - FlowLayout: a row of controls that wraps instead of clipping. ElidedLabel: a one-line label that elides.
+- TermLabel: a word-wrapped caption whose glossary words are links ('{{i0|beam intensity (I0)}}'): hovering says what
+  the word means, a click opens Help > Glossary there.
+- plain_error(text_or_exc): a failure in plain words (no exception name, no [Errno n], no doubled backslash).
 - page_scroll(widget): a page that scrolls vertically instead of squeezing its cards; fit_height(panel): a panel
   never lower than its word-wrapped rows need at its width; size_to_current_tab(tabs); fit_screen(dialog, w, h).
 - set_enabled(widget, on, reason): disabled actions say why in their tooltip.
@@ -17,6 +20,7 @@ from __future__ import annotations
 import html
 import logging
 import os
+import re
 import time
 import traceback
 from contextlib import contextmanager
@@ -755,6 +759,146 @@ class ElidedLabel(QLabel):
         self.style().drawItemText(p, r, int(self.alignment()) | int(Qt.AlignVCenter), self.palette(), self.isEnabled(),
                                   txt, self.foregroundRole())
         p.end()
+
+
+_TERM = re.compile(r"\{\{([\w-]+)(?:\|(.*?))?\}\}")
+
+
+def term_markup_plain(markup: str) -> str:
+    """'{{i0|beam intensity (I0)}}' -> 'beam intensity (I0)'; '{{tey}}' -> the term's short word."""
+    from aurora.glossary import term
+
+    def sub(m) -> str:
+        if m.group(2) is not None:
+            return m.group(2)
+        try:
+            return term(m.group(1)).short
+        except KeyError:
+            return m.group(1)
+    return _TERM.sub(sub, markup or "")
+
+
+def term_markup_keys(markup: str) -> list[str]:
+    return [m.group(1) for m in _TERM.finditer(markup or "")]
+
+
+class TermLabel(QLabel):
+    """A word-wrapped caption built from markup '{{key}}' or '{{key|shown words}}' (aurora.glossary keys): each term
+    is an underlined link in the link colour. Hovering a link shows 'What is …?' at the cursor; a click (or Tab then
+    Enter) opens Help > Glossary at that word. plain_text() is the text without markup (tests, screen readers)."""
+
+    def __init__(self, markup: str = "", parent: QWidget | None = None):
+        super().__init__(parent)
+        self._markup = ""
+        self.setWordWrap(True)
+        self.setTextFormat(Qt.RichText)
+        self.setOpenExternalLinks(False)
+        self.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self.linkHovered.connect(self._hovered)
+        self.linkActivated.connect(self._activated)
+        from aurora.app.theme import on_theme_changed
+        on_theme_changed(self, lambda _s: self._render())
+        self.set_markup(markup)
+
+    def set_markup(self, markup: str) -> None:
+        self._markup = markup or ""
+        self._render()
+
+    def markup(self) -> str:
+        return self._markup
+
+    def plain_text(self) -> str:
+        return term_markup_plain(self._markup)
+
+    def full_text(self) -> str:
+        return self.plain_text()
+
+    def linked_keys(self) -> list[str]:
+        return term_markup_keys(self._markup)
+
+    def _render(self) -> None:
+        from aurora.app.theme import TOKENS
+        out, last = [], 0
+        for m in _TERM.finditer(self._markup):
+            out.append(html.escape(self._markup[last:m.start()]))
+            shown = term_markup_plain(m.group(0))
+            out.append(f"<a href=\"glossary:{m.group(1)}\" style=\"color:{TOKENS['link']};text-decoration:underline\">"
+                       f"{html.escape(shown)}</a>")
+            last = m.end()
+        out.append(html.escape(self._markup[last:]))
+        super().setText("".join(out).replace("\n", "<br>"))
+        self.setAccessibleDescription(self.plain_text())
+
+    def _hovered(self, link: str) -> None:
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QToolTip
+        if link.startswith("glossary:"):
+            from aurora.glossary import what_is
+            try:
+                QToolTip.showText(QCursor.pos(), what_is(link.split(":", 1)[1]), self)
+            except KeyError:
+                pass
+        else:
+            QToolTip.hideText()
+
+    def _activated(self, link: str) -> None:
+        if link.startswith("glossary:"):
+            from aurora.app.help import open_glossary
+            open_glossary(self, link.split(":", 1)[1])
+
+
+def fit_to_content(card: QWidget, floor: int = 0) -> None:
+    """Give a card in a splitter the height its wrapped lines need at its width (a splitter ignores word wrap, so a
+    long caption would otherwise be drawn over the widget below it)."""
+    import shiboken6
+    if card is None or not shiboken6.isValid(card) or card.width() <= 0:
+        return
+    lay = card.layout()
+    if lay is None:
+        return
+    need = lay.heightForWidth(card.width()) if lay.hasHeightForWidth() else lay.sizeHint().height()
+    need = max(need, floor)
+    if need > 0 and need != card.minimumHeight():
+        card.setMinimumHeight(need)
+
+
+def _relative(path: str, root: Path | None) -> str:
+    if root is None:
+        return path
+    try:
+        return str(Path(path).resolve().relative_to(Path(root).resolve()))
+    except (ValueError, OSError):
+        return path
+
+
+def plain_error(err, root: Path | None = None) -> str:
+    """A failure in plain words for an Easy-visible text: a protected folder, a refused write, a missing file or a full
+    disk by name; anything else its last line without 'module.Class: ' and '[Errno n] '. Paths are shown as written
+    (never repr, so no doubled backslashes), relative to `root` when inside it."""
+    import errno as _errno
+    from aurora.core.io.safety import ProtectedPathError
+    if isinstance(err, BaseException):
+        exc, text = err, str(err)
+    else:
+        exc, text = None, str(err or "")
+    last = text.strip().splitlines()[-1].strip() if text.strip() else ""
+    low = last.lower()
+    if isinstance(exc, ProtectedPathError) or "protectedpatherror" in low or "never writes" in low:
+        return "this folder is protected: AURORA never writes into raw data or a protected folder"
+    if isinstance(exc, PermissionError) or "[errno 13]" in low or "permissionerror" in low or "access is denied" in low \
+            or "permission denied" in low:
+        return "AURORA may not write here (a read-only folder, or a file open in another program)"
+    if isinstance(exc, FileNotFoundError) or "filenotfounderror" in low or "[errno 2]" in low:
+        return "the file or folder is missing (moved, or on a share that is not reachable now)"
+    if (isinstance(exc, OSError) and getattr(exc, "errno", None) == _errno.ENOSPC) or "[errno 28]" in low \
+            or "no space left" in low:
+        return "the disk is full"
+    msg = re.sub(r"^(?:(?:[A-Za-z_]\w*\.)+[A-Za-z_]\w*|\w*(?:Error|Exception|Warning|Interrupt)): ", "", last)
+    msg = re.sub(r"\[(?:Errno|WinError) -?\d+\]\s*", "", msg)
+    msg = re.sub(r"'([A-Za-z]:\\\\[^']*|/[^']*)'", lambda m: _relative(m.group(1).replace("\\\\", "\\"), root), msg)
+    msg = msg.replace("\\\\", "\\").strip().rstrip(".")
+    return msg or "unknown error"
 
 
 def set_enabled(widget: QWidget, on: bool, reason: str = "") -> None:

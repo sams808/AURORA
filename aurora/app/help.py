@@ -21,6 +21,7 @@ from aurora.app.widgets import fit_screen
 
 DOCS = [
     ("USER_GUIDE.md", "User guide", "the short guide, one section per perspective"),
+    ("GLOSSARY.md", "Glossary", "the meaning of every word AURORA uses, in plain language"),
     ("MANUAL.md", "Manual", "every control, the files read and written, troubleshooting"),
     ("TUTORIALS.md", "Tutorials", "walkthroughs on the demo beamtime, then the real-beamtime recipe"),
     ("INSTALL.md", "Installation and sharing", "installers, macOS and Windows notes, where things are stored"),
@@ -363,6 +364,18 @@ class HelpWindow(QMainWindow):
             src = self.browser.source()
             self.browser._loaded = ""
             self.browser.setSource(src)
+
+
+def open_glossary(widget: QWidget, key: str | None = None) -> None:
+    """Help > Glossary at the entry of a term ('i0'), or at its top (key None or '')."""
+    from aurora.glossary import term
+    anchor = None
+    if key:
+        try:
+            anchor = term(key).anchor
+        except KeyError:
+            anchor = None
+    open_help(widget, "GLOSSARY.md", anchor)
 
 
 def open_help(widget: QWidget, doc: str = "USER_GUIDE.md", anchor: str | None = None) -> None:

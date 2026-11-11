@@ -31,6 +31,7 @@ from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
 from aurora.app.jobs import JobManager, all_managers
 from aurora.app.theme import TOKENS, apply_theme, follow_system, on_theme_changed
 from aurora.app.vocab import plural
+from aurora.app import guide
 from aurora.app import mode as ui_mode
 from aurora.app import shortcuts
 from aurora.app import project_files, stack_cache
@@ -39,10 +40,14 @@ PERSPECTIVES = [
     ("home", "Home"), ("survey", "Survey"), ("reduce", "Reduce"), ("check", "Check"), ("compare", "Compare"),
     ("fit", "Fit"), ("maps", "Maps"), ("report", "Report"),
 ]
-# perspectives shown only in Advanced mode (Easy mode = John Bussey's basic path: reduce, check, compare, fit, report)
+# perspectives shown only in Advanced mode (Easy mode: the main steps with standard settings)
 ADVANCED_PERSPECTIVES = {"maps"}
-MODE_STATUS = {False: "Easy mode: the basic path of John Bussey's GUI", True: "Advanced mode: every option"}
+MODE_STATUS = {False: "Easy mode: the main steps with standard settings", True: "Advanced mode: every option"}
+NEXT_WIDTH = 420                        # the top bar's Next link is elided to this width (the full sentence: tooltip)
 MIN_SIZE = (1200, 760)                  # DESIGN.md: the smallest window every perspective fits without clipping
+BANNER_TEXT = ("This beamtime folder is read-only for AURORA (a locked drive, a share without write access, or a "
+               "protected folder): your outlines and spectra cannot be saved inside it. Copy the beamtime folder to "
+               "this computer and open the copy to keep your work.")
 CLOSE_WAIT_S = 5.0                      # closing waits at most this long for cancelled jobs to stop
 EXIT_WAIT_S = 10.0                      # then the process waits at most this long in all for the threads still running
 SEP = "▸"
@@ -143,6 +148,7 @@ class MainWindow(QMainWindow):
         outer.setSpacing(0)
         self.session = Session(self)
         outer.addWidget(self._top_bar())
+        outer.addWidget(self._banner())
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -189,6 +195,14 @@ class MainWindow(QMainWindow):
         self._mode_seen: bool | None = None
         ui_mode.on_mode_changed(self, self._mode_changed)
         on_theme_changed(self, lambda _s: self._rail_icons())
+        self._visited: set[str] = set()
+        self._report_folder = ""
+        self._fit_ran = False
+        self._guide_timer = QTimer(self)
+        self._guide_timer.setSingleShot(True)
+        self._guide_timer.setInterval(100)
+        self._guide_timer.timeout.connect(self.refresh_guide)
+        self._wire_guide()
         self.show_perspective("home")
         central.setFocusPolicy(Qt.ClickFocus)      # at start the focus rests on the page, not on a top-bar button
         central.setFocus()
@@ -212,6 +226,15 @@ class MainWindow(QMainWindow):
         self.crumb = Crumb(self.session)
         lay.addWidget(self.crumb)
         lay.addStretch(1)
+        # Easy mode, once a project is open: 'Next: Check – look at each spectrum …' (a link to that page)
+        self.next_label = QLabel("")
+        self.next_label.setObjectName("nextlink")
+        self.next_label.setTextFormat(Qt.RichText)
+        self.next_label.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+        self.next_label.setAccessibleName("next step")
+        self.next_label.linkActivated.connect(self._next_link)
+        self.next_label.hide()
+        lay.addWidget(self.next_label)
         self.mode_btn = QToolButton()
         self.mode_btn.setObjectName("modebtn")
         self.mode_btn.setCheckable(True)
@@ -233,7 +256,7 @@ class MainWindow(QMainWindow):
             b = QToolButton()
             b.setObjectName("railbtn")
             b.setText(title)
-            b.setToolTip(shortcuts.native_text(f"{title} (Ctrl+{i + 1})"))
+            b.setToolTip(shortcuts.native_text(f"{title} (Ctrl+{i + 1}): {guide.RAIL_TIPS.get(key, '')}".rstrip(": ")))
             b.setAccessibleName(title)
             b.setProperty("aurora_icon", key)
             b.setIcon(two_state_icon(key, TOKENS["rail_text"], TOKENS["on_accent"]))
@@ -301,7 +324,7 @@ class MainWindow(QMainWindow):
         self.mode_action.setCheckable(True)
         self.mode_action.setShortcut("Ctrl+Shift+A")
         self.mode_action.setMenuRole(QAction.NoRole)
-        self.mode_action.setStatusTip("every option (Advanced) or the basic path of John Bussey's GUI (Easy)")
+        self.mode_action.setStatusTip("every option (Advanced) or the main steps with standard settings (Easy)")
         _section(self.mode_action, "View")
         self.mode_action.toggled.connect(lambda on: on != ui_mode.is_advanced() and ui_mode.set_advanced(on))
         view.addAction(self.mode_action)
@@ -384,6 +407,10 @@ class MainWindow(QMainWindow):
     def show_perspective(self, key: str) -> None:
         self.stack.setCurrentWidget(self.pages[key])
         self.rail_buttons[key].setChecked(True)
+        if getattr(self, "_visited", None) is not None:
+            if self.session.project is not None:
+                self._visited.add(key)
+            self.schedule_guide()
 
     def go_to(self, key: str) -> bool:
         """Open a perspective from a shortcut or a link: one hidden in Easy mode answers with a status hint."""
@@ -472,6 +499,7 @@ class MainWindow(QMainWindow):
         if self._mode_seen is not None and self._mode_seen != advanced:
             self.statusBar().showMessage(MODE_STATUS[advanced], 5000)
         self._mode_seen = advanced
+        self.schedule_guide()
 
     def _sync_view_actions(self) -> None:
         from aurora.app.settings_dialog import get
@@ -644,6 +672,180 @@ class MainWindow(QMainWindow):
         if cur is None or Path(cur.root) == Path(project.root):
             return True
         return self.session.confirm_leave("open another project")
+
+    # ------------------------------------------------------------------ getting started (Easy mode)
+    def _wire_guide(self) -> None:
+        ses = self.session
+        for sig in (ses.project_changed, ses.zones_changed, ses.check_queue_changed, ses.save_state,
+                    self.library.changed, self.home.opening_changed, self.check.saved, self.report.built,
+                    self.fit.fitted):
+            sig.connect(self.schedule_guide)          # a bound method: disconnected with the window (never a lambda)
+        self.report.built.connect(self._built)
+        self.fit.fitted.connect(self._fitted)
+        ses.project_changed.connect(self._project_for_guide)
+        self.home.guide_strip.go.connect(self.guide_go)
+        self.home.guide_strip.hidden_by_user.connect(self.hide_guide)
+        from aurora.app.settings_dialog import on_settings_changed
+        on_settings_changed(self, self.schedule_guide)
+
+    def _built(self, folder: str) -> None:
+        self._report_folder = folder
+
+    def _fitted(self) -> None:
+        self._fit_ran = True
+
+    def _project_for_guide(self, _project) -> None:
+        """A new project starts the guide again (the pages seen, the build and the fit belong to the last one)."""
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
+        self._visited = {self.current_key()} if self.session.project is not None else set()
+        self._report_folder = ""
+        self._fit_ran = False
+        self.check.n_saved = 0
+        self.schedule_guide()
+
+    def schedule_guide(self, *_args) -> None:
+        """Refresh the guide 100 ms after the last change (any signal's arguments are ignored)."""
+        import shiboken6
+        t = getattr(self, "_guide_timer", None)
+        if t is not None and shiboken6.isValid(self) and shiboken6.isValid(t):
+            t.start()
+
+    def guide_state(self):
+        """The getting-started state of the window (aurora.app.guide.GuideState)."""
+        from aurora.app import guide as g
+        ses = self.session
+        p = ses.project
+        n_stacks = sum(len(h.stacks) for _day, h in ses.holder_keys.values()) if p is not None else 0
+        n_zones = 0
+        if p is not None:
+            for hz in ses.zones.holders.values():
+                n_zones += sum(1 for z in hz.zones if z.rects or getattr(z, "polygons", None) or getattr(z, "pixels", None)
+                               or getattr(z, "painted", None))
+        lib = self.library
+        rows = getattr(lib, "requests", None)
+        return g.GuideState(
+            has_project=p is not None, opening=self.home._opening if p is None else "",
+            read_only=p is not None and self.read_only_beamtime(),
+            n_complete_stacks=n_stacks, n_zones=n_zones, n_queued=len(ses.check_queue),
+            n_saved=self.check.n_saved, n_library=len(rows) if rows is not None else 0, fit_ran=self._fit_ran,
+            report_folder=self._report_folder, visited=frozenset(self._visited), current=self.current_key(),
+            can_choose_work_folder=False)
+
+    def read_only_beamtime(self) -> bool:
+        """The beamtime folder cannot be written: a protected folder, or the session found it read-only."""
+        p = self.session.project
+        if p is None:
+            return False
+        try:
+            from aurora.core.io.safety import is_protected
+            if is_protected(Path(p.root)):
+                return True
+        except (ImportError, OSError, ValueError):
+            pass
+        return bool(getattr(self.session, "folder_read_only", False))
+
+    def refresh_guide(self) -> None:
+        """The guide strip on Home and the top bar's Next link (Easy mode, Settings 'show the getting-started guide')."""
+        from aurora.app import guide as g
+        step = g.next_step(self.guide_state())
+        self.next_step = step
+        show = (not ui_mode.is_advanced()) and bool(setting("show_guide"))
+        has = self.session.project is not None
+        here = self.current_key() == "home"
+        strip = self.home.guide_strip
+        strip.setVisible(show and has)
+        if show and has:
+            strip.show_step(step, here)
+        self._paint_next(step, show and has)
+        self._paint_banner()
+
+    def _paint_next(self, step, show: bool) -> None:
+        import html as _html
+        from aurora.app import guide as g
+        lab = self.next_label
+        lab.setVisible(show)
+        if not show:
+            return
+        title = g.PAGE_TITLES.get(step.page, step.page)
+        short = g.short_sentence(step)
+        if self.current_key() == step.page:
+            plain = f"Here: {short}"
+            shown = _html.escape(lab.fontMetrics().elidedText(plain, Qt.ElideRight, NEXT_WIDTH))
+        else:
+            plain = f"Next: {title} – {short}"
+            el = _html.escape(lab.fontMetrics().elidedText(plain, Qt.ElideRight, NEXT_WIDTH))
+            shown = (f"<a href='aurora:goto:{step.page}' style='color:{TOKENS['link']};text-decoration:none'>{el}</a>")
+        lab.setText(shown)
+        lab.setToolTip(step.sentence)
+        lab.setProperty("aurora_plain", plain)
+        lab.setAccessibleDescription(plain)
+
+    def next_text(self) -> str:
+        """The Next link as a reader sees it (tests)."""
+        return str(self.next_label.property("aurora_plain") or "") if self.next_label.isVisible() else ""
+
+    def _next_link(self, href: str) -> None:
+        if href.startswith("aurora:goto:"):
+            self.go_to(href[len("aurora:goto:"):])
+
+    def guide_go(self, target: str) -> None:
+        """The guide strip's button: a page, or an action ('open', 'demo', 'reload', 'folder')."""
+        if target in self.pages:
+            self.go_to(target)
+        elif target == "open":
+            self.home.choose_project()
+        elif target == "demo":
+            self.open_demo()
+        elif target == "reload":
+            self.home.reload()
+        elif target == "folder" and self._report_folder:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self._report_folder))
+        elif target == "workfolder" and hasattr(self, "choose_work_folder"):
+            self.choose_work_folder()
+
+    def hide_guide(self) -> None:
+        from aurora.app.settings import settings
+        s = settings()
+        s.setValue("show_guide", False)
+        s.sync()
+        self.statusBar().showMessage("Getting started hidden: Settings > show the getting-started guide (Easy mode) "
+                                     "shows it again", 8000)
+        self.refresh_guide()
+
+    # ------------------------------------------------------------------ read-only beamtime banner
+    def _banner(self) -> QWidget:
+        from PySide6.QtWidgets import QFrame
+        from aurora.app.widgets import TermLabel
+        b = QFrame()
+        b.setObjectName("banner")
+        b.setAccessibleName("read-only beamtime")
+        lay = QHBoxLayout(b)
+        lay.setContentsMargins(16, 6, 16, 6)
+        lay.setSpacing(10)
+        self.banner_text = TermLabel(BANNER_TEXT)
+        self.banner_text.setObjectName("bannertext")
+        lay.addWidget(self.banner_text, 1)
+        self.banner_dismiss = QPushButton("Dismiss")
+        self.banner_dismiss.setToolTip("Hide this note for this beamtime (the save indicator still says read-only)")
+        self.banner_dismiss.setAccessibleName("Dismiss the read-only note")
+        self.banner_dismiss.clicked.connect(self._dismiss_banner)
+        lay.addWidget(self.banner_dismiss)
+        self._banner_dismissed: str = ""
+        b.hide()
+        self.banner = b
+        return b
+
+    def _dismiss_banner(self) -> None:
+        p = self.session.project
+        self._banner_dismissed = str(p.root) if p is not None else ""
+        self.banner.hide()
+
+    def _paint_banner(self) -> None:
+        p = self.session.project
+        show = p is not None and self.read_only_beamtime() and self._banner_dismissed != str(p.root)
+        self.banner.setVisible(show)
 
     def _on_project(self, project) -> None:
         self.statusBar().showMessage(f"{plural(len(project.scans), 'scan')} in {project.root}")

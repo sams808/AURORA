@@ -574,3 +574,13 @@ class Library(QObject):
         self._edge_cache.clear()
         self.changed.emit()
         return found, list(self.missing)
+
+
+def add_zone_traces(library, zone, sid: str, traces, settings, holder_name: str = "", scan_name: str = "") -> list:
+    """A zone's traces on one scan into the Compare library, in memory (Reduce's 'Send the zone's traces to Compare'
+    and Check's 'Show in Compare without saving'): the normalised fluorescence sum and, when ticked, the TEY."""
+    from aurora.core.names import short_time
+    label = f"{zone.label} · {holder_name} {short_time(sid) or scan_name or sid}"
+    tey = traces.tey if getattr(settings, "tey", True) else None
+    return library.add_traces(label, traces.E, traces.sum, tey, source=f"zone {zone.id} of {sid}")
+

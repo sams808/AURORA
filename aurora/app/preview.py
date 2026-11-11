@@ -29,6 +29,12 @@ MIN_PLOT_PX = 180               # the compact fluorescence panel never gets less
 MIN_TOP_PX = 110                # the fluorescence panel never gets less
 COMPACT_BELOW_PX = 260          # below this plot height, the TEY and I0 panels hide (compact)
 SHOW_TEXT = "Show ▾"
+TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
+          "ipfy": "Inverse yield (IPFY) of the sample", "tey": "Electron yield (TEY): the surface",
+          "i0": "Beam intensity (I0) during the scan"}
+SUM_NAME = "sum of the detectors in use"
+SPIKES_NAME = "repaired points (spikes)"          # the legend draws the red dot itself
+BANDS_NOTE = "Grey bands: the energy ranges before and after the edge used to scale the spectrum."
 
 
 class SparseAxis(pg.AxisItem):
@@ -122,21 +128,24 @@ class PreviewPlot(QWidget):
         self.low = self.gl.addPlot(row=2, col=0, axisItems={"left": SparseAxis("left")})
         self.mid.setXLink(self.top)
         self.low.setXLink(self.top)
-        self.top.setLabel("left", "fluorescence")
-        self.mid.setLabel("left", "TEY")
-        self.low.setLabel("left", "I0 (zone sum)")
+        for p_ in (self.top, self.mid, self.low):
+            p_.setLabel("left", "arb. units")              # uncalibrated: arbitrary units (short: the panels are low)
         self.low.setLabel("bottom", "energy (eV)")
         for p in (self.top, self.mid, self.low):
             p.showGrid(x=True, y=True, alpha=0.15)
             p.vb.disableAutoRange()
         for p in (self.top, self.mid):                  # linked x: one row of energies, under the lowest panel
             p.getAxis("bottom").setStyle(showValues=False)
-        self.top.addLegend(offset=(10, 10))
+        self.top.addLegend(offset=(-10, -10))         # bottom right: never over the rise at the edge
         self.gl.ci.layout.setRowStretchFactor(0, 4)
         self.gl.ci.layout.setRowStretchFactor(1, 2)
         self.gl.ci.layout.setRowStretchFactor(2, 2)
         lay.addWidget(self.gl, 1)
         lay.addWidget(self.readout)
+        self.bands_note = ElidedLabel(BANDS_NOTE, Qt.ElideRight)   # what the grey bands are (shown when drawn)
+        self.bands_note.setObjectName("muted")
+        self.bands_note.hide()
+        lay.addWidget(self.bands_note)
         self.top.setMinimumHeight(MIN_TOP_PX)
         self._min_plot = int(min_plot_px)
         self._forced_compact: bool | None = None        # None: automatic (by the plot height)
@@ -228,6 +237,9 @@ class PreviewPlot(QWidget):
         from aurora.app.widgets import set_plot_hint
         if not self._traces:
             self.top.setTitle("")
+            self.mid.setTitle("")
+            self.low.setTitle("")
+            self.bands_note.hide()
             set_plot_hint(self.top, self._waiting or "select a sample (zone) and a scan to see its traces")
             for p in (self.mid, self.low):
                 set_plot_hint(p, " ")                 # no bare 0..1 axes on an empty preview
@@ -236,7 +248,13 @@ class PreviewPlot(QWidget):
             set_plot_hint(p, None)
         multi = len(self._traces) > 1
         t0 = self._traces[0][1]
-        self.top.setTitle("fluorescence" + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))
+        ipfy = bool(t0.settings and getattr(t0.settings, "signal", "pfy") == "ipfy")
+        self.top.setTitle(TITLES["ipfy" if ipfy else "pfy"]
+                          + (" (raw counts)" if t0.settings and t0.settings.fluo_norm == "raw" else ""))
+        self.mid.setTitle(TITLES["tey"])
+        self.low.setTitle(TITLES["i0"])
+        self.bands_note.setVisible(bool(t0.pre))
+        self._spike_named = False
         if t0.pre:
             for rng in (t0.pre, t0.post):
                 reg = pg.LinearRegionItem(values=list(rng), movable=False, brush=pg.mkBrush(with_alpha(pc("region"), 0.10)),
@@ -256,13 +274,13 @@ class PreviewPlot(QWidget):
                         continue
                     on = t.settings.sdd[i] if t.settings else True
                     pen = pg.mkPen(col or curve(i), width=1 if on else 0.8, style=dash(i))
-                    item = self.top.plot(t.E, y, pen=pen, connect="finite", name=(f"SDD{i + 1}" + ("" if on else " (off)")) if ti == 0 else None)
+                    item = self.top.plot(t.E, y, pen=pen, connect="finite", name=(f"SDD{i + 1}" + ("" if on else " (left out)")) if ti == 0 else None)
                     item.setOpacity(1.0 if on else 0.35)
                     self._items[f"sdd{i}"] = item
                     self._spikes(self.top, t.E, y, t.spikes.get(f"sdd{i + 1}"), None if multi else f"spk:sdd{i}")
             if self.show_sum.isChecked() and t.sum is not None:
                 self._items["sum"] = self.top.plot(t.E, t.sum, pen=pg.mkPen(col or pc("sum"), width=2.2), connect="finite",
-                                                   name=(name + " " if multi else "") + "sum of ticked SDDs")
+                                                   name=(name + " " if multi else "") + SUM_NAME)
                 self._spikes(self.top, t.E, t.sum, t.spikes.get("sum"), None if multi else "spk:sum")
             if self.show_tey.isChecked():
                 self._items["tey"] = self.mid.plot(t.E, t.tey, pen=pg.mkPen(col or pc("tey"), width=1.6), connect="finite")
@@ -315,7 +333,8 @@ class PreviewPlot(QWidget):
 
     def _spikes(self, plot, E, y, idx, role: str | None = None) -> None:
         """The spikes of a curve as dots. With a role (one trace drawn), the dots exist even without a spike, so
-        update_traces can move them."""
+        update_traces can move them. The first dots drawn on the fluorescence panel get the legend's 'repaired
+        points (spikes)' entry."""
         if not self.show_spikes.isChecked() or not (idx or role):
             return
         idx = [i for i in (idx or []) if np.isfinite(y[i])]
@@ -324,6 +343,24 @@ class PreviewPlot(QWidget):
             plot.addItem(it, ignoreBounds=True)
             if role:
                 self._items[role] = it
+            if plot is self.top and idx:
+                self._name_spikes(it)
+
+    def _name_spikes(self, it) -> None:
+        """The red dots say what they are: one legend entry, for the first dots of the fluorescence panel."""
+        if not getattr(self, "_spike_named", False) and self.top.legend is not None:
+            self.top.legend.addItem(it, SPIKES_NAME)
+            self._spike_named = True
+
+    def _rename_spikes(self) -> None:
+        """After an update in place: the legend entry while the fluorescence panel shows dots, none without."""
+        shown = [it for role, it in self._items.items()
+                 if role.startswith("spk:") and role != "spk:tey" and role != "spk:i0" and len(it.data)]
+        if shown:
+            self._name_spikes(shown[0])
+        elif getattr(self, "_spike_named", False) and self.top.legend is not None:
+            self.top.legend.removeItem(SPIKES_NAME)
+            self._spike_named = False
 
     # ------------------------------------------------------------------ updates in place
     def _signature(self, traces) -> tuple | None:
@@ -337,8 +374,8 @@ class PreviewPlot(QWidget):
         return (name, scheme(), text_px(), self.show_sdd.isChecked(), self.show_sum.isChecked(), self.show_tey.isChecked(),
                 self.show_i0.isChecked(), self.show_spikes.isChecked(), tuple(y is None for y in t.det),
                 t.sum is None, tuple(st.sdd) if st else None, st.i0_source if st else None,
-                st.fluo_norm if st else None, bool(t.pre), edge, meta.get("edge", ""),
-                bool(edge and t.E[0] <= edge <= t.E[-1]))
+                st.fluo_norm if st else None, getattr(st, "signal", "pfy") if st else None, bool(t.pre), edge,
+                meta.get("edge", ""), bool(edge and t.E[0] <= edge <= t.E[-1]))
 
     def update_traces(self, traces: list[tuple[str, ZoneTraces, dict]]) -> None:
         """set_traces for a preview that changes quickly (a zone being drawn): when the traces have the structure of
@@ -372,6 +409,7 @@ class PreviewPlot(QWidget):
         if "spk:i0" in items:
             sp = list(t.spikes.get("i0") or [])
             items["spk:i0"].setData(t.E[sp], t.i0_raw[sp])
+        self._rename_spikes()
         for role, rng in (("pre", t.pre), ("post", t.post)):
             if role in items and rng:
                 items[role].setRegion(list(rng))
