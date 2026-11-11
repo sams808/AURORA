@@ -348,10 +348,10 @@ def test_import_rows_fit_their_combos_and_release_notes_are_styled(qapp, tmp_pat
     from aurora.app.session import ImportRow
     theme.apply_theme(qapp, text_size="larger")
     try:
-        d = ImportDialog(tmp_path / "zones_all.json", [ImportRow("N5", "N5", 2, 3, 1), ImportRow("N6", "N6", 1, 1, 0)])
+        d = ImportDialog(tmp_path / "zones_all.json", [ImportRow("holderA", "holderA", 2, 3, 1), ImportRow("holderB", "holderB", 1, 1, 0)])
         d.show()
         pump(qapp)
-        for r, key in enumerate(("N5", "N6")):
+        for r, key in enumerate(("holderA", "holderB")):
             c = d.combos[key]
             assert c.height() <= d.table.rowHeight(r) and c.visibleRegion().boundingRect().height() == c.height(), key
         d.deleteLater()

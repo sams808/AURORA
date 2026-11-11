@@ -75,20 +75,20 @@ def _close(win):
 
 
 def test_a_cube_that_lands_after_a_holder_switch_is_not_shown(qapp, tmp_path):
-    """Load N5's cube, switch to N6 before it lands (its result is queued to the GUI thread, so the switch comes first,
-    as when a user moves on during a minutes-long load): N6 shows no cube, so no N6 zone can be made of N5's pixels."""
+    """Load holderA's cube, switch to holderB before it lands (its result is queued to the GUI thread, so the switch comes first,
+    as when a user moves on during a minutes-long load): holderB shows no cube, so no holderB zone can be made of holderA's pixels."""
     win = _window(qapp, testdata.make_fake_project(tmp_path / "two", n_holders=2))
     ses, mp = win.session, win.maps
-    ses.set_holder("N5"); qapp.processEvents()
+    ses.set_holder("holderA"); qapp.processEvents()
     mp.load()
-    ses.set_holder("N6")
+    ses.set_holder("holderB")
     assert win.jobs.wait_idle(20000)
     assert mp.hc is None
     assert [mp.scan_combo.itemData(i) for i in range(mp.scan_combo.count())] == \
-        [ses.stack_id(s) for s in ses.stacks_of("N6")]
+        [ses.stack_id(s) for s in ses.stacks_of("holderB")]
     assert "not shown" in mp.status.text() and testdata.STACK in mp.status.text()
-    # back on N5 the cube opens from its cache
-    ses.set_holder("N5"); qapp.processEvents()
+    # back on holderA the cube opens from its cache
+    ses.set_holder("holderA"); qapp.processEvents()
     assert "cached" in mp.cube_estimate()
     _close(win)
 
@@ -111,7 +111,7 @@ def test_a_cube_that_lands_after_another_stack_was_picked_is_not_shown(qapp, tmp
     x, y = testdata.snake_grid()
     testdata._write_stack(root / "raw" / testdata.DAY / "094000_LongOne_f_k_stack", "LongOne_f_k",
                           testdata.ENERGIES, len(testdata.ENERGIES), x, y, np.random.default_rng(1),
-                          created="Thu Nov  5 09:40:00 2026")
+                          created="Fri Mar 14 09:40:00 2025")
     win = _window(qapp, root)
     mp = win.maps
     sids = [mp.scan_combo.itemData(i) for i in range(mp.scan_combo.count())]
@@ -127,25 +127,25 @@ def test_a_cube_that_lands_after_another_stack_was_picked_is_not_shown(qapp, tmp
 
 
 def test_a_zone_from_clusters_goes_only_to_the_holder_of_the_cube(qapp, tmp_path):
-    """A cube of N5 on screen while N6 is the current holder (set directly): Make zone refuses instead of writing N5's
-    pixels into N6, and the label names the cube's own holder."""
+    """A cube of holderA on screen while holderB is the current holder (set directly): Make zone refuses instead of writing holderA's
+    pixels into holderB, and the label names the cube's own holder."""
     from aurora.core.hypercube import ClusterResult
     root = testdata.make_fake_project(tmp_path / "two", n_holders=2)
     win = _window(qapp, root)
     ses, mp = win.session, win.maps
-    ses.set_holder("N6"); qapp.processEvents()
+    ses.set_holder("holderB"); qapp.processEvents()
     proj = ses.project
-    hc = Hypercube.load(proj, proj.find(testdata.STACK))           # N5's stack
+    hc = Hypercube.load(proj, proj.find(testdata.STACK))           # holderA's stack
     mp.set_hypercube(hc)
     labels = np.arange(hc.n_pix) % 2
     M = hc.pixel_matrix(None, 60, 75)
     cr = ClusterResult(labels=labels, centres=np.array([M[labels == c].mean(axis=0) for c in (0, 1)]),
                        scores=np.zeros((hc.n_pix, 2)), explained=np.array([0.6, 0.3]), E=hc.E[hc.valid], seed=0)
     mp.show_clusters(cr, M, {"scan": hc.name})
-    assert mp._cluster_label().startswith("clusters 1+2 · N5 09:27")
+    assert mp._cluster_label().startswith("clusters 1+2 · holderA 09:27")
     assert mp.make_zone_from_clusters() is None
-    assert not ses.holder_zones("N6").zones and not ses.holder_zones("N5").zones
-    assert "N5" in mp.status.text()
+    assert not ses.holder_zones("holderB").zones and not ses.holder_zones("holderA").zones
+    assert "holderA" in mp.status.text()
     _close(win)
 
 

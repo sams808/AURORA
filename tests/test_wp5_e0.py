@@ -60,7 +60,7 @@ def test_search_window_around_the_tabulated_edge():
 
 
 def test_e0_is_never_a_data_or_window_end():
-    """A start-up transient of the first points (the real TEY traces of my_beamtime) and a stronger edge just above
+    """A start-up transient of the first points (real TEY traces of a fluorine beamtime) and a stronger edge just above
     the search window both used to give E0 at an end (680.0 / 716.6 eV) and an all-NaN normalisation."""
     E = np.linspace(680, 730, 251)
     start = _edge(E, 690.0)

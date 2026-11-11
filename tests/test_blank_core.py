@@ -300,7 +300,7 @@ def test_a_sheet_naming_other_holders_says_so(tmp_path):
 
 # ----------------------------------------------------------------------------- BL-13 holder names keep their numbers
 @pytest.mark.parametrize("name, scan_name, holder", [
-    ("010013_holderA_survey", None, "N5"), ("011600_N7_plate_survey", None, "N7"),
+    ("010013_plateB2_survey", None, "B2"), ("011600_C4_plate_survey", None, "C4"),
     ("133400_R2_survey_survey", "R2_survey_survey", "R2"), ("093834_Rad1_plate_survey", "Rad1_plate_survey", "Rad1"),
     ("093000_Plate_3_survey", None, "Plate_3"), ("150000_Plate_4_survey", None, "Plate_4"),
     ("093000_tape_mount_2_survey", None, "tape_mount_2"), ("101500_holderA_survey", None, "holderA"),
@@ -499,7 +499,7 @@ def test_a_stack_named_for_another_edge_is_noted(tmp_path):
 
 
 @pytest.mark.parametrize("name, test", [
-    ("143504_photodiode_f_k_stack", True), ("121500_photodiode_f_k_stack", True), ("121500_dark_stack", True),
+    ("143504_photodiode_f_k_mylab_stack", True), ("121500_photodiode_f_k_stack", True), ("121500_dark_stack", True),
     ("121500_dark_2_stack", True), ("121500_i0_test_stack", True), ("121500_beam_test_f_k_stack", True),
     ("121500_dark_glass_fe_l3_stack", False), ("121500_Darkite_stack", False), ("121500_my_diode_array_stack", False),
 ])

@@ -128,7 +128,7 @@ def test_ui_values_queue_flags_defaults_flush_and_read_only(qapp, fake_project):
     assert ses.queue_for_check([item]) == 0 and seen == [1]
     assert ses.unqueue_for_check([item]) == 1 and ses.check_queue == [] and seen == [1, 0]
     ses.queue_for_check([item])
-    assert ses.ui_value("check_queue") == [["N5", z.id, sid]]          # the queue is saved with the session
+    assert ses.ui_value("check_queue") == [["holderA", z.id, sid]]          # the queue is saved with the session
     # reopening (Reload): ui values back, the queue kept
     ses.set_project(Project.discover(fake_project))
     assert ses.ui_value("preflight_ignored") == ["f1"] and ses.ui_value("missing", 3) == 3 and ses.check_queue == [item]

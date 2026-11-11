@@ -413,7 +413,7 @@ class Session(QObject):
             self.sheet_changed.emit()
 
     def sheet_for(self, holder_name: str | None) -> list:
-        """The sample-sheet rows of a holder (its holder column names it, compared loosely: 'Plate N5' is N5); every
+        """The sample-sheet rows of a holder (its holder column names it, compared loosely: 'Plate B2' is B2); every
         row when the sheet has no holder column."""
         if not holder_name:
             return []

@@ -231,7 +231,7 @@ def test_rows_set_in_advanced_say_so_in_easy(qapp, tmp_path):
         cmp_, lib = win.compare, win.library
         win.show_perspective("compare")
         lib.add_folder(tmp_path)
-        lib.add_traces("zone 1", E, 1 / (1 + np.exp(-(E - 696))), None, source="zone 1 of 2026-11-05_092758_x_stack")
+        lib.add_traces("zone 1", E, 1 / (1 + np.exp(-(E - 696))), None, source="zone 1 of 2025-03-14_092758_x_stack")
         qapp.processEvents()
         assert not mode.is_advanced() and not cmp_.easy_chip_box.isVisible()
         i = next(k for k, r in enumerate(lib.requests) if r.signal == "sdd-scaled")

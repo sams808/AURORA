@@ -217,9 +217,9 @@ def test_many_findings_fill_in_one_batch_and_a_tick_moves_one_row(qapp, tmp_path
     proj = project(tmp_path)
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     rp, lst = win.report, win.report.preflight_list
-    finds = [Finding(id=f"k|N5|{i}", kind="ungrouped" if i % 3 else "no_settings",
-                     text=f"'{i} zone' (N5): a finding long enough to wrap over two lines of the Finding column " * (1 + i % 3),
-                     holder="N5", zone_id=1) for i in range(250)]
+    finds = [Finding(id=f"k|holderA|{i}", kind="ungrouped" if i % 3 else "no_settings",
+                     text=f"'{i} zone' (holderA): a finding long enough to wrap over two lines of the Finding column " * (1 + i % 3),
+                     holder="holderA", zone_id=1) for i in range(250)]
     rp._plan = Plan(zones=list(rp._plan.zones), findings=finds)
     inserted = []
     lst.model().rowsInserted.connect(lambda *a: inserted.append(a))

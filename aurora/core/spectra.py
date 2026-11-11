@@ -40,7 +40,7 @@ NORM_MODES = ("raw", "i0", "i0pre", "i0jump", "area", "max")
 # The automatic pre-edge window ends at least this far below E0, as Compare's larch pre-edge window does
 # (compare.DEFAULT_PRE, -20..-5 eV from E0). F K scans start at 680 eV and many fluorides have E0 at 686.5-686.8 eV,
 # inside the zone tool's first 15 % (680-687.5 eV): a line fitted there runs up the edge and turns the white line of
-# UF4 / UF5 into the minimum of the normalised trace (review 2026-11, checked against larch's pre_edge).
+# such a fluoride into the minimum of the normalised trace (review 2026-11, checked against larch's pre_edge).
 AUTO_PRE_GAP_EV = -DEFAULT_PRE[1]
 
 

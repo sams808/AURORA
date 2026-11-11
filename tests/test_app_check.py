@@ -67,7 +67,7 @@ def test_good_i0_stacks_are_read_in_a_job(qapp, tmp_path):
     qapp.processEvents()
     ses = win.session
     sid, good_sid = ses.stack_id(proj.find(testdata.STACK)), ses.stack_id(proj.find(testdata.STACK2))
-    ses.set_holder("N5")
+    ses.set_holder("holderA")
     sd = ses.stack(sid)
     ses.zones.good_i0[good_sid] = True                       # marked good, not loaded (a reopened session)
     x0, x1, y0, y1 = sd.bbox

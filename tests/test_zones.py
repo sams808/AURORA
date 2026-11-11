@@ -94,9 +94,10 @@ def test_normalise_modes():
     assert np.isnan(normalise(E, y, "i0", None).y).all()
 
 
-def _uf4_like():
-    """The real F K grid (680-685 eV in 0.5 eV, 685-700 in 0.1, 700-730 in 0.2) and a UF4-like PFY / I0: edge at
-    686.6 eV (E0 of 141456_UF4 is 686.66), white line at 691.8 eV, a sloped background. Synthetic."""
+def _early_edge_like():
+    """The real F K grid (680-685 eV in 0.5 eV, 685-700 in 0.1, 700-730 in 0.2) and the PFY / I0 of a fluoride with an
+    early edge: edge at 686.6 eV (E0 of a real such stack is 686.66), white line at 691.8 eV, a sloped background.
+    Synthetic."""
     E = np.r_[np.arange(680.0, 685.0, 0.5), np.arange(685.0, 700.0, 0.1), np.arange(700.0, 730.0001, 0.2)]
     y = (30 + 0.4 * (E - 680) + 250 / (1 + np.exp(-(E - 686.6) / 0.8))
          + 150 * np.exp(-0.5 * ((E - 691.8) / 1.2) ** 2) + 80 / (1 + np.exp(-(E - 715) / 4)))
@@ -104,10 +105,10 @@ def _uf4_like():
 
 
 def test_automatic_pre_window_stays_below_the_edge():
-    """The zone tool's first 15 % (680-687.5 eV) reached the UF4 / UF5 edges at 686.5-686.8 eV, and the white line
-    became the minimum of the Easy trace (-0.27 on the real 141456_UF4; larch's pre_edge gives +1.49 on the same
-    arrays). The automatic window now ends 5 eV below E0 and says so."""
-    E, y = _uf4_like()
+    """The zone tool's first 15 % (680-687.5 eV) reached fluoride edges at 686.5-686.8 eV, and the white line became
+    the minimum of the Easy trace (-0.27 on a real such stack; larch's pre_edge gives +1.49 on the same arrays). The
+    automatic window now ends 5 eV below E0 and says so."""
+    E, y = _early_edge_like()
     i0 = np.full(E.size, 2.0)
     n = normalise(E, y, "i0jump", i0, edge_ev=696.7)
     assert 681.0 < n.pre[1] <= 686.6 - 5.0 + 0.1 and n.pre[0] == 680.0

@@ -202,7 +202,7 @@ def test_a_summary_written_after_the_zone_flags_it_on_reload(qapp, fake_project)
         d = fake_project / "processed" / testdata.DAY
         d.mkdir(parents=True, exist_ok=True)
         (d / "summary.json").write_text(json.dumps({"day": testdata.DAY, "holders": [{
-            "holder": "N5", "survey": testdata.SURVEY,
+            "holder": testdata.HOLDER, "survey": testdata.SURVEY,
             "scans": [{"scan": testdata.STACK, "sdd_saturated": ["sdd3"]}]}]}), encoding="utf-8")
         win.home.set_project(Project.discover(fake_project))            # Reload of the same folder
         pump(qapp)
@@ -219,8 +219,9 @@ def test_a_label_picked_from_the_list_renames_at_once(qapp, fake_project):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
-    (fake_project / "samples.csv").write_text("sample sheet\nFinal plate#,Sample group,Sample ID\nN5,Minerals,1 alpha\n",
-                                              encoding="cp1252")
+    from aurora.core import testdata
+    (fake_project / "samples.csv").write_text("sample sheet\nFinal plate#,Sample group,Sample ID\n"
+                                              f"{testdata.HOLDER},Group 1,1 alpha\n", encoding="cp1252")
     win, sid = open_window(qapp, Project.discover(fake_project))
     try:
         win.activateWindow()

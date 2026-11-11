@@ -32,5 +32,6 @@
  "survey_grid_min": [20, 20],
  "survey_pitch_mm": 0.2,
  "window_scan": "103000_sample1_f_k_stack",
+ "whole_pad_stacks": ["103000_sample1_f_k_stack"],
  "report": {"groups": ["Group 1"], "min_entries": 1, "min_pages": 2, "figure_words": ["Group"]}
 }

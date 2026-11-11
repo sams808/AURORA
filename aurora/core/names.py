@@ -65,7 +65,7 @@ def label_from_name(name: str, words=()) -> str:
     s = scan_base(name)
     m = re.match(r"^(.+?)_(\d+)$", s)
     if m and pat.search(m.group(1)) and pat.search(m.group(1)).start() > 0:
-        s = m.group(1)                                  # 'UF4_u_n45coarse_1': the re-take counter of a plan
+        s = m.group(1)                                  # 'sampleB_u_n45coarse_1': the re-take counter of a plan
     while True:
         m = pat.search(s)
         if not m or m.start() == 0:
@@ -108,7 +108,7 @@ def short_time(sid: str) -> str:
 
 def strip_scan_suffix(name: str, words=()) -> str:
     """The sample label of a scan folder name (label_from_name): '103000_sample1_f_k_stack' -> 'sample1';
-    '092758_soil_coarse_fraction_ca_l_stack' -> 'soil_coarse_fraction'; '150255_UF4_u_n45coarse_1_stack' -> 'UF4'."""
+    '092758_soil_coarse_fraction_ca_l_stack' -> 'soil_coarse_fraction'; '150255_sampleB_u_n45coarse_1_stack' -> 'sampleB'."""
     return label_from_name(name, words)
 
 

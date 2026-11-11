@@ -162,7 +162,7 @@ FINE_E = np.round(np.r_[np.arange(680.0, 685.0, 0.5), np.arange(685.0, 700.0, 0.
 def _whole_pad_sums(seed: int, n_pix: int = 361, dip_at: float | None = None, i0_spike_at: float | None = None):
     """Zone sums of a whole pad on the beamtime's F K grid (311 energies, 0.5 / 0.1 / 0.2 eV steps): a smooth I0 that
     drifts (a slow random walk of 6e-4 per step on a falling curve) with white noise of 1e-3, which gives the
-    statistics of the 2026 whole-pad I0 (UF4, 361 px: residual to the running median exactly 0 at 40 % of the
+    statistics of a real whole-pad I0 (361 px: residual to the running median exactly 0 at 40 % of the
     energies, point-to-point noise 1.3e-3); SDD counts proportional to it (Poisson).
     dip_at: a 3 % beam dip seen by I0 and every SDD; i0_spike_at: a 3 % jump of I0 alone."""
     from aurora.core.zones import ZoneSums
@@ -227,13 +227,17 @@ def test_near_edge_note_uses_the_measured_edge():
     assert "1 point near the edge was treated as a spike, check the preview" in t.notes
 
 
-def test_coherent_on_real_whole_pads(real_project):
-    """The 2026 beamtime's whole pads (UF4, UO2F2: 361 px): the coherent mode flagged 57 and 52 of 311 I0 points of
-    ordinary noise (1-5 sigma) and Check warned '19 % of the points flagged bad'."""
+def test_coherent_on_real_whole_pads(real_project, real_expect):
+    """Whole pads of a real beamtime (two stacks of 361 px, `whole_pad_stacks` of its expectations file): the coherent
+    mode flagged 57 and 52 of 311 I0 points of ordinary noise (1-5 sigma) and Check warned '19 % of the points flagged
+    bad'."""
     from aurora.core import qc
     from aurora.core.model import Project
     proj = Project.discover(real_project)
-    for name in ("141456_UF4_f_k_stack", "181731_UO2F2_f_k_stack"):
+    names = real_expect.get("whole_pad_stacks")
+    if not names:
+        pytest.skip("no whole_pad_stacks in the beamtime's aurora_expectations.json")
+    for name in names:
         scan = proj.find(name)
         if scan is None:
             pytest.skip(f"{name} not in the beamtime folder")
