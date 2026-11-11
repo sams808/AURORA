@@ -3,7 +3,9 @@
 Nine tutorials, each ten minutes or less. The first eight use the synthetic demo beamtime that AURORA writes for you,
 so nothing you do touches real data; the ninth takes the same steps on a beamtime of your own. Controls are described
 in full in `MANUAL.md`. AURORA starts in Easy mode; the steps marked *Advanced* need Advanced mode (**View > Advanced
-mode**, the mode button at the right of the top bar, or **Ctrl+Shift+A**).
+mode**, the mode button at the right of the top bar, or **Ctrl+Shift+A**). In Easy mode the *Getting started* row at
+the top of Home names the next step and its button, and **Help > Glossary** explains every word the window shows (an
+underlined word in a caption opens it at that word).
 
 The demo beamtime is one click away: **Help > Open the demo beamtime** (or the **Open the demo beamtime** button on
 Home before a project is open) writes it into the user data folder and opens it. To put it somewhere else (a new or
@@ -41,9 +43,16 @@ use `aurora-cli.exe demo …` on Windows or `AURORA.app/Contents/MacOS/AURORA de
    ```
 
 5. Double-click the complete stack. AURORA switches to Reduce with that scan loaded.
+6. Choose **Survey** (**Ctrl+2**): the map of holderA, its colour scale from *low* to *high*, the rectangle of the
+   complete stack over the two bright pads. Choose **Draw** and drag a rectangle around the left pad, holding the
+   button down for a moment: the **Zone preview** on the right shows the X-rays of the points inside the outline while
+   you drag and, once you let go, the fluorescence spectrum of the stack it covers, rising at the F K edge. **Open in
+   Reduce** opens that stack with the new sample selected. Press **Ctrl+Z** to take the outline away again: Tutorial 2
+   draws the two samples in Reduce.
 
-What you learned: how a holder is formed (a survey followed by its stacks), what the statuses mean, and that the
-headless listing and the tree agree.
+What you learned: how a holder is formed (a survey followed by its stacks), what the statuses mean, that the
+headless listing and the tree agree, and that a sample can be outlined on the Survey with its spectrum shown while
+you draw.
 
 ## Tutorial 2: draw zones and reduce a stack
 

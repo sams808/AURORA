@@ -7,9 +7,17 @@ AURORA is version 2 of John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_B
 
 Status 0.4.0 (2026-11-08): every perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps, Report).
 AURORA starts in **Easy mode**, the basic path of John Bussey's GUI (open the beamtime, draw the samples, check the
-spectra, compare, fit with LCF, build the report); **Advanced mode** (View > Advanced mode, the button in the top bar,
-or Ctrl+Shift+A) shows every option, Maps included. Zones attach to every stack that covers them, every edit can be
-undone, the session is backed up, and the report says what it will contain before it is built. See `CHANGELOG.md`.
+spectra, compare, fit with LCF, build the report) in plain words, for people new to X-ray absorption: a glossary
+(Help > Glossary), a *Getting started* row on Home and a quick start in the user guide. **Advanced mode** (View >
+Advanced mode, the button in the top bar, or Ctrl+Shift+A) shows every option, Maps included. Samples are drawn and
+erased on the Survey and in Reduce with one tool bar, and their spectrum shows while the outline is drawn. Zones
+attach to every stack that covers them, every edit can be undone, the session is backed up, and the report says what
+it will contain before it is built. See `CHANGELOG.md`.
+
+AURORA is blank: it ships no lab's names, samples or settings, and works on your own beamtime. Only the scan folders
+are needed (`raw/<day>/<scan>/`, or a loose folder of scan folders); the sample sheet, the fixed emission lines
+(`config/roi_bins.json`), the SDD calibration, a plate layout and hand-drawn holder sketches are optional, and the
+manual says what each adds. A beamtime on a read-only share works through a working folder of your own.
 
 ## Downloads
 
@@ -61,8 +69,8 @@ The build scripts create a clean `.venv-build` (Python 3.12, the pins of `packag
 follows every import it finds in site-packages, and a global Python with torch or scikit-learn installed would turn a
 300 MB bundle into 1 GB.
 
-The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with `processed/`, `config/`, `reports/` beside it;
-a loose folder of scan folders (John Bussey's `CLS GUI/`) opens too. `aurora.core` never imports Qt; `aurora.app` holds
+The beamtime folder layout is `raw/<day>/<HHMMSS>_<name>_<plan>/` with the optional `processed/`, `config/`,
+`reports/` beside it; a loose folder of scan folders (John Bussey's `CLS GUI/`) opens too. `aurora.core` never imports Qt; `aurora.app` holds
 the PySide6 interface.
 
 ## Continuous integration

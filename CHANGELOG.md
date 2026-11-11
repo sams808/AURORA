@@ -1,8 +1,63 @@
 # Changelog
 
 ## 0.4.0 (2026-11-08)
-Easy mode follows John Bussey's GUI step by step, Advanced mode keeps every option, zones are never lost, and AURORA
-installs on Windows and macOS.
+Easy mode follows John Bussey's GUI step by step and speaks plain words, Advanced mode keeps every option, zones are
+drawn and erased on the Survey and in Reduce with a live preview, a beamtime of any lab opens with only its scan
+folders, zones are never lost, and AURORA installs on Windows and macOS.
+
+### For newcomers, and for your own data
+- Help > Glossary explains every word AURORA shows in plain language; tooltips end with "What is …?", underlined
+  words in the captions open the glossary, and small "?" buttons sit next to the step-2 preset, the Check view, the
+  Compare signals and the Fit target.
+- Getting started on Home (Easy mode): what a beamtime folder looks like and the steps before a project is open, then
+  a row with the steps done and the next one, its button and Hide, and a Next link in the top bar. Settings "show the
+  getting-started guide (Easy mode)". F1 in Easy mode opens the user guide's quick start at the page, with a
+  screenshot of that page in Easy mode.
+- Easy mode speaks plain words everywhere, the expert term in parentheses; Advanced mode keeps the precise terms.
+  Reduce step 4 says in one sentence how the spectrum is made (the exact settings in its tooltip); maps say what their
+  colour shows and their colour scale reads low to high; Check says what to look for and its messages are plain;
+  Compare names signals in words and draws a spectrum it cannot scale dashed, with the reason; Fit says what a
+  coefficient means; the report has one plain row per kind of finding and "How to read the figures". Errors read in
+  plain words (a protected or read-only folder, a file open in another program, a missing share, a full disk).
+- A beamtime AURORA may not write into (a locked drive, a read-only share, a protected folder) gets a banner with
+  **Choose a working folder…**: the outlines, the checks, the Compare library, the caches, the saved spectra and the
+  reports then go to a folder of your own, remembered for that beamtime, and nothing is written into the beamtime.
+  Until then Check offers Show in Compare without saving and Build the report is disabled with the reason.
+- A new sample takes its name and group from the sample sheet when the stack's name holds a sample ID of the holder;
+  without a sheet row the sample box offers the labels of the holder's scans; Add to Check on a sample still called
+  "zone N" opens a field "Name this sample:" (Enter names it, Esc keeps "zone N").
+- A session saved on another computer says so when it opens (session.json keeps a short hash of the computer, never
+  its name).
+- A beamtime with only `raw/<day>/<scan>` opens and works: every configuration file is optional, and a file of the
+  wrong shape never stops a project; Home and `aurora project` say what was left out and why. The project's own
+  `config/sdd_calibration.json` is used before the CLS toolkit's file next to the beamtime (named when used); File >
+  Import SDD calibration… adds one.
+- Sample sheets of any lab: other encodings, separators, title lines and column names; File > Choose sample sheet…
+  and New sample sheet…; the summary names the columns read and every CSV not used.
+- Holders keep their numbers; day folders under other names, scan folders without _survey / _stack and scans one
+  level too deep are read or explained; scan labels and edges follow any lab's naming (`config/naming.json` for a
+  beamtime's own words), and the edge is checked against the energies. A sample named dark_glass is no longer a test
+  scan; a stack can be treated as a sample or a test by hand (Home, right-click).
+- Without a fixed line for the edge's own line, a new sample starts on the window of that line: the calibrated line
+  of the edge, else John Bussey's 60:83 for F K (his GUI's default, so the saved files equal his), else the line of
+  the edge on the nominal 10 eV per channel. Save as a fixed line… writes `config/roi_bins.json`; a zone on a line the
+  beamtime does not define is flagged in Reduce and before building.
+- The hand-drawn holder sketch is optional: the Survey shows a Sketch card only when the holder has one; **Load a
+  sketch…** (next to the holder, and in the map's right-click menu) and **Remove the sketch** manage AURORA's copy in
+  `.aurora/sketches/`, and `sketches/` and `zones_html/sketches/` are read too. The sample card is one line when there
+  is no sheet or no row for the holder, and Grid of zones hides the rows it has nothing for.
+- Survey: opens on the beamtime's own line; the first view holds the survey map and every scan and zone of the holder
+  and says when some lie outside the map (the map's right-click menu offers Fit view); a holder without a survey map
+  and a missing or unmatched sample sheet are explained. Grid of zones can save its grid as a plate layout.
+- The sample sheet reader also recognises the columns Holder, Group, Edges, Formula and Notes (names compared without
+  case, spaces or punctuation).
+- The demo beamtime is neutral and carries the whole Easy job: made-up names (holder holderA, samples 1 alpha and
+  2 beta, groups Group 1 and Group 2, spectra NaF, CaF2, LiF, mixture 1 and 2), a survey over the stack with a bright
+  pad under each sample, a sample sheet in plain columns and a README.
+- Nothing of one lab or beamtime ships: neutral examples in the code and the manuals, and tests that keep account
+  names, beamtime folder names and an optional local list of words out of the published files.
+- Home's tree has a Pixels column, edges in words, "not used" holders and flags in words; the scan summary starts with
+  what the scan is; opening shows "Reading <name> … i of n scans"; the save indicator dates an earlier save.
 
 ### Window, help and navigation
 - Light and dark themes (View > Appearance: follow the system, light or dark) with contrast checked for text and
@@ -185,8 +240,17 @@ installs on Windows and macOS.
   Zones previewed with the good-I0 mean read the good-I0 scans in the background, with Cancel (in Check and Send to
   Compare too).
 - The automatic pre-edge window (pre left blank) ends at least 5 eV below E0 when the first 15 % of the scan reaches
-  the edge, in Reduce, Check and the report: on UF4 / UF5 the Easy trace's white line was the minimum of the trace
-  (-0.27) and is now its maximum (+1.2). A note in Check and the report says when the window was shortened.
+  the edge, in Reduce, Check and the report: on a scan that starts close to its edge the Easy trace's white line was
+  the minimum of the trace (-0.27) and is now its maximum (+1.2). A note in Check and the report says when the
+  window was shortened.
+- The preview's legend sits in a line of its own under the fluorescence panel (SDD1 to SDD4 and the sum, a detector
+  left out of the sum marked so), never over the rise at the edge nor cut at the bottom of a low panel, and the
+  plots always fit their panel after a resize. One line under the plots says what the grey bands are and gives the
+  hover readout while the pointer is over them. The step-2 plot labels the decades of its log axis only, and its
+  x axis reads *channel (about 10 eV each)*. At 1500 × 940 in Advanced mode the zone's comment shares the group's row
+  and the preview's toggles (**Show**, **all scans**) its title row, so the per-scan settings card shows a row more
+  and the page does not scroll. Compare's y axis label fits the plot, and the Survey's sample-sheet table shows its
+  column titles whole, without row numbers.
 - Batch settings: **Copy to…** a card (all scans of the zone, this scan in every zone, every scan of the edge),
   Ctrl+Shift+C / Ctrl+Shift+V, and **Rules…** with a live table of what would change, Apply now and Save as default
   (scans that arrive later inherit them). A field set by hand on a card is pinned.
@@ -220,8 +284,8 @@ installs on Windows and macOS.
   source, also on a beamtime without sgm_report; the I0 reference only uses scans within ±150 eV. In Easy mode a
   sample drawn before the verdict (Check's own probe, or an sgm_report summary that Reload finds) follows it: a
   saturated SDD leaves the sum and an invalid I0 takes the good-I0 mean, unless the field was set on a card (one undo
-  step, named in the status line). A dead (all-zero) detector's message says how to leave it out, and that John
-  Bussey's GUI only warned.
+  step, named in the status line). A ticked detector that counts nothing in the window is a warning, as in John
+  Bussey's GUI (the spectrum of the other detectors stays valid), and its message says how to leave it out.
 - New scans use a coherent de-spike that keeps real white lines (each detector is compared with the median of the
   others, so a white line common to all four stays); spike energies are reported in eV. Its threshold is never below
   k times the trace's point-to-point noise, so ordinary noise on the smooth traces of large zones is no longer taken
@@ -368,6 +432,10 @@ installs on Windows and macOS.
   `tests/local_paths.example.json`).
 
 ### Manuals
+- The user guide starts with a quick start for non-specialists (the first spectrum in five steps, what each page
+  shows in Easy mode with its screenshot, and "When something looks wrong"), and "Your own beamtime" says what each
+  optional file adds; the manual describes the folder layout and the sample sheet (2.3, 2.4), the working folder, the
+  glossary and Getting started (2.6); Tutorial 9 opens a beamtime of one's own.
 - The user guide, manual, tutorials and installation guide describe this version: Easy mode as the start mode and
   what Advanced mode adds in each perspective, every menu entry and shortcut, the session's undo and backups, the new
   subsections (opening a project, project and scan summaries, grid of zones, XRF windows, copying settings and rules,
