@@ -103,9 +103,9 @@ def test_home_marks_the_stack_of_the_next_day(qapp, tmp_path):
     home = HomePerspective()
     home.set_project(proj)
     day1, day2 = home.tree.topLevelItem(0), home.tree.topLevelItem(1)
-    assert day1.text(0) == DAY1 and day2.text(0) == DAY2
+    assert day1.text(0).startswith(f"{DAY1}  ·  ") and day2.text(0).startswith(f"{DAY2}  ·  ")   # with its counts
     holder = day1.child(0)
-    assert holder.text(0) == "holder holderA"
+    assert holder.text(0).startswith("holder holderA  ·  ")
     texts = {holder.child(i).text(0): " ".join(holder.child(i).text(c) for c in range(8))
              for i in range(holder.childCount())}
     assert "(next day)" in texts[AFTER_MIDNIGHT] and "(next day)" not in texts[LATE_SURVEY]

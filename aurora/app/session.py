@@ -79,7 +79,10 @@ NEWER_SCHEMA_TEXT = "written by a newer AURORA: edits here are not saved; export
 READ_ONLY_TEXT = "this session is read-only: edits here are not saved; export them to a file"
 LOCKED_TEXT = ("this project is open in another AURORA ({who}): this window is read-only, edits here are not saved; "
                "close the other one, then Reload")
-UNWRITABLE_TEXT = "the session cannot be saved here ({why}): edits here are not saved; export them to a file"
+UNWRITABLE_TEXT = "the session cannot be saved here: {why}. Edits here are not saved; export them to a file"
+# Easy mode, a beamtime folder AURORA cannot write: the window's banner offers the working folder (M04, S-31)
+FOLDER_READ_ONLY_EASY = ("This beamtime folder is read-only: choose a working folder (the banner above) to keep your "
+                         "outlines and spectra.")
 LOST_TEXT = ("another AURORA took this project over ({who}): edits here are no longer saved; export them to a file, "
              "or Reload to read its session")
 FOREIGN_TEXT = ("session.json was changed by another program since this window read it: that version was kept as "
@@ -341,6 +344,7 @@ class Session(QObject):
         self.read_only = self._newer = False
         self.read_only_reason = self._save_error = ""
         self.folder_read_only = False
+        self.file_host = ""                         # the 'host' header of the session read ('' none, or no header)
         self._dirty = self._user_edits = False
         self._pending_path = None
         self._file_stamp = self._file_schema = self._file_bytes = None
@@ -362,8 +366,8 @@ class Session(QObject):
             self.holder_changed.emit(self.current_holder)
         self.save_state.emit(self._idle_state())
         if notice:
-            self.status.emit(notice)
-        if locked:
+            self.status.emit(self.read_only_message() if self.folder_read_only and notice == locked else notice)
+        if locked and not self.folder_read_only:     # a folder AURORA cannot write: the banner says it, no box
             self.warned.emit("Read-only session", locked)
 
     def _reload(self, project: Project) -> None:
@@ -565,28 +569,59 @@ class Session(QObject):
     def backup_dir(self) -> Path:
         return self.project.aurora_dir / BACKUP_DIR
 
-    def use_work_folder(self, work: Path) -> None:
+    def earlier_outlines(self) -> tuple[int, dict[str, int], str]:
+        """(n, {holder: n}, when) of the outlines on screen that this computer did not save: a beamtime session read
+        without a 'host' header (an older AURORA, a colleague) or from another computer, before any edit here. (0, {},
+        '') otherwise. The working folder asks whether to keep them (persona M03)."""
+        if self.project is None or self._user_edits or (self.file_host and self.file_host == host_id()):
+            return 0, {}, ""
+        from aurora.app.zone_tools import zone_drawn
+        per = {k: len([z for z in hz.zones if zone_drawn(z)]) for k, hz in self.zones.holders.items()}
+        per = {k: n for k, n in per.items() if n}
+        when = _local_naive(self.zones.exported) if self.zones.exported else None
+        return sum(per.values()), per, (f"{when:%Y-%m-%d %H:%M}" if when is not None else "")
+
+    def use_work_folder(self, work: Path, keep_outlines: bool = True) -> None:
         """Keep this beamtime's session in a working folder from now on (Choose a working folder…). The working
-        folder gets the zones on screen, edits not saved yet included, when it has no session of its own; one it
-        already has is read. The session then opens again there: lock, autosave, backups."""
+        folder gets the zones on screen, edits not saved yet included, when it has no session of its own (with
+        keep_outlines=False it starts empty instead: someone else's outlines stay in the beamtime); one it already
+        has is read. The session then opens again there: lock, autosave, backups; the holder, zone and stack on
+        screen stay (M14)."""
         if self.project is None:
             return
+        keep = (self.current_holder, self.current_zone, self.current_stack)
         from aurora.core.io.safety import assert_writable
         from aurora.core.io.textio import write_text_atomic
         target = Path(work) / ".aurora" / "session.json"
         assert_writable(target)
         Path(work).mkdir(parents=True, exist_ok=True)
-        if not target.exists() and not self._newer and (self._user_edits or self.zones.holders):
+        if not target.exists() and not self._newer and keep_outlines and (self._user_edits or self.zones.holders):
             target.parent.mkdir(parents=True, exist_ok=True)
-            self.zones.exported = self.clock().isoformat(timespec="seconds")
-            self.zones.stamp(f"AURORA {__version__}", host_id())
+            adopted = not self._user_edits and bool(self.file_host != host_id())
+            self.zones.exported = self.zones.exported if adopted else self.clock().isoformat(timespec="seconds")
+            self.zones.stamp(f"AURORA {__version__}", "" if adopted else host_id())    # never 'mine' when copied
             write_text_atomic(target, json.dumps(self.zones.to_json(), indent=1, ensure_ascii=False,
                                                  default=json_default))
             log.info("%s: the session on screen written to the working folder %s", self.project.root, work)
+        elif not target.exists() and not keep_outlines:
+            target.parent.mkdir(parents=True, exist_ok=True)         # an empty session of its own: the beamtime's
+            empty = ZonesFile(project=self._project_id())             # outlines stay where they are
+            empty.ui = dict(self.zones.ui or {})                      # the choices on screen (sample sheet …) stay
+            empty.exported = self.clock().isoformat(timespec="seconds")
+            empty.stamp(f"AURORA {__version__}", host_id())
+            write_text_atomic(target, json.dumps(empty.to_json(), indent=1, ensure_ascii=False, default=json_default))
+            log.info("%s: an empty session started in the working folder %s", self.project.root, work)
         self._save_timer.stop()
         self._dirty = self._user_edits = False
         self.project.work = Path(work)
         self._open(self.project)
+        holder, zid, sid = keep
+        if holder in self.holder_keys and holder != self.current_holder:
+            self.set_holder(holder)
+        if zid is not None and self.zone(zid) is not None:
+            self.select_zone(zid)
+        if sid is not None and sid in self._stacks:
+            self.select_stack(sid)
 
     @property
     def dirty(self) -> bool:
@@ -617,6 +652,14 @@ class Session(QObject):
         self.read_only = True
         self.read_only_reason = text
         return text
+
+    def read_only_message(self) -> str:
+        """Why edits are not saved, for the status line: in Easy mode, for a beamtime folder AURORA cannot write, the
+        one next step (a working folder); otherwise the reason."""
+        from aurora.app.mode import is_advanced
+        if self.folder_read_only and not is_advanced():
+            return FOLDER_READ_ONLY_EASY
+        return self.read_only_reason or READ_ONLY_TEXT
 
     def release_lock(self) -> None:
         """Let the project go (the window closes, another project opens): another AURORA may then edit it."""
@@ -710,6 +753,7 @@ class Session(QObject):
         self._file_bytes = data if schema < SESSION_SCHEMA else None
         self._file_stamp = _file_stamp(sf)
         log.info("session restored from %s (schema %d)", sf, schema)
+        self.file_host = zf.host or ""
         return self._other_computer(zf)
 
     @staticmethod
@@ -1215,13 +1259,23 @@ class Session(QObject):
         self._mark_dirty()
         z = self.zone() if self.current_zone is not None else None
         if z is not None and frozenset(z.settings) != state.attached:
-            self.status.emit(self.attach_text(z))
+            text = self.attach_text(z)
+            if text:
+                self.status.emit(text)
 
     def attach_text(self, z: Zone) -> str:
-        """'zone 3 attached to 2 scans (1 not loaded)'."""
+        """'zone 3 attached to 2 scans (1 not loaded)'; in Easy mode 'sample 3 lies on 2 complete stacks' and, for
+        none, 'sample 3 lies on no complete stack: only complete stacks give spectra' (persona S-08)."""
+        from aurora.app.mode import is_advanced
         from aurora.app.vocab import plural
         n = len(z.settings)
         off = sum(1 for sid in z.settings if sid not in self._stacks)
+        if not is_advanced():
+            from aurora.app.zone_tools import sample_name, zone_drawn
+            who = sample_name(z)
+            if n == 0:                          # an outline not drawn yet lies nowhere: nothing to say
+                return f"{who} lies on no complete stack: only complete stacks give spectra" if zone_drawn(z) else ""
+            return f"{who} lies on {plural(n, 'complete stack')}"
         return f"zone {z.id} attached to {plural(n, 'scan')}" + (f" ({off} not loaded)" if off else "")
 
     def _apply_snapshot(self, snap: Snapshot, place: tuple, message: str) -> None:
@@ -1361,9 +1415,15 @@ class Session(QObject):
         return True
 
     def scan_labels(self, key: str | None = None) -> list[str]:
-        """The sample labels of the holder's stacks (the sample box's list when the sheet has no row for the holder)."""
+        """The sample names of the holder's stacks (the sample box's list when the sheet has no row for the holder):
+        the sample part of each scan name, without the holder tag and the edge and lab suffix ('quartz_grains', not
+        'quartz_grains_f_k_lab': persona S-33)."""
+        from aurora.core.names import sample_part
         key = key or self.current_holder
-        return sorted({s.label for s in self.stacks_of(key) if s.label}) if key else []
+        if not key:
+            return []
+        h = self.holder(key)
+        return sorted({sample_part(s.name, h.name if h is not None else None) for s in self.stacks_of(key) if s.label})
 
     def delete_zone(self, zid: int) -> None:
         """Delete a zone of the current holder. No confirmation: Ctrl+Z brings it back."""
@@ -1613,7 +1673,7 @@ class Session(QObject):
             log.warning("autosave for %s dropped: the project is now %s", pending, path)
             return False
         if self.read_only or not self._check_lock():
-            self.status.emit(self.read_only_reason or READ_ONLY_TEXT)
+            self.status.emit(self.read_only_message())
             self.save_state.emit("read-only")
             return False
         from aurora.core.io.safety import assert_writable
@@ -1642,7 +1702,9 @@ class Session(QObject):
         self._dirty = self._user_edits = False
         self._save_error = ""
         self._known_sig = self._signature()
-        self.status.emit(f"zones saved to {path}")
+        from aurora.app.mode import is_advanced
+        if is_advanced():                       # Easy: the top bar's 'saved 12:03' says it (the path in its tooltip);
+            self.status.emit(f"zones saved to {path}")    # the status line keeps what the last stroke said (M10)
         self.save_state.emit(f"saved {now:%H:%M}")
         last = self._last_snapshot
         # a newest snapshot 'in the future' (named before a move to a time zone further west, or before a DST change)

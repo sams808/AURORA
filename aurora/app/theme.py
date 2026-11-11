@@ -41,7 +41,7 @@ LIGHT = {
     # text
     "ink": "#15213B", "muted": "#4E5D7A", "disabled": "#5F6B84", "placeholder": "#5F6B84", "link": "#0A6A5B",
     "select_fg": "#15213B", "on_action": "#FFFFFF", "tooltip_fg": "#F4FFF8", "chrome_text": "#F4FFF8",
-    "crumb": "#B8C7E3", "rail_text": "#C9D6F0", "on_accent": "#0A1430",
+    "crumb": "#B8C7E3", "rail_text": "#C9D6F0", "on_accent": "#0A1430", "chrome_link": "#5FDCC5",
     "ok_fg": "#0A5F52", "ok_bg": "#E3F8F3", "warn_fg": "#8A4B00", "warn_bg": "#FFF1DD", "bad_fg": "#9B1C1C",
     "bad_bg": "#FDE2E2", "plot_fg": "#2A3652", "map_fg": "#C9D6F0",
     # UI parts and lines
@@ -55,7 +55,7 @@ DARK = {
     "tooltip_bg": "#27334E", "action_disabled_bg": "#232E46", "plot_bg": "#172033", "map_bg": "#0B1630",
     "ink": "#E7EDF8", "muted": "#A9B6CF", "disabled": "#8F9BB3", "placeholder": "#97A3BC", "link": "#5FDCC5",
     "select_fg": "#E7EDF8", "on_action": "#06201B", "tooltip_fg": "#F4F7FC", "chrome_text": "#F4FFF8",
-    "crumb": "#B8C7E3", "rail_text": "#C9D6F0", "on_accent": "#0A1430",
+    "crumb": "#B8C7E3", "rail_text": "#C9D6F0", "on_accent": "#0A1430", "chrome_link": "#5FDCC5",
     "ok_fg": "#7FE0CC", "ok_bg": "#123B35", "warn_fg": "#F5C27E", "warn_bg": "#3B2A12", "bad_fg": "#FFA3A3",
     "bad_bg": "#43191E", "plot_fg": "#C9D3E6", "map_fg": "#C9D6F0",
     "aurora": "#38E0C2", "action": "#2EC4A6", "action_dark": "#5AD6BE", "edge": "#6F7E9C", "focus": "#38E0C2",

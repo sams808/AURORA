@@ -43,7 +43,8 @@ def test_a_zone_attaches_to_a_stack_never_loaded(qapp, project2, tmp_path):
     assert set(z.settings) == {SID_A, SID_B} and set(z.members) == {SID_A, SID_B}
     assert z.members[SID_B] == list(range(12)) and z.settings[SID_B].n == 12
     assert z.settings[SID_B].stack == STACK_B and z.settings[SID_B].line == z.settings[SID_A].line
-    assert "zone 1 attached to 2 scans (1 not loaded)" in msgs
+    assert "both lies on 2 complete stacks" in msgs                   # Easy words (Advanced: 'zone 1 attached to
+    assert not any("no complete stack" in m for m in msgs)            # 2 scans (1 not loaded)'); never 'none' first
     assert ses.stack_loaded(SID_B) is None             # attaching never loads
     # the report sees both zone x scan pairs
     kw = {k: v for k, v in {"png_dpi": 60, "appendix": False, "maps": False}.items()

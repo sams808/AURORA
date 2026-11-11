@@ -192,7 +192,7 @@ def test_export_from_the_question_keeps_the_edits(qapp, fake_project, tmp_path, 
     ses = win.session
     assert ses.read_only and "cannot be saved here" in ses.read_only_reason
     assert win.session._ui.state == "read-only" and win.session._ui.indicator.property("tone") == "warn"
-    assert "cannot be saved here" in win.session._ui.last_message          # the non-modal box at open
+    assert win.session._ui.last_message == ""       # no box at open: the banner says it (persona M04, S-31)
     draw_zone(ses, "rescued zone")
     out = tmp_path / "rescued_zones_all.json"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), "JSON (*.json)"))

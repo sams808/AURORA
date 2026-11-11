@@ -1191,7 +1191,9 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
             with ses.edit(f"add a rectangle to zone {z.id}"):
                 z.rects.append([-0.6, 0.35, 4.9, 5.6])
             assert set(z.settings) == {sid_a, sid_b} and ses.stack_loaded(sid_b) is None, sorted(z.settings)
-            assert ses.attach_text(z).endswith("(1 not loaded)"), ses.attach_text(z)
+            from aurora.app.mode import is_advanced
+            assert (ses.attach_text(z).endswith("(1 not loaded)") if is_advanced() else
+                    ses.attach_text(z).endswith("lies on 2 complete stacks")), ses.attach_text(z)
             done = z.to_json()
             steps = ses.undo_stack.count()
             assert ses.undo() and z.id not in [q.id for q in ses.holder_zones().zones]
@@ -1522,7 +1524,7 @@ def _gui_checks(r: _Runner, ctx: dict, base: Path) -> None:
         pump(5)
         lst = rp.preflight_list
         total = rp.totals.text()
-        assert re.fullmatch(r"\d+ zones? · \d+ spectr(um|a) · \d+ warnings?( · \d+ notes?)?", total), total
+        assert re.fullmatch(r"\d+ (zone|sample)s? · \d+ spectr(um|a) · \d+ warnings?( · \d+ notes?)?", total), total
         n = lst.topLevelItemCount()
         if n:
             first = lst.topLevelItem(0)                 # several findings of one kind sit under a plain parent row

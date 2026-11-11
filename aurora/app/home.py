@@ -19,8 +19,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QMenu, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMenu, QPushButton, QSplitter, QStyledItemDelegate, QTextBrowser,
+                               QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, shortcuts
 from aurora.app.help_text import explain, header_tips
@@ -155,6 +155,38 @@ def path_line(project: Project) -> str:
     work = f"   ·   working folder {project.work}" if getattr(project, "work", None) else ""
     return (f"{project.root}   ·   {days}, {plural(project.n_holders, 'holder')}, "
             f"{plural(len(project.scans), 'scan')}{work}")
+
+
+HOLDER_ROLE = Qt.UserRole + 7                 # a holder row of the tree: the holder
+
+
+class ScanNameDelegate(QStyledItemDelegate):
+    """The Scan column of a scan row when its folder name does not fit: the sample part of the name (the time has its
+    own column; the holder tag, the edge and the lab suffix go), elided at its end; the full name stays in the text
+    and the tooltip (persona S-04: '095242_…5_stack' hid the one word that finds a sample)."""
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        if index.column() != 0:
+            return
+        s = index.data(Qt.UserRole)
+        if not isinstance(s, ScanInfo):
+            return
+        fm = option.fontMetrics
+        room = option.rect.width() - 8
+        if room <= 0 or fm.horizontalAdvance(option.text) <= room:
+            return
+        from aurora.core.names import sample_part
+        option.text = fm.elidedText(sample_part(s.name, s.holder or None), Qt.ElideRight, room)
+
+
+def short_energies(s) -> str:
+    """'670–735 eV' (Easy): the range without decimals, never cut in the middle of a number (M01)."""
+    if s.kind == "survey":
+        return f"{s.e_min:.0f} eV" if s.e_min == s.e_min else ""
+    if s.n_energies and s.e_min == s.e_min:
+        return f"{s.e_min:.0f}–{s.e_max:.0f} eV"
+    return s.energy_text
 
 
 def breakable(text: str) -> str:
@@ -354,7 +386,8 @@ class HomePerspective(QWidget):
         # every column in view at 1200 px: the Scan column takes the width the others leave and elides long names
         # in the middle (the full name is its tooltip); a fixed 360 px pushed Energies, Points and Flags off-screen
         self.tree.setTextElideMode(Qt.ElideMiddle)
-        self._columns = fit_columns(self.tree, first_chars=16)
+        self.tree.setItemDelegateForColumn(0, ScanNameDelegate(self.tree))       # names lead with the sample (S-04)
+        self._columns = fit_columns(self.tree, first_chars=16, keep=(COLS.index("Edge"), COLS.index("Status")))
         self.tree.currentItemChanged.connect(self._on_select)
         self.tree.itemDoubleClicked.connect(self._activated)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -372,8 +405,8 @@ class HomePerspective(QWidget):
         self.details.setHtml(self._welcome_html())
         right.body.addWidget(self.details, 1)
         split.addWidget(right)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 2)
+        split.setStretchFactor(0, 16)                  # the tree about 64 % of the width (M01): its words whole
+        split.setStretchFactor(1, 9)
         root.addWidget(split, 1)
 
         self.empty_state = WelcomePanel(self, parent=self.tree)
@@ -729,21 +762,27 @@ class HomePerspective(QWidget):
             if day.continued:
                 holders = sorted({s.holder for s in day.continued})
                 note = f"continues holder {', '.join(holders)}"
-            d_item = QTreeWidgetItem([day.date or day.path.name, "", plural(len(day.holders), "holder"), "", note,
-                                      "", plural(len(day.scans) + len(day.continued), "scan"), ""])
+            # the day's and the holder's counts in the first column, which has the room (M01: '28…ns', '4 co…acks')
+            counts = f"{plural(len(day.holders), 'holder')}, {plural(len(day.scans) + len(day.continued), 'scan')}"
+            d_item = QTreeWidgetItem([f"{day.date or day.path.name}  ·  {counts}", "", "", "", note, "", "", ""])
+            d_item.setToolTip(0, f"{day.date or day.path.name}: {counts}")
             d_item.setData(0, Qt.UserRole, None)
             if day.continued:
                 d_item.setToolTip(STATUS_COL, f"{plural(len(day.continued), 'stack')} of this day continue a holder of "
                                               "an earlier day (recorded after midnight): listed under that holder")
             self.tree.addTopLevelItem(d_item)
+            d_item.setFirstColumnSpanned(not note)           # the day and its counts across the row (M01)
             for holder in day.holders:
                 n_ok = len(holder.stacks)
                 title = f"holder {holder.name}" + (f" ({holder.display})" if holder.display != holder.name else "")
-                h_item = QTreeWidgetItem([title, "", "", "", f"{n_ok} complete {'stack' if n_ok == 1 else 'stacks'}",
-                                          "", "", f"{len(holder.dropped)} not used" if holder.dropped else ""])
-                if holder.dropped:
-                    h_item.setToolTip(FLAGS_COL, NOT_USED_TIP)
+                summary = (f"{title}  ·  {n_ok} complete {'stack' if n_ok == 1 else 'stacks'}"
+                           + (f", {len(holder.dropped)} not used" if holder.dropped else ""))
+                h_item = QTreeWidgetItem([summary, "", "", "", "", "", "", ""])
+                h_item.setToolTip(0, summary + (f"\n{len(holder.dropped)} not used: {NOT_USED_TIP}" if holder.dropped
+                                                else ""))
+                h_item.setData(0, HOLDER_ROLE, holder)
                 d_item.addChild(h_item)
+                h_item.setFirstColumnSpanned(True)           # its summary across the row: never cut (M01)
                 for s in holder.scans:
                     h_item.addChild(self._scan_item(s))
             for s in day.others:
@@ -755,8 +794,10 @@ class HomePerspective(QWidget):
 
     def _scan_item(self, s: ScanInfo) -> QTreeWidgetItem:
         when = f"{s.time} {later_note(s.day, s.continues)}" if s.continues else s.time
-        it = QTreeWidgetItem([s.name, when, s.kind, edge_words(s.edge_text), s.status.replace("_", " "), s.energy_text,
+        it = QTreeWidgetItem([s.name, when, s.kind, edge_words(s.edge_text), s.status.replace("_", " "),
+                              s.energy_text if is_advanced() else short_energies(s),
                               str(s.n_points) if s.n_points else "", ""])
+        it.setToolTip(5, s.energy_text)
         it.setData(0, Qt.UserRole, s)
         it.setToolTip(0, s.name)
         if s.edge_text:
@@ -791,8 +832,12 @@ class HomePerspective(QWidget):
             it = stack.pop()
             if it.data(FLAGS_COL, FLAG_ROLE) is not None:
                 self._flag_cell(it)
+            s = it.data(0, Qt.UserRole)
+            if isinstance(s, ScanInfo):             # the energies: '670–735 eV' in Easy, with decimals in Advanced
+                it.setText(5, s.energy_text if is_advanced() else short_energies(s))
             stack.extend(it.child(i) for i in range(it.childCount()))
         self.subtitle.setText(SUBTITLE[(is_advanced(), self.project is not None)])
+        self._columns.schedule()
 
     def on_link(self, url) -> None:
         """Links of the summary panel: 'glossary:<key>' opens the glossary (empty key: its top), 'aurora:help:<doc>#<a>'
@@ -822,8 +867,14 @@ class HomePerspective(QWidget):
             self._render_details()
             self.scan_selected.emit(s)
             self._check_maps(s)
-        elif self.project is not None and self._shown is not None:
-            self._shown = None                        # a day or holder row: the project summary again
+        elif self.project is not None and cur is not None and cur.data(0, HOLDER_ROLE) is not None:
+            self._shown = None                        # a holder row: what the holder holds (M22)
+            self._shown_holder = cur.data(0, HOLDER_ROLE)
+            self.details_card.set_title("Holder")
+            self.details.setHtml(self._holder_html(self._shown_holder))
+        elif self.project is not None and (self._shown is not None or getattr(self, "_shown_holder", None)):
+            self._shown = None                        # a day row: the project summary again
+            self._shown_holder = None
             self._render_details()
 
     def scan_context_menu(self, item: QTreeWidgetItem) -> QMenu | None:
@@ -925,13 +976,34 @@ class HomePerspective(QWidget):
         return (f"<h3>Could not open the project</h3><p>{where}</p><p><b>{e(failure_reason(self._failed))}.</b></p>"
                 + why + detail)
 
+    def set_project_notes(self, notes: list[str]) -> None:
+        """Sentences the window adds to the project summary (outlines saved earlier in the beamtime: M03)."""
+        self.project_notes = [n for n in notes if n]
+        if self.project is not None and self._shown is None:
+            self._render_details()
+
     def _project_html(self) -> str:
         p = self.project
         e = html.escape
         rows = overview.project_rows(p, self.facts) if is_advanced() else overview.easy_project_rows(p, self.facts)
-        return (f"<h3>{e(p.root.name)}</h3>{self._table(rows)}"
+        notes = "".join(f"<p><b>{e(n)}</b></p>" for n in getattr(self, "project_notes", []))
+        return (f"<h3>{e(p.root.name)}</h3>{notes}{self._table(rows)}"
                 f"<p style='color:{TOKENS['muted']}'>Select a scan to read its summary; double-click a complete stack "
                 "to outline a sample on it in Reduce.</p>")
+
+    def _holder_html(self, h) -> str:
+        """A holder's summary: its survey, its stacks with their status, the ones not used and why."""
+        e = html.escape
+        rows = [("survey", h.survey.name if h.survey is not None else "none (the stacks were recorded before any "
+                                                                       "survey)")]
+        for s in h.stacks:
+            rows.append(("complete stack", f"{s.time} {s.label} · {edge_words(s.edge_text)} · {short_energies(s)}"))
+        for s in h.dropped:
+            why = s.status_reason or s.status.replace("_", " ")
+            rows.append(("not used", f"{s.time} {s.label} · {why}"))
+        return (f"<h3>holder {e(h.display)}</h3>{self._table(rows)}"
+                f"<p style='color:{TOKENS['muted']}'>Double-click a complete stack to outline a sample on it in "
+                "Reduce; the Survey shows them on the map of the holder.</p>")
 
     def _scan_html(self, s: ScanInfo) -> str:
         e = html.escape

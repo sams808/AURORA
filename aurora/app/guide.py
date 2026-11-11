@@ -116,12 +116,12 @@ def next_step(s: GuideState) -> NextStep:
     if s.n_zones == 0 and "survey" not in s.visited:
         return step("survey", "Next: find your samples on the map of each holder.", _go("survey"))
     if s.n_zones == 0:
-        if SURVEY_DRAWS:
-            return step("reduce", "Next: outline your first sample: draw around it on the Survey map, or on its stack "
-                                  "map in Reduce.", _go("reduce"))
+        if SURVEY_DRAWS:                        # the drawing happens on the Survey: the step is there (M23, S-25)
+            return step("survey", "Next: draw around your first sample (Draw, then drag) on the Survey map, or on its "
+                                  "stack map in Reduce.", _go("survey"))
         return step("reduce", "Next: outline your first sample: drag over it on its map in Reduce.", _go("reduce"))
     if s.n_queued == 0 and s.n_saved == 0:
-        return step("reduce", "Next: in Reduce, select a sample and press Add to Check.", _go("reduce"))
+        return step("reduce", "Next: select the sample and press Add to Check.", _go("reduce"))
     if s.n_queued > s.n_saved:
         return step("check", "Next: look at each spectrum in Check, then press Save ticked → Compare.", _go("check"))
     if "compare" not in s.visited:
@@ -186,7 +186,7 @@ def getting_started_html(advanced: bool, tokens: dict | None = None) -> str:
             "<h4>The steps (the pages on the left, in order)</h4>"
             f"<ol>{steps}</ol>"
             f"<p><b>New to X-ray absorption?</b> The <a href='glossary:' {a}>glossary</a> explains every word AURORA "
-            "uses (I0, TEY, edge, stack …), and the user guide starts with a quick start for non-specialists "
+            "uses (I0, TEY, edge, stack …), and Help > Quick start explains these steps for non-specialists "
             f"(<a href='aurora:help:USER_GUIDE.md#quick-start-for-non-specialists' {a}>open it</a>). The demo "
             "beamtime is a small made-up beamtime with the same layout: try every step on it first.</p>")
 

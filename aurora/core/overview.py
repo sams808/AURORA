@@ -352,7 +352,16 @@ def easy_project_rows(project, facts: ProjectFacts | None = None) -> list[tuple[
         elif key == "sample sheet" and val.startswith("none"):
             val = ("none: type the sample names yourself (optional: a CSV file with a 'Sample ID' column in the "
                    "beamtime folder)")
+        elif key == "sample sheet" and " (columns: " in val:      # the column mapping: Advanced (M22, S-24)
+            head, rest = val.split(" (columns: ", 1)
+            tail = rest.split(")", 1)[1] if ")" in rest else ""
+            name, _sep, what = head.partition(", ")
+            val = f"{name}: {what}{tail}" if what else head + tail
         out.append((key, val))
+    work = getattr(project, "work", None)
+    if work:                                    # where this beamtime's work goes (M14)
+        out.insert(0, ("working folder", f"{work} (your outlines, spectra and reports; the beamtime folder is only "
+                                         "read)"))
     return out
 
 
@@ -364,8 +373,8 @@ def easy_scan_rows(scan, project=None, incomplete=None, check_error: str = "") -
     if first:
         out.append(("what it is", first))
     for key, val in scan_rows(scan, project, incomplete, check_error):
-        if val == NOT_RECORDED:
-            continue
+        if val == NOT_RECORDED or (key == "project" and val.endswith("(folder; no project id in the file)")):
+            continue                            # an empty project id says nothing to a newcomer (M22)
         if key == "estimated total":
             val = val.replace("(num_maps × time per map", "(number of maps × time per map")
         elif key == "grid" and scan.grid != (0, 0):

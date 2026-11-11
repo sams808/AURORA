@@ -124,7 +124,7 @@ def test_project_summary_replaces_no_project_open(qapp, tmp_path):
         assert word in text, word
     assert "1 survey" in text and "1 complete" in text and "1 aborted" in text and "1 test" in text
     sheet = next(proj.root.glob("*.csv"))
-    assert f"{sheet.name}, " in text
+    assert (f"{sheet.name}, " if mode.is_advanced() else f"{sheet.name}: ") in text     # Easy: no column mapping
     assert home.details_card.title.full_text() == "Project"
     win.session._save_timer.stop()
     win.close()
@@ -157,7 +157,10 @@ def test_scan_summary_easy_and_advanced(qapp, fake_project):
     assert "und_phase" in page and "Metadata" in win.home.details.toPlainText() and "6 s per map" in page
     assert "SDD geometry" in win.home.details.toPlainText()
     mode.set_advanced(False)
-    tree.setCurrentItem(holder)                                # a holder row: the project summary again
+    tree.setCurrentItem(holder)                                # a holder row: the holder's summary (M22)
+    pump(qapp)
+    assert win.home.details_card.title.full_text() == "Holder" and "Complete stack" in win.home.details.toPlainText()
+    tree.setCurrentItem(tree.topLevelItem(0))                  # a day row: the project summary again
     pump(qapp)
     assert "Holders" in win.home.details.toPlainText()
     win.close()

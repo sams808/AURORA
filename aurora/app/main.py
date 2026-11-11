@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
             ui_mode.mark_advanced_perspective(key)
         self._mode_seen: bool | None = None
         ui_mode.on_mode_changed(self, self._mode_changed)
-        on_theme_changed(self, lambda _s: self._rail_icons())
+        on_theme_changed(self, lambda _s: (self._rail_icons(), self.refresh_guide()))    # the Next link's colour too
         self._visited: set[str] = set()
         self._report_folder = ""
         self._fit_ran = False
@@ -211,6 +211,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ chrome
     def _top_bar(self) -> QWidget:
         bar = QWidget()
+        self.topbar = bar
         bar.setObjectName("topbar")
         bar.setFixedHeight(48)
         lay = QHBoxLayout(bar)
@@ -378,6 +379,11 @@ class MainWindow(QMainWindow):
         for name, title, tip in DOCS:
             self.help_actions[name] = self._action(help_, title, lambda n=name: self.show_help(n), None, "Help", tip)
         help_.addSeparator()
+        # one name for one thing (S-30): Home's 'Getting started' is the user guide's quick start
+        self.quick_action = self._action(help_, "Quick start", lambda: self.show_help("USER_GUIDE.md",
+                                                                                      "quick-start-for-non-specialists"),
+                                         None, "Help", "the user guide's quick start: the steps of Getting started on "
+                                         "Home, explained")
         self.page_help_action = self._action(help_, "Help on this page", self.help_on_page, QKeySequence.HelpContents,
                                              "Help", "the manual section of the current perspective or tab")
         self.shortcuts_action = self._action(help_, "&Keyboard shortcuts", self.show_shortcuts, "Ctrl+/", "Help",
@@ -726,16 +732,17 @@ class MainWindow(QMainWindow):
         n_stacks = sum(len(h.stacks) for _day, h in ses.holder_keys.values()) if p is not None else 0
         n_zones = 0
         if p is not None:
+            from aurora.app.zone_tools import zone_drawn
             for hz in ses.zones.holders.values():
-                n_zones += sum(1 for z in hz.zones if z.rects or getattr(z, "polygons", None) or getattr(z, "pixels", None)
-                               or getattr(z, "painted", None))
+                n_zones += sum(1 for z in hz.zones if zone_drawn(z))
         lib = self.library
         rows = getattr(lib, "requests", None)
         return g.GuideState(
             has_project=p is not None, opening=self.home._opening if p is None else "",
             read_only=p is not None and self.read_only_beamtime(),
             n_complete_stacks=n_stacks, n_zones=n_zones, n_queued=len(ses.check_queue),
-            n_saved=self.check.n_saved, n_library=len(rows) if rows is not None else 0, fit_ran=self._fit_ran,
+            n_saved=max(self.check.n_saved, self.check.saved_count()),     # saved in an earlier session too (M05)
+            n_library=len(rows) if rows is not None else 0, fit_ran=self._fit_ran,
             report_folder=self._report_folder, visited=frozenset(self._visited), current=self.current_key(),
             can_choose_work_folder=True)
 
@@ -776,17 +783,43 @@ class MainWindow(QMainWindow):
             return
         title = g.PAGE_TITLES.get(step.page, step.page)
         short = g.short_sentence(step)
+        room = self._next_room()
         if self.current_key() == step.page:
             plain = f"Here: {short}"
-            shown = _html.escape(lab.fontMetrics().elidedText(plain, Qt.ElideRight, NEXT_WIDTH))
+            shown = _html.escape(lab.fontMetrics().elidedText(plain, Qt.ElideRight, room))
         else:
             plain = f"Next: {title} – {short}"
-            el = _html.escape(lab.fontMetrics().elidedText(plain, Qt.ElideRight, NEXT_WIDTH))
-            shown = (f"<a href='aurora:goto:{step.page}' style='color:{TOKENS['link']};text-decoration:none'>{el}</a>")
+            el = _html.escape(lab.fontMetrics().elidedText(plain, Qt.ElideRight, room))
+            # the top bar is navy in both schemes: its link has its own token (the page link is 2.8:1 on it, M02)
+            shown = (f"<a href='aurora:goto:{step.page}' style='color:{TOKENS['chrome_link']};text-decoration:none'>"
+                     f"{el}</a>")
         lab.setText(shown)
         lab.setToolTip(step.sentence)
         lab.setProperty("aurora_plain", plain)
         lab.setAccessibleDescription(plain)
+
+    def _next_room(self) -> int:
+        """The width the Next link may take: NEXT_WIDTH at most, and never so much that the save indicator ('saved
+        05:57') or the crumb is squeezed (persona S-26: 'saved 0')."""
+        bar = getattr(self, "topbar", None)
+        if bar is None or bar.width() <= 0:
+            return NEXT_WIDTH
+        lay = bar.layout()
+        used = lay.contentsMargins().left() + lay.contentsMargins().right()
+        n = 0
+        for i in range(lay.count()):
+            w = lay.itemAt(i).widget()
+            if w is None or w is self.next_label or w.isHidden():
+                continue
+            used += w.sizeHint().width()
+            n += 1
+        used += lay.spacing() * (n + 1)
+        return max(120, min(NEXT_WIDTH, bar.width() - used - 8))
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        if getattr(self, "next_step", None) is not None and self.next_label.isVisible():
+            self._paint_next(self.next_step, True)
 
     def next_text(self) -> str:
         """The Next link as a reader sees it (tests)."""
@@ -895,15 +928,24 @@ class MainWindow(QMainWindow):
             pass
         if not why and is_protected(work / ".aurora"):
             why = "this folder is protected too"
+        keep = True
+        if not why and not (work / ".aurora" / "session.json").exists():
+            n, per, when = self.session.earlier_outlines()
+            if n:                               # someone else's outlines: keep them, or start empty (M03)
+                answer = self.ask_keep_outlines(n, per, when)
+                if answer == "cancel":
+                    return False
+                keep = answer == "keep"
         if not why:
             try:
-                self.session.use_work_folder(work)
+                self.session.use_work_folder(work, keep_outlines=keep)
             except OSError as err:
                 why = plain_error(err)
         if why:
             QMessageBox.warning(self, "Choose a working folder", f"{work} cannot be the working folder: {why}.")
             return False
         remember_work_folder(p.root, work)
+        self._earlier_notes()
         self.library.set_project(p)
         self.home.path_label.setText(home_path_line(p))
         self.crumb.refresh()
@@ -912,12 +954,45 @@ class MainWindow(QMainWindow):
         self.refresh_guide()
         return True
 
+    def earlier_outlines_text(self, n: int, per: dict, when: str) -> str:
+        """'This beamtime holds 12 outlines saved earlier (2026-11-08 15:16), on holder Se: they are shown and go into
+        the report.' (persona M03)."""
+        names = []
+        for key in per:
+            h = self.session.holder(key)
+            names.append(h.name if h is not None else str(key).rsplit("/", 1)[-1])
+        where = ", ".join(names[:4]) + (" …" if len(names) > 4 else "")
+        when = f" ({when})" if when else ""
+        holder = "holder" if len(names) == 1 else "holders"
+        return (f"This beamtime holds {plural(n, 'outline')} saved earlier{when}, on {holder} {where}: they are shown "
+                "and go into the report.")
+
+    def ask_keep_outlines(self, n: int, per: dict, when: str) -> str:
+        """'keep', 'empty' or 'cancel': whether the working folder starts with the outlines saved earlier in the
+        beamtime (not on this computer, or by an older AURORA) or with an empty session. Tests replace this."""
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(QMessageBox.Question, "Choose a working folder",
+                          self.earlier_outlines_text(n, per, when) + "\n\nStart your working folder with them?",
+                          QMessageBox.NoButton, self)
+        keep = box.addButton(f"Keep the {plural(n, 'earlier outline')}", QMessageBox.AcceptRole)
+        empty = box.addButton("Start with an empty session", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(keep)
+        box.exec()
+        return "keep" if box.clickedButton() is keep else "empty" if box.clickedButton() is empty else "cancel"
+
     def _on_project(self, project) -> None:
         self.statusBar().showMessage(f"{plural(len(project.scans), 'scan')} in {project.root}")
         self.session.flush()                   # an edit still waiting for its autosave is written before the switch
         self.session.set_project(project)
         self.library.set_project(project)
         self.crumb.refresh()
+        self._earlier_notes()
+
+    def _earlier_notes(self) -> None:
+        """Home's project summary says when the outlines on screen were saved earlier, not on this computer (M03)."""
+        n, per, when = self.session.earlier_outlines()
+        self.home.set_project_notes([self.earlier_outlines_text(n, per, when)] if n else [])
 
 
 def fix_working_dir() -> Path | None:

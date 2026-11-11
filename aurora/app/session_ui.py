@@ -292,6 +292,10 @@ class SessionUI(QObject):
         state = self.state
         lab.setText(state)
         lab.setVisible(bool(state))
+        lab.setMinimumWidth(lab.fontMetrics().horizontalAdvance(state) + 4 if state else 0)   # never 'saved 0'
+        win = self.window
+        if hasattr(win, "_paint_next") and getattr(win, "next_step", None) is not None and win.next_label.isVisible():
+            win._paint_next(win.next_step, True)            # the Next link gives way to the indicator
         word = "saved" if state.startswith("saved") else state
         from aurora.app.theme import set_tone
         set_tone(lab, "warn" if word in ("not saved", "read-only") else None)      # edits at risk stand out
