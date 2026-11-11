@@ -1040,7 +1040,9 @@ class Session(QObject):
                 if st is None:
                     st = self.default_settings(scan if scan is not None else self._stitched_scan(sd), sd)
                     z.settings[sid] = st
-                elif sd is not None and st.line not in sd.labels and sd.labels and "line" not in st.pinned:
+                # a line with windows of its own (roi: read from the raw folders) needs no fixed bins of that name
+                elif (sd is not None and not st.roi and st.line not in sd.labels and sd.labels
+                      and "line" not in st.pinned):
                     log.info("zone %s on %s: line %r is not in the stack (%s); %r used", z.id, sid, st.line,
                              ", ".join(sd.labels), sd.main)
                     st.line = sd.main
@@ -1069,6 +1071,14 @@ class Session(QObject):
         st = easy_scan_settings(scan, self.flags_of(scan), labels)
         if sd is not None and sd.labels and st.line not in sd.labels:
             st.line = sd.main
+        default = self.window_default(scan, sd)
+        if default is not None:                     # no fixed line for the edge: the window of the edge's own line
+            st.line, st.roi = default["line"], default["roi"]
+            try:
+                from aurora.core.lines import default_signal
+                st.signal = default_signal(scan, getattr(scan, "summary", None) or {}, line=st.line)
+            except (ImportError, AttributeError):
+                pass
         for fn in list(self._settings_defaults):
             try:
                 fn(scan, st)
@@ -1077,6 +1087,35 @@ class Session(QObject):
             except Exception:
                 log.exception("settings-default provider %r failed on %s", fn, getattr(scan, "name", scan))
         return st
+
+    def window_default(self, scan, sd: StackData | None = None) -> dict | None:
+        """The XRF window of a new sample when the beamtime has no fixed line for the edge's own line (no
+        config/roi_bins.json, or none for that line): {'line': label, 'roi': windows}, the first window Reduce's step
+        2 offers for the edge: the calibrated line of the edge, else John Bussey's 60:83 when it holds the edge's line
+        (F K: F Kα at 10 eV per channel, his GUI's default), else the line of the edge on the nominal 10 eV per channel
+        (owner decision, 0.4.0). None with fixed bins for that line, or without an edge or a known line."""
+        from aurora.core import xrf_windows as xw
+        from aurora.core.lines import resonant_line
+        from aurora.core.names import target_edge
+        edge = getattr(sd, "edge", None) or getattr(scan, "edge", None) or target_edge(getattr(scan, "name", "") or "")
+        if not edge or self.project is None:
+            return None
+        bins = getattr(self.project, "roi_bins", None)
+        try:
+            label = resonant_line(*edge)
+        except (TypeError, ValueError, KeyError):
+            return None
+        if not label or (bins is not None and bins.has(label)):
+            return None
+        cal = getattr(self.project, "calibration", None)
+        el = xw.edge_line_windows(edge, cal, bins)
+        if el is not None:
+            return {"line": el.label, "roi": xw.normalise_windows(el.windows)}
+        john = xw.john_default_windows(edge)
+        if john is not None:
+            return {"line": john[0], "roi": xw.normalise_windows(john[1])}
+        el = xw.edge_line_windows(edge, cal, bins, nominal=True)
+        return {"line": el.label, "roi": xw.normalise_windows(el.windows)} if el is not None else None
 
     # ------------------------------------------------------------------ editing
     @contextmanager

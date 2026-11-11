@@ -842,10 +842,13 @@ oxygen, not to the edge element (fluorine): the spectrum is an inverse yield (IP
   the nominal 10 eV per channel, *nominal calibration, check the peak*, when neither a fixed line of that name nor the
   standard 60:83 holds the edge's line, for example O Kα), *standard 60:83 (F Kα)* when no fixed line or calibration
   gives the edge's line (John Bussey's GUI's default window, which holds F Kα at the nominal 10 eV / channel; not
-  offered for an edge whose line it does not hold), and *custom (drag the band on the plot)*. Without roi_bins.json a
-  stack has the total XRF only, which holds every emission line, not just the edge's: the line below the boxes says
-  so, and the card says *No fixed emission lines for this beamtime: AURORA uses the total fluorescence. To follow one
-  element, drag the window over its peak.*
+  offered for an edge whose line it does not hold), and *custom (drag the band on the plot)*. Without a fixed line for
+  the edge's own line (no roi_bins.json, or none of that name), a new sample starts on the first of these windows of
+  the edge's line: the calibrated line of the edge, else the standard 60:83 for an F K stack (John Bussey's GUI's own
+  default, so the saved files equal his), else the nominal line of the edge; **Remember windows for F K** and a window
+  chosen here replace it. The total XRF stays a preset: it holds every emission line, not just the edge's, and the line
+  below the boxes says so. The card says *No fixed emission lines for this beamtime: AURORA starts on a standard
+  window of the edge element's X-rays (the preset). Check that its band covers the peak, or drag it there.*
 - **Save as a fixed line…** (Easy and Advanced) names the line (the emission line of the stack's edge is offered, for
   example *F Kα*) and writes the four windows shown into `config/roi_bins.json`: the file is created when the beamtime
   has none, the previous one is kept as `roi_bins.backup-<time>.json`, and what other tools wrote in it stays. The line

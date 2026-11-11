@@ -454,9 +454,10 @@ def test_real_windows_reproduce_the_sgm_report_bins(real_project, real_expect):
 
 
 def test_without_roi_bins_easy_offers_johns_window_and_says_what_total_xrf_is(qapp, fake_project):
-    """A folder without config/roi_bins.json (John Bussey's own layout) reduces to the total XRF only. Step 2 then says
-    that the total XRF holds every emission line, not the PFY of the edge's line, and offers John Bussey's default
-    window (60:83 on every detector, F Kα at 676.8 eV is channel 67.7 at the nominal 10 eV / channel)."""
+    """A folder without config/roi_bins.json (John Bussey's own layout) reduces to the total XRF only. Step 2 starts
+    on John Bussey's default window (60:83 on every detector, F Kα at 676.8 eV is channel 67.7 at the nominal 10 eV /
+    channel; final polish g06#3: a new sample's window follows the edge's own line), and says, when the total XRF is
+    chosen, that it holds every emission line, not the PFY of the edge's line."""
     from wp3_helpers import close, open_window, pump
     assert xw.john_default_windows(("F", "K")) == ("F Kα", {d: [60, 83] for d in DETS})
     assert xw.john_default_windows(("O", "K")) is None                   # O Kα, 524.9 eV: channel 52, outside 60:83
@@ -466,11 +467,18 @@ def test_without_roi_bins_easy_offers_johns_window_and_says_what_total_xrf_is(qa
         wc = rd.window_card
         items = [wc.preset.itemText(i) for i in range(wc.preset.count())]
         assert items == ["all X-rays (total XRF)", "standard 60:83 (F Kα)", "custom (drag the band on the plot)"]
+        assert wc.preset.currentText() == "standard 60:83 (F Kα)" and "every emission line" not in wc.ev_label.text()
+        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
+        pump(qapp)
+        st = ses.zone().settings[sid]
+        assert st.line == "F Kα" and st.roi == {d: [60, 83] for d in DETS}        # the new sample starts on it
+        wc.preset.setCurrentIndex(0)
+        pump(qapp)
         assert wc.preset.currentText() == "all X-rays (total XRF)"
         assert "every emission line, not only the F Kα of the edge" in wc.ev_label.text()
         assert "the earlier SGM XAS GUI started with 60:83" in wc.ev_label.text()          # Easy: no person name
-        rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
-        pump(qapp)
+        st = ses.zone().settings[sid]
+        assert st.line == xw.TOTAL_LABEL and not st.roi
         wc.preset.setCurrentIndex(1)
         pump(qapp)
         st = ses.zone().settings[sid]

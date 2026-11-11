@@ -946,7 +946,11 @@ class ReducePerspective(QWidget):
         st = z.settings.get(sd.id) if z is not None else None
         if st is not None:
             return {"line": st.line or sd.main, "roi": st.roi}
-        return self._choices.get((self.session.current_holder or "", self._edge_key(sd)))
+        kept = self._choices.get((self.session.current_holder or "", self._edge_key(sd)))
+        if kept is not None:
+            return kept
+        scan = self.session.scan_of(sd.id)            # no fixed line for the edge: the window of the edge's line
+        return self.session.window_default(scan, sd) if scan is not None else None
 
     def _show_window_step(self) -> None:
         sd = self.current_stack()

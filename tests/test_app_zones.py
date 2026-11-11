@@ -42,7 +42,9 @@ def test_survey_and_reduce_on_fake_project(qapp, fake_project):
     ses.touch()
     ses.select_stack(sid)
     qapp.processEvents()
-    assert rd.map.image.image is not None and rd.map_line.currentText() == "total XRF"
+    # no fixed line for F Kα (no roi_bins.json): the map shows the window of the edge's own line, John Bussey's 60:83
+    # (final polish g06#3), not the total XRF
+    assert rd.map.image.image is not None and rd.map_line.currentText() == "XRF window"
     # draw a zone with rect+ over the whole footprint
     sd = ses.stack_loaded(sid)
     x0, x1, y0, y1 = sd.bbox
@@ -50,7 +52,8 @@ def test_survey_and_reduce_on_fake_project(qapp, fake_project):
     qapp.processEvents()
     z = ses.zone()
     assert z is not None and z.id == 1 and len(z.rects) == 1
-    assert z.members[sid] == list(range(12)) and z.settings[sid].n == 12 and z.settings[sid].line == "total XRF"
+    assert z.members[sid] == list(range(12)) and z.settings[sid].n == 12 and z.settings[sid].line == "F Kα"
+    assert z.settings[sid].roi == {d: [60, 83] for d in ("sdd1", "sdd2", "sdd3", "sdd4")}
     assert rd.zone_list.count() == 1 and len(rd._cards) == 1
     assert len(rd.preview._traces) == 1 and rd.preview._traces[0][1].n_pix == 12
     # erase one pixel with the brush, then an erase rectangle

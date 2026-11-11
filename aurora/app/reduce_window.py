@@ -4,7 +4,8 @@ or the survey points inside the region (John Bussey's 'XRF from survey, only ins
 the eV equivalent, and the presets (every fixed line of roi_bins.json, the line of the edge, John Bussey's default
 60:83 when no fixed line or calibration gives the edge's line, custom). Without a calibration the line of the edge
 is offered on the nominal 10 eV per channel ('check the peak') when the beamtime has no fixed line of that name;
-without any fixed line a note says the total fluorescence is used. The total XRF is said to hold every emission
+without any fixed line a note says that a new sample starts on the standard window of the edge's line
+(Session.window_default) and asks to check that it covers the peak. The total XRF is said to hold every emission
 line, so that it is not taken for the PFY of the edge's line. Save as a fixed line… writes the current windows into
 config/roi_bins.json under a name, so every scan of the beamtime can use them and Maps can draw the element.
 
@@ -37,8 +38,8 @@ SOURCES = (("stack", "the whole stack"), ("survey", "survey"), ("region", "insid
            ("survey_zone", "survey, inside the zone"))
 CUSTOM = "custom (drag the band on the plot)"
 SAVE_LINE = "Save as a fixed line…"
-NO_FIXED_LINES = ("No fixed emission lines for this beamtime: AURORA uses the total fluorescence. To follow one "
-                  "element, drag the window over its peak.")
+NO_FIXED_LINES = ("No fixed emission lines for this beamtime: AURORA starts on a standard window of the edge "
+                  "element's X-rays (the preset). Check that its band covers the peak, or drag it there.")
 NOMINAL_EDGE = "nominal calibration, check the peak"
 CAPTION = ("The plot shows the X-rays your sample emits (its {{emission-spectrum|emission spectrum}}), one curve per "
            "detector (SDD1 to SDD4). Only the counts inside the shaded band become your spectrum: keep the preset of "
