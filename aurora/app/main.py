@@ -532,7 +532,13 @@ class MainWindow(QMainWindow):
         return page_anchor(self.current_key(), self.stack.currentWidget())
 
     def help_on_page(self) -> None:
-        """F1 / Help > Help on this page."""
+        """F1 / Help > Help on this page: in Easy mode the user guide's quick start at this page (its Easy screenshot
+        first, help.EASY_HELP), in Advanced mode the manual at the page or its tab."""
+        from aurora.app.help import EASY_HELP
+        key = self.current_key()
+        if not ui_mode.is_advanced() and key in EASY_HELP:
+            self.show_help("USER_GUIDE.md", EASY_HELP[key])
+            return
         self.show_help("MANUAL.md", self.help_anchor())
 
     def show_shortcuts(self) -> None:

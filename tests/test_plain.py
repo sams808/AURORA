@@ -575,6 +575,76 @@ def test_plain_error_words():
     assert plain_error(OSError(28, "No space left on device")) == "the disk is full"
 
 
+
+def test_colour_scales_read_low_and_high_in_easy(easy_demo, qapp):
+    """PL-16: the colour scale of the Survey and Reduce maps reads 'low' / 'high' at its ends in Easy mode and the
+    numbers in Advanced mode."""
+    win = easy_demo
+    for page in ("survey", "reduce"):
+        win.show_perspective(page)
+        wait(qapp, 0.3)
+    for m in (win.survey.map, win.reduce.map):
+        assert m.bar_tick_labels() == ["low", "high"]
+    mode.set_advanced(True)
+    try:
+        assert win.survey.map.bar_tick_labels() == [] and win.reduce.map.bar_tick_labels() == []
+    finally:
+        mode.set_advanced(False)
+    assert win.survey.map.bar_tick_labels() == ["low", "high"]
+
+
+def test_f1_in_easy_opens_the_quick_start_of_the_page(qapp, monkeypatch):
+    """PL-21: F1 in Easy mode opens USER_GUIDE.md at the quick-start section of the page, whose first image is that
+    page's Easy screenshot; Advanced mode keeps the manual."""
+    import re
+    from aurora.app.help import EASY_HELP, slug
+    from aurora.app.main import MainWindow
+    text = (DOCS / "USER_GUIDE.md").read_text(encoding="utf-8")
+    heads = {slug(m.group(1)): m.end() for m in re.finditer(r"^#{2,4} (.+)$", text, re.M)}
+    for page, anchor in EASY_HELP.items():
+        assert anchor in heads, anchor
+        first = re.search(r"!\[[^\]]*\]\((img/[^)]+)\)", text[heads[anchor]:])
+        assert first is not None and first.group(1) == f"img/easy_{page}.png", (page, first)
+        assert (DOCS / first.group(1)).is_file(), first.group(1)
+    win = MainWindow()
+    opened = []
+    monkeypatch.setattr(win, "show_help", lambda doc="USER_GUIDE.md", anchor=None: opened.append((doc, anchor)))
+    try:
+        mode.set_advanced(False)
+        for page in ("home", "reduce", "fit"):
+            win.show_perspective(page)
+            win.help_on_page()
+        assert opened == [("USER_GUIDE.md", EASY_HELP[p]) for p in ("home", "reduce", "fit")]
+        mode.set_advanced(True)
+        win.show_perspective("reduce")
+        win.help_on_page()
+        assert opened[-1] == ("MANUAL.md", "4-reduce")
+    finally:
+        mode.set_advanced(False)
+        close(win)
+
+
+def test_failures_in_plain_words(qapp):
+    """The rest of PL-09: a job's failure in a status line reads in plain words (the error's own line in the tooltip),
+    an export refused by a protected or missing folder too, and Home's open failure strips the class name."""
+    import errno
+    from PySide6.QtWidgets import QLabel
+    from aurora.app.home import failure_reason
+    from aurora.app.widgets import say_failure, write_error_text
+    from aurora.core.io.safety import ProtectedPathError
+    lab = QLabel()
+    tb = "Traceback (most recent call last):\n  ...\nPermissionError: [Errno 13] Permission denied: 'C:\\\\b\\\\x.npz'"
+    text = say_failure(lab, "could not read the stack", tb)
+    assert text == "could not read the stack: AURORA may not write here (a read-only folder, or a file open in another program)"
+    assert lab.toolTip().startswith("PermissionError") and "Traceback" not in lab.toolTip()
+    say_failure(lab, "could not read the stack", "aurora.core.stack.StackError: the stack has no energies")
+    assert lab.text() == "could not read the stack: the stack has no energies"
+    assert write_error_text("lcf.csv", ProtectedPathError(13, "x", "p")).startswith(
+        "Could not write lcf.csv: this folder is protected")
+    assert write_error_text("a.csv", OSError(errno.ENOSPC, "No space left on device")) == "Could not write a.csv: the disk is full."
+    assert failure_reason("ValueError: the h5 file holds no stack") == "The h5 file holds no stack"
+
+
 # ----------------------------------------------------------------------------- the user guide
 def test_quick_start_in_user_guide():
     text = (DOCS / "USER_GUIDE.md").read_text(encoding="utf-8")

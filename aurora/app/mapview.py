@@ -417,6 +417,9 @@ class MapView(pg.GraphicsLayoutWidget):
         self.plot.setLabel("left", "y (mm)")
         self.bar = colour_bar()                                  # the colour scale of the map, beside it
         self.addItem(self.bar, row=0, col=1)
+        self._bar_words = False                                   # Easy: 'low' / 'high' at the ends, no numbers
+        from aurora.app.mode import on_mode_changed
+        on_mode_changed(self, lambda adv: self.set_bar_words(not adv))
         style_plot(self, "map")                                  # navy in both schemes, light axes (the bar's too)
         for ax in ("bottom", "left"):
             self.plot.getAxis(ax).enableAutoSIPrefix(False)      # never "x (mm) (x0.001)"
@@ -668,6 +671,25 @@ class MapView(pg.GraphicsLayoutWidget):
         if ax.labelText != text:                     # every slider step draws the map: no relayout for the same text
             ax.setLabel(text)
 
+    def set_bar_words(self, on: bool) -> None:
+        """The colour scale's end labels: 'low' and 'high' (Easy mode: what a newcomer needs to read the colour), or the
+        numeric range (Advanced mode, a map whose colours are a fixed lookup)."""
+        self._bar_words = bool(on)
+        self._paint_bar_ticks()
+
+    def bar_tick_labels(self) -> list[str]:
+        """The texts at the colour scale's ticks when they are fixed ('low', 'high'); [] for the numeric ticks."""
+        ticks = getattr(self.bar.getAxis("right"), "_tickLevels", None)
+        return [t for level in (ticks or []) for _v, t in level]
+
+    def _paint_bar_ticks(self) -> None:
+        ax = self.bar.getAxis("right")
+        if self._bar_words and not getattr(self, "_fixed_lut", False):
+            lo, hi = (float(v) for v in self.bar.levels())
+            ax.setTicks([[(lo, "low"), (hi, "high")]])
+        else:
+            ax.setTicks(None)
+
     def scale_levels(self) -> tuple[float, float] | None:
         """The values at the two ends of the colour scale (None for a map without one)."""
         return tuple(float(v) for v in self.bar.levels()) if self.bar in self.ci.items else None
@@ -683,6 +705,8 @@ class MapView(pg.GraphicsLayoutWidget):
             hi = lo + 1.0
         self.image.setImage(img, levels=(lo, hi), autoLevels=False)
         self.bar.setLevels((lo, hi))
+        if self._bar_words:
+            self._paint_bar_ticks()
         dx = g.dx if np.isfinite(g.dx) else 0.1
         dy = g.dy if np.isfinite(g.dy) else dx
         self._data_rect = QRectF(float(g.xs[0]) - dx / 2, float(g.ys[0]) - dy / 2, len(g.xs) * dx, len(g.ys) * dy)

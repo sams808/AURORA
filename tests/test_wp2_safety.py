@@ -667,5 +667,5 @@ def test_a_failed_save_says_why_in_plain_words(qapp, fake_project):
         t0 = time.monotonic()
         assert ses.flush() is False
         assert time.monotonic() - t0 < 1.5
-    text = next(m for m in msgs if m.startswith("could not save the session"))
-    assert "\\\\" not in text and str(ses.session_file.parent) in text, text
+    text = next(m for m in msgs if m.startswith("Could not save your outlines: "))      # plain PL-09
+    assert "\\\\" not in text and "Errno" not in text and "Error:" not in text, text

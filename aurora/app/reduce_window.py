@@ -29,7 +29,7 @@ from aurora.app.help_text import say
 from aurora.app.mode import is_advanced, mark_advanced, mark_easy, on_mode_changed
 from aurora.app.theme import curve, dash, make_plot, min_height, mk_pen, on_theme_changed, with_alpha
 from aurora.app.vocab import DET_LABELS, unit_suffix
-from aurora.app.widgets import Card, FlowLayout, TermLabel, pair, set_plot_hint
+from aurora.app.widgets import Card, FlowLayout, TermLabel, pair, plain_error, say_failure, set_plot_hint
 from aurora.core import xrf_windows as xw
 from aurora.core.constants import DETS, N_CH
 
@@ -535,7 +535,8 @@ class XrfWindowCard(Card):
                 sv = self.session.survey()
             except Exception as err:                   # an unreadable survey: say so, keep the card usable
                 sv = None
-                self.status.setText(f"the survey could not be read ({err})")
+                self.status.setText(f"the survey could not be read: {plain_error(err)}")
+                self.status.setToolTip(str(err))
             if sv is not None:
                 self._spectrum = np.asarray(sv.spec, float)
                 self.status.setText(f"survey {sv.name} at {sv.energy:.1f} eV")
@@ -556,7 +557,7 @@ class XrfWindowCard(Card):
         self._draw()
         jobs.of(self).submit(f"emission:{sid}", lambda cb, s=sd: xw.stack_emission_data(s, cb),
                              on_done=lambda em, s=sd: self._emission_read(s, em),
-                             on_failed=lambda t: self.status.setText("could not read the spectra: " + t.strip().splitlines()[-1]),
+                             on_failed=lambda t: say_failure(self.status, "could not read the X-ray spectra", t),
                              label=f"reading the emission spectrum of {sd.name}", taskbar=self.taskbar)
 
     def _emission_read(self, sd, em) -> None:

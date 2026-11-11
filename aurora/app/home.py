@@ -135,7 +135,8 @@ def failure_reason(text: str) -> str:
     elif name == "PermissionError":
         why = "access to the folder is denied"
     else:
-        why = msg or last or "unknown error"
+        from aurora.app.widgets import plain_error
+        why = plain_error(last) if last else "unknown error"
     return why[:1].upper() + why[1:]
 
 

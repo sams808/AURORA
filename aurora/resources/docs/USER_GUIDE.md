@@ -9,7 +9,8 @@ John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_Beamline_Analysis notebo
 This is the short guide. `MANUAL.md` describes every control, `TUTORIALS.md` walks through the demo beamtime
 (**Help > Open the demo beamtime**, or `aurora demo <folder>`), `INSTALL.md` covers the installers (Windows 10 or 11;
 macOS 15 or later, Apple silicon or Intel) and where things are stored. All four open from the **Help** menu; **F1**
-opens the manual at the section of the page you are on, and the small **?** of every panel at that panel's section.
+opens the page's section of this guide's quick start in Easy mode (the manual's section in Advanced mode), and the
+small **?** of every panel the manual at that panel's section.
 **Help > Keyboard shortcuts** (**Ctrl+/**) lists every shortcut.
 
 **Easy and Advanced mode.** AURORA starts in **Easy mode**, the main steps with standard settings: open the
@@ -68,7 +69,60 @@ underlined words in the captions open the glossary at that word.
 | *inverse yield (IPFY)* in Check, and detector curves that dip | the window counts another element's X-rays; the spectrum is computed as beam ÷ counts and rises at the edge | normal; choose the line of the edge element in step 2 to count its own X-rays |
 | detector curves of different heights | the four detectors see the sample from different angles | normal when their shapes agree |
 | *saturated* detectors, or *no detector left in the sum* | too many X-rays for those detectors | use the electron-yield (TEY) spectrum of that scan |
-| *read-only* in the top bar, a banner about a read-only folder | AURORA cannot write in the beamtime folder | copy the beamtime folder to this computer and open the copy |
+| *read-only* in the top bar, a banner about a read-only folder | AURORA cannot write in the beamtime folder | press **Choose a working folder…** in the banner: your work is kept in a folder of your own, the beamtime folder is only read |
+
+### Home in Easy mode
+
+![Home in Easy mode, the demo beamtime open](img/easy_home.png)
+
+**Open project…** opens the beamtime folder (the one that holds `raw/`; a day folder, a scan folder or a loose folder
+of scans opens too). The tree lists the days, the holders and their scans; a click on a scan shows what it is. The
+*Getting started* row at the top names the next step and its button; **Hide** puts it away.
+
+### Survey in Easy mode
+
+![Survey in Easy mode: the holder map with a sample outlined](img/easy_survey.png)
+
+The map of one holder at one energy, brighter where more X-rays came back (the colour scale reads *low* to *high*).
+The rectangles are the measured areas (stacks). Choose **Draw**, then drag around a sample: the *Zone preview* shows
+its X-rays and its spectrum while you drag. **Erase** takes part of an outline away; in **Move**, a click on a
+rectangle opens that stack in Reduce. A hand-drawn sketch of the holder is optional: **Load a sketch…** adds one.
+
+### Reduce in Easy mode
+
+![Reduce in Easy mode: the four steps](img/easy_reduce.png)
+
+Four numbered steps: the scans of the holder; which X-rays to count (keep the preset of your element); the sample's
+outline on the stack map (**Draw** / **Erase** as on the Survey, and its **sample name**); then **Add to Check**,
+with one sentence saying how the spectrum is made. The *Preview* on the right shows the spectrum as it will be saved.
+
+### Check in Easy mode
+
+![Check in Easy mode: the spectra to check](img/easy_check.png)
+
+One row per sample and scan. A good spectrum rises once at the edge and then stays roughly level, and its four
+detector curves have the same shape. Untick **Looks OK** where it does not, then **Save ticked → Compare**.
+
+### Compare in Easy mode
+
+![Compare in Easy mode: the saved spectra scaled](img/easy_compare.png)
+
+The saved spectra on one graph, each scaled so that its rise at the edge is 1; a spectrum that cannot be scaled that
+way is drawn dashed with the reason. **Add saved spectra…** brings in spectra saved earlier.
+
+### Fit in Easy mode
+
+![Fit in Easy mode: a linear combination fit](img/easy_fit.png)
+
+Describes one spectrum as a mix of reference spectra (LCF): tick the references, press **Run LCF**; each coefficient
+is the share of that reference, and the R-factor says how close the mix comes.
+
+### Report in Easy mode
+
+![Report in Easy mode](img/easy_report.png)
+
+**Build the report** writes a PDF with one page per sample group, its figures and CSV files, into a new dated folder
+each time; the *Check before building* list names what to look at first.
 
 ## 1. Open a beamtime
 

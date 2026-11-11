@@ -110,7 +110,7 @@ navy in both schemes, so colour maps look the same in both. A
 curve keeps its colour when the scheme changes, and every curve also has its own dash, so colour is never the only
 cue. Status cells show an icon with a word (*✓ ok*, *! check*, *✗ bad*). A focused control shows a 2 px outline.
 Every intensity map (Survey, Reduce, Maps) has its colour scale beside it, named by its quantity (*counts / I0*,
-*log10(counts / I0 + 1)*). Footprint and zone outlines sit on a dark edge and a light rim of their own hue, so
+*log10(counts / I0 + 1)*); in Easy mode its ends read *low* and *high*, in Advanced mode the numbers. Footprint and zone outlines sit on a dark edge and a light rim of their own hue, so
 they read on every tone of the colour map.
 
 *Long tasks* (reading a project, loading stacks, reading XRF windows, running the checks, fits, loading a

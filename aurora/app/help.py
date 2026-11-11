@@ -40,6 +40,12 @@ TAB_HELP: dict[tuple[str, str], str] = {
     ("maps", "Explore"): "81-explore", ("maps", "Elemental maps"): "82-elemental-maps", ("maps", "RGB"): "83-rgb",
     ("maps", "Clusters"): "84-clusters",
 }
+# Easy mode: F1 opens the user guide's quick start at the page (its Easy screenshot first); Maps is Advanced only
+EASY_HELP: dict[str, str] = {
+    "home": "home-in-easy-mode", "survey": "survey-in-easy-mode", "reduce": "reduce-in-easy-mode",
+    "check": "check-in-easy-mode", "compare": "compare-in-easy-mode", "fit": "fit-in-easy-mode",
+    "report": "report-in-easy-mode",
+}
 HELP_ANCHOR_PROP = "aurora_help_anchor"
 
 

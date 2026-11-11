@@ -221,7 +221,8 @@ def test_exports_are_refused_before_anything_is_written(qapp, demo, tmp_path, mo
             after = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*"))
             assert after == before, (name, sorted(set(after) - set(before)))     # not one file or folder made
             assert not g.ok and len(warnings_shown) == 1, (name, warnings_shown)
-            assert "never writes here" in warnings_shown[0] and "open in another program" not in warnings_shown[0]
+            # in plain words (PL-09): 'this folder is protected: AURORA never writes into raw data or a protected folder'
+            assert "this folder is protected" in warnings_shown[0] and "open in another program" not in warnings_shown[0]
 
 
 def test_the_compare_csv_holds_what_its_figure_shows(qapp, demo, tmp_path):

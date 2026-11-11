@@ -901,6 +901,16 @@ def plain_error(err, root: Path | None = None) -> str:
     return msg or "unknown error"
 
 
+def say_failure(label: QWidget, what: str, trace: str, root: Path | None = None) -> str:
+    """A job's failure in a status line: '{what}: {plain_error}' as the text, the error's own last line in the
+    tooltip (what Advanced users and bug reports need). Returns the text."""
+    last = trace.strip().splitlines()[-1].strip() if str(trace or "").strip() else ""
+    text = f"{what}: {plain_error(last, root)}"
+    label.setText(text)
+    label.setToolTip(last)
+    return text
+
+
 def set_enabled(widget: QWidget, on: bool, reason: str = "") -> None:
     """Enable or disable an action; while disabled its tooltip says why ('open a project first')."""
     base = widget.property("aurora_tip")
@@ -1050,7 +1060,10 @@ def write_error_text(label: str, err: BaseException, verb: str = "write") -> str
     """'Could not write lcf.csv: Permission denied. Is it open in another program?': the system's reason without the
     exception's name; a folder that refuses asks whether it is read-only."""
     from aurora.core.io.safety import ProtectedPathError
-    reason = (getattr(err, "strerror", None) or str(err) or type(err).__name__).strip().rstrip(".")
+    if isinstance(err, PermissionError) and not isinstance(err, ProtectedPathError):
+        reason = (getattr(err, "strerror", None) or str(err) or type(err).__name__).strip().rstrip(".")
+    else:                                       # a protected folder, a missing folder, a full disk: in plain words
+        reason = plain_error(err).rstrip(".")
     hint = ""
     if held_file(err):
         hint = " Is it open in another program?"

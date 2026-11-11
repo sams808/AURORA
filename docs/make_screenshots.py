@@ -3,11 +3,13 @@
 Run from the repo root with the project's Python:
 
     python docs/make_screenshots.py                          # light scheme, Advanced mode, into the bundled docs
+    python docs/make_screenshots.py --easy                   # the Easy set of the user guide (easy_*.png)
     python docs/make_screenshots.py --scheme dark --out DIR  # the dark set, somewhere else
 
-Advanced mode, so every control the manual describes is on screen. Writes a fresh demo folder in a temporary
-directory outside the home folder (its path is on screen; see demo_root) and removes it at the end; the settings go
-to a temporary folder too: nothing else is touched. Refuses to run (exit 2, with the reason) when a path the shots
+Advanced mode, so every control the manual describes is on screen; --easy writes the seven Easy pages the user
+guide's quick start shows (easy_home.png … easy_report.png). Writes a fresh demo folder in a temporary directory
+outside the home folder (its path is on screen; see demo_root) and removes it at the end; without
+AURORA_SETTINGS_DIR the settings go to a temporary folder too, removed at the end: nothing else is touched. Refuses to run (exit 2, with the reason) when a path the shots
 show (the demo, its references and report folders) names the account (account_in_paths).
 """
 from __future__ import annotations
@@ -159,6 +161,14 @@ def main(argv: list[str] | None = None) -> int:
              ("maps_explore", lambda: (win.show_perspective("maps"), mp.tabs.setCurrentIndex(0))),
              ("maps_elements", lambda: mp.tabs.setCurrentIndex(1)), ("maps_clusters", lambda: mp.tabs.setCurrentIndex(3)),
              ("report", lambda: win.show_perspective("report"))]
+    if args.easy:                                     # the user guide's quick start: the seven Easy pages
+        shots = [("easy_home", lambda: win.show_perspective("home")),
+                 ("easy_survey", lambda: win.show_perspective("survey")),
+                 ("easy_reduce", lambda: win.show_perspective("reduce")),
+                 ("easy_check", lambda: win.show_perspective("check")),
+                 ("easy_compare", lambda: win.show_perspective("compare")),
+                 ("easy_fit", lambda: (win.show_perspective("fit"), fit.tabs.setCurrentIndex(0))),
+                 ("easy_report", lambda: win.show_perspective("report"))]
     if args.only:
         unknown = set(args.only) - {name for name, _ in shots}
         if unknown:

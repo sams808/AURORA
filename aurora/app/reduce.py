@@ -33,7 +33,7 @@ from aurora.app.zone_tools import PreviewThrottle, ZoneEditor, ZoneToolBar, fast
 from aurora.app.vocab import (DET_LABELS, ELEMENT_NAMES, NORM_LABELS, channel_words, det_items, det_words, edge_words,
                               flag_words, plural, unit_suffix)
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, fit_height,
-                                overlay_host, page_scroll, pair, set_enabled)
+                                overlay_host, page_scroll, pair, say_failure, set_enabled)
 from aurora.core import rules as rl
 from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
@@ -847,6 +847,10 @@ class ReducePerspective(QWidget):
         sid = cur.data(Qt.UserRole)
         self.load_stack(sid)
 
+    def _root(self):
+        p = self.session.project
+        return p.root if p is not None else None
+
     def load_stack(self, sid: str) -> None:
         sd = self.session.stack_loaded(sid)
         if sd is not None:
@@ -856,7 +860,8 @@ class ReducePerspective(QWidget):
         name = split_stack_id(sid)[1]
         jobs.of(self).submit(f"stack:{sid}", lambda cb: session.stack(sid, progress=cb),
                              on_done=lambda _sd, sid=sid: self._loaded(sid),
-                             on_failed=lambda t: self.status_label.setText("could not read the stack: " + t.strip().splitlines()[-1]),
+                             on_failed=lambda t: say_failure(self.status_label, "could not read the stack", t,
+                                                             self._root()),
                              on_end=lambda _s: self.update_actions(), label=f"reading {name}", taskbar=self.taskbar)
 
     def load_all(self) -> None:
@@ -879,7 +884,8 @@ class ReducePerspective(QWidget):
 
         self.status_label.setText(f"reading {plural(len(sids), 'scan')} …")
         jobs.of(self).submit(f"stacks:{self.session.current_holder}", job, on_done=self._all_loaded,
-                             on_failed=lambda t: self.status_label.setText("could not read: " + t.strip().splitlines()[-1]),
+                             on_failed=lambda t: say_failure(self.status_label, "could not read the scans", t,
+                                                             self._root()),
                              on_end=lambda _s: self.update_actions(), label="reading the scans of the holder",
                              taskbar=self.taskbar)
 
@@ -1024,7 +1030,7 @@ class ReducePerspective(QWidget):
 
     def _windows_failed(self, key: str, trace: str) -> None:
         self._window_failed.add(key)
-        self.status_label.setText("could not read the windows: " + trace.strip().splitlines()[-1])
+        say_failure(self.status_label, "could not read the emission windows", trace, self._root())
         self.redraw_map()
         self.update_preview()
 
