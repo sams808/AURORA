@@ -205,7 +205,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                       "polygon", "42-stack-map"),
     "zones.brush_size": ("The brush covers n × n points of the map (+ / - change it).", "brush size in map points",
                          "42-stack-map"),
-    "zones.undo": ("Undo the last zone edit (Ctrl+Z). One stroke is one step.", "undo the last zone edit",
+    "zones.undo": ("Undo the last edit (Ctrl+Z), the one Edit > Undo names. One stroke is one step.",
+                   "undo the last edit",
                    "42-stack-map"),
     "zones.clear": ("Remove the drawing of the selected sample (every drawn and erased shape), to draw it again; the "
                     "sample and its name stay. One step of Undo.", "Clear the region", "42-stack-map"),

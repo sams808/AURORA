@@ -142,8 +142,9 @@ class ZoneEditor(QObject):
         return self._draft
 
     def idle(self) -> None:
-        """No stroke on the map (a tool, scan or holder change): the stroke preview goes, the hint says what a drag
-        does with the tool."""
+        """No stroke on the map (a tool, scan or holder change): a stroke in progress is cancelled (its points were
+        those of the map before the change), the stroke preview goes, the hint says what a drag does with the tool."""
+        self.map.cancel_drawing()
         self._draft = None
         self._pending = None
         self._feedback_timer.stop()
@@ -522,6 +523,8 @@ class ZoneToolBar(QWidget):
         if stack is not None:
             self.undo_btn.setEnabled(stack.canUndo())
             stack.canUndoChanged.connect(self.undo_btn.setEnabled)
+            stack.undoTextChanged.connect(self._undo_tip)   # the step it undoes: one undo history for every edit
+            self._undo_tip(stack.undoText())
         mark_advanced(self.shape_buttons["polygon"], self.new_each)
         self._show_state()
         self._paint_icons()
@@ -597,6 +600,16 @@ class ZoneToolBar(QWidget):
         from aurora.app.theme import TOKENS
         for b, name in self._icons:
             b.setIcon(icon(name, TOKENS["ink"], 16))
+
+    def _undo_tip(self, text: str) -> None:
+        """Undo's tooltip names the step it undoes ('Undo: add a rectangle to zone 3 (Ctrl+Z)'), as Edit > Undo does:
+        the history is shared with the settings and good-I0 edits, so the last step is not always a zone's."""
+        from aurora.app.help_text import HELP
+        from aurora.app.shortcuts import native_text
+        tip = native_text(f"Undo: {text} (Ctrl+Z). One stroke is one step." if text else HELP["zones.undo"][0])
+        self.undo_btn.setToolTip(tip)
+        self.undo_btn.setProperty("aurora_tip", tip)
+        self.undo_btn.setStatusTip(tip)
 
 
 def idle_hint(tool: str) -> str:

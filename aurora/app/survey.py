@@ -37,6 +37,39 @@ from aurora.core.model import ScanInfo
 FOOTPRINT_LABELS = {"complete": "complete", "aborted": "aborted", "in_progress": "in progress", "test": "test"}
 
 
+class ColumnScroll(QScrollArea):
+    """The Survey's right column: it scrolls up and down, never sideways, so it is as wide as its widest card needs
+    (and at least `min_width`): a card wider than the column (a sketch image, a long header) widens the column instead
+    of being cut off at the right edge."""
+
+    def __init__(self, min_width: int, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._min_width = int(min_width)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QScrollArea.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+    def setWidget(self, w: QWidget) -> None:
+        super().setWidget(w)
+        w.installEventFilter(self)
+
+    def eventFilter(self, obj, ev) -> bool:
+        from PySide6.QtCore import QEvent
+        if obj is self.widget() and ev.type() == QEvent.LayoutRequest:
+            self.updateGeometry()                       # a scroll area does not pass its content's new size up
+        return False
+
+    def minimumSizeHint(self):
+        s = super().minimumSizeHint()
+        w = self.widget()
+        need = self._min_width
+        if w is not None:
+            need = max(need, w.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width()
+                       + 2 * self.frameWidth())
+        s.setWidth(need)
+        return s
+
+
 class FootprintLegend(QWidget):
     """The small legend of the scan footprints: colour and dash per status (never colour alone)."""
 
@@ -156,11 +189,16 @@ class SurveyPerspective(QWidget):
         self.zone_table = QTableWidget(0, 4)
         self.zone_table.setHorizontalHeaderLabels(["#", "Label", "Group", "Scans"])
         self.zone_table.setAccessibleName("zones of the holder")
-        self.zone_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.zone_table.verticalHeader().hide()         # the # column numbers the zones: no second row number
+        hh = self.zone_table.horizontalHeader()
+        for c in (0, 2, 3):
+            hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)  # the label takes the width: no sideways scroll bar
         self.zone_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.zone_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.zone_table.itemSelectionChanged.connect(self._zone_row_selected)
-        self.zone_table.setMinimumHeight(70)
+        self._fit_zone_table()                          # its header and two zones, at every Text size
+        on_theme_changed(self.zone_table, lambda _s: self._fit_zone_table())
         zc.body.addWidget(self.zone_table, 1)
         right.addWidget(zc)
         self.zone_preview = ZonePreviewCard(session)    # the zone's XRF emission and its XAS on a covered stack
@@ -188,12 +226,8 @@ class SurveyPerspective(QWidget):
         right.setSizes([130, 440, 150, 150])
         self.right_split = right
         # at the smallest window the column scrolls rather than squeezing the preview's plots below their minimum
-        self.right_scroll = QScrollArea()
-        self.right_scroll.setWidgetResizable(True)
-        self.right_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.right_scroll = ColumnScroll(400)           # the preview's plots stay readable at 1200 px
         self.right_scroll.setWidget(right)
-        self.right_scroll.setMinimumWidth(400)          # the preview's plots stay readable at 1200 px
         split.addWidget(self.right_scroll)
         split.setStretchFactor(0, 3); split.setStretchFactor(1, 2)
         self.body = overlay_host(split)
@@ -383,14 +417,22 @@ class SurveyPerspective(QWidget):
         self._redraw_when_shown()
         self._preview_when_shown()
         self.update_actions()
+        self._select_row()
+
+    def _select_row(self) -> None:
+        """The selected zone's row in the zones table (none selected: no row)."""
         zid = self.session.current_zone
+        self.zone_table.blockSignals(True)
+        self.zone_table.clearSelection()
         for r in range(self.zone_table.rowCount()):
             if self.zone_table.item(r, 0).data(Qt.UserRole) == zid:
-                self.zone_table.blockSignals(True); self.zone_table.selectRow(r); self.zone_table.blockSignals(False)
+                self.zone_table.selectRow(r)
+        self.zone_table.blockSignals(False)
 
     def _zones_changed(self) -> None:
         self._fill_zone_table(); self._redraw_when_shown(); self._preview_when_shown()
         self.update_actions()
+        self._select_row()                              # a stroke selects its new zone before the row exists
 
     def _fill_zone_table(self) -> None:
         hz = self.session.holder_zones(create=False)
@@ -404,6 +446,12 @@ class SurveyPerspective(QWidget):
             self.zone_table.setItem(r, 2, QTableWidgetItem(z.group))
             self.zone_table.setItem(r, 3, QTableWidgetItem(str(sum(1 for s in z.settings.values() if s.include))))
         self.zone_table.blockSignals(False)
+
+    def _fit_zone_table(self) -> None:
+        """The zones table never shows less than its header and two rows (the column scrolls below the preview)."""
+        t = self.zone_table
+        t.setMinimumHeight(t.horizontalHeader().sizeHint().height() + 2 * t.verticalHeader().defaultSectionSize()
+                           + 2 * t.frameWidth())
 
     def _zone_row_selected(self) -> None:
         rows = self.zone_table.selectionModel().selectedRows()

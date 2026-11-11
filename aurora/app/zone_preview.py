@@ -3,9 +3,10 @@
 1. The XRF emission of the zone's survey points (EmissionPlot): the four SDDs in the series colours with their dashes
    and their sum, log y, x in channels, in counts per point (the mean over the zone's N points, so drawing changes
    the shape, not the scale), at the survey's one energy. The windows are marked read-only: the window of the map's
-   channel shaded per SDD (roi_bins.json), the other fixed lines as thin labelled ticks at their centres, and the
-   zone's own XRF windows on the scan below (ScanSettings.roi) dashed. No line is assumed: without fixed bins, or with
-   total / TEY / I0 as the map's channel, no window shows.
+   channel shaded per SDD (roi_bins.json) and named above it, the other fixed lines as thin ticks at their centres
+   (named beside them where the names fit), and the zone's own XRF windows on the scan below (ScanSettings.roi)
+   dashed. No line is assumed: without fixed bins, or with total / TEY / I0 as the map's channel, no window shows.
+   The line under it names the curves of both plots (SeriesLegend), or gives the hover readout.
 2. The XAS of the zone on a stack it covers (PreviewPlot, fluorescence only): the scan is picked in 'scan' among the
    stacks the zone covers (their stage coordinates: loaded or not); the current stack when covered, else the earliest.
    A loaded stack previews live while drawing; one not loaded is read in a job (the key Reduce uses, so the two never
@@ -20,8 +21,8 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from aurora.app.help_text import explain, labelled
 from aurora.app.preview import PreviewPlot
@@ -33,6 +34,7 @@ from aurora.core.constants import DETS, N_CH
 TITLE = "Zone preview"
 MIN_PANEL_PX = 140              # the emission and the XAS panel each get at least this (px at the Text size): their
 EMISSION_PX = 150               # data areas keep 48 px (the XAS's sparse axis) and 80 px (the emission) for their ticks
+HEADROOM = 0.18                 # the emission's y range reaches this share of its decades above the highest count
 OPEN_TEXT = "Open in Reduce"
 NOT_LOADED = " (not loaded)"
 MSG_NO_SURVEY = "This holder has no survey map: draw the zones on the stack map in Reduce"
@@ -44,6 +46,41 @@ MSG_NO_SPECTRA = "the survey's per-point spectra could not be read again"
 MSG_READING = "reading {scan} …"
 MSG_AT_RELEASE = "{scan} is not loaded: it is read when you let go"
 MSG_GOOD_I0 = "reading the good-I0 scans …"
+
+
+class SeriesLegend(QWidget):
+    """One line naming the curves of the card's two plots, which share their colours and dashes: SDD1 to SDD4 (the
+    series colours and dashes) and their sum (thick). It stands for the XAS plot's own legend, a box that covered
+    most of the short panel."""
+    NAMES = (*DET_LABELS, "sum")
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        lay = FlowLayout(self, spacing=6)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.swatches: list[QLabel] = []
+        self.labels: list[QLabel] = []
+        for name in self.NAMES:
+            sw = QLabel()
+            sw.setAccessibleName(f"{name} curve")
+            t = QLabel(name)
+            t.setObjectName("muted")
+            lay.addWidget(sw)
+            lay.addWidget(t)
+            self.swatches.append(sw)
+            self.labels.append(t)
+        self.setAccessibleName("curves of the zone preview")
+        self.refresh()
+        on_theme_changed(self, lambda _s: self.refresh())
+
+    def refresh(self) -> None:
+        from aurora.app.theme import swatch_icon
+        for i, sw in enumerate(self.swatches):
+            colour, style = (pc("sum"), Qt.SolidLine) if i == len(DET_LABELS) else (curve(i), dash(i))
+            sw.setPixmap(swatch_icon(colour, style, 12).pixmap(12, 12))
+
+    def texts(self) -> list[str]:
+        return [t.text() for t in self.labels]
 
 
 class EmissionPlot(QWidget):
@@ -65,12 +102,19 @@ class EmissionPlot(QWidget):
         self.sum_curve = self.plot.plot([], [], pen=mk_pen(pc("sum"), 2.0), connect="finite")
         self.readout = ElidedLabel("", Qt.ElideRight)
         self.readout.setObjectName("muted")
+        self.legend = SeriesLegend()                        # the curves of both plots of the card
+        self.line = QStackedWidget()                        # one line under the plot: the legend, or the hover
+        self.line.addWidget(self.legend)                    # readout while the pointer is over the plot
+        self.line.addWidget(self.readout)
         lay.addWidget(self.plot, 1)
-        lay.addWidget(self.readout)
+        lay.addWidget(self.line)
+        self.plot.installEventFilter(self)
         self.regions: list[pg.LinearRegionItem] = []        # the window of the map's channel, one per SDD
         self.ticks: list[pg.InfiniteLine] = []              # the other fixed lines
         self.zone_lines: list[pg.InfiniteLine] = []         # the zone's own windows on the scan previewed
         self.window: dict | None = None                     # sdd -> (lo, hi) of the shaded window
+        self.window_label: pg.InfiniteLine | None = None    # its name above it
+        self.tick_names: list[tuple[float, str]] = []       # (centre channel, line) of the ticks
         self.data: dict | None = None                       # {'per_point': (4, 256), 'sum': (256,), 'n': N}
         self.calibration = None
         self.plot.scene().sigMouseMoved.connect(self._moved)
@@ -80,6 +124,8 @@ class EmissionPlot(QWidget):
     def set_spectrum(self, per_point, n: int, title: str = "") -> None:
         """per_point: (4, 256) mean counts per point (None: nothing to draw)."""
         self.plot.setTitle(title)
+        self.line.setVisible(per_point is not None)
+        self.line.setCurrentWidget(self.legend)
         if per_point is None:
             self.data = None
             for c in self.curves + [self.sum_curve]:
@@ -101,8 +147,10 @@ class EmissionPlot(QWidget):
         vals = np.concatenate(pos) if pos else np.array([])
         lo, hi = (float(vals.min()), float(vals.max())) if vals.size else (0.1, 1.0)
         lo = max(lo, 1e-3)
-        self.plot.getViewBox().setRange(xRange=(0, N_CH), yRange=(np.log10(lo), np.log10(max(hi, lo * 10))),
-                                        padding=0.04, disableAutoRange=True)
+        top = np.log10(max(hi, lo * 10))
+        top += HEADROOM * (top - np.log10(lo))          # room above the highest peak for the window names
+        self.plot.getViewBox().setRange(xRange=(0, N_CH), yRange=(np.log10(lo), top), padding=0.04,
+                                        disableAutoRange=True)
 
     def show_message(self, text: str) -> None:
         """An empty plot with a sentence instead of axes."""
@@ -110,13 +158,24 @@ class EmissionPlot(QWidget):
         self.set_windows(None, [], None)
         set_plot_hint(self.plot, text)
 
-    def set_windows(self, current: dict | None, others, zone: dict | None, zone_label: str = "") -> None:
-        """current: sdd -> (lo, hi) of the map channel's window (shaded); others: [(line, centre channel)] (ticks);
-        zone: sdd -> [lo, hi] of the zone's own windows on the scan below (dashed), labelled `zone_label`."""
-        for it in self.regions + self.ticks + self.zone_lines:
+    @staticmethod
+    def _label_opts(position: float, colour: str, side: str = "centre") -> dict:
+        """A line label on a plate of the plot's background (readable over the curves), centred on its line or beside
+        it ('left' / 'right'), so the names of two windows close together do not print over each other."""
+        anchor = {"left": (1.0, 0.5), "right": (0.0, 0.5)}.get(side, (0.5, 0.5))
+        return {"position": position, "color": colour, "anchors": [anchor, anchor],
+                "fill": pg.mkBrush(with_alpha(TOKENS["plot_bg"], 0.85))}
+
+    def set_windows(self, current: dict | None, others, zone: dict | None, zone_label: str = "",
+                    name: str = "") -> None:
+        """current: sdd -> (lo, hi) of the map channel's window (shaded), named `name` above it; others: [(line,
+        centre channel)] (dotted ticks, named beside them on the side away from the shaded window); zone: sdd ->
+        [lo, hi] of the zone's own windows on the scan below (dashed), labelled `zone_label`."""
+        for it in self.regions + self.ticks + self.zone_lines + ([self.window_label] if self.window_label else []):
             self.plot.removeItem(it)
-        self.regions, self.ticks, self.zone_lines = [], [], []
+        self.regions, self.ticks, self.zone_lines, self.window_label = [], [], [], None
         self.window = {d: (int(v[0]), int(v[1])) for d, v in current.items()} if current else None
+        centre = None
         if self.window:
             for i, d in enumerate(DETS):
                 lo, hi = self.window[d]
@@ -127,10 +186,20 @@ class EmissionPlot(QWidget):
                 r.setZValue(-5 + i)
                 self.plot.addItem(r, ignoreBounds=True)
                 self.regions.append(r)
-        for label, centre in others or []:
-            t = pg.InfiniteLine(pos=float(centre), angle=90, pen=mk_pen(TOKENS["muted"], 1.0, Qt.DotLine),
-                                label=label, labelOpts={"position": 0.92, "color": TOKENS["muted"]})
+            centre = float(np.mean([(lo + hi) / 2 for lo, hi in self.window.values()]))
+            if name:
+                self.window_label = pg.InfiniteLine(pos=centre, angle=90, pen=pg.mkPen(None), label=name,
+                                                    labelOpts=self._label_opts(0.94, TOKENS["plot_fg"]))
+                self.plot.addItem(self.window_label, ignoreBounds=True)
+        self.tick_names = sorted((float(at), label) for label, at in others or [])
+        named = self._names_that_fit(self.tick_names, centre)
+        for at, label in self.tick_names:
+            side = "centre" if centre is None else ("left" if at < centre else "right")
+            t = pg.InfiniteLine(pos=at, angle=90, pen=mk_pen(TOKENS["muted"], 1.0, Qt.DotLine),
+                                label=label if label in named else None,
+                                labelOpts=self._label_opts(0.78, TOKENS["muted"], side))
             t.setZValue(-8)
+            t.setToolTip(f"{label} window")
             self.plot.addItem(t, ignoreBounds=True)
             self.ticks.append(t)
         if zone:
@@ -149,11 +218,40 @@ class EmissionPlot(QWidget):
         self.sum_curve.setPen(mk_pen(pc("sum"), 2.0))
 
     # ------------------------------------------------------------------ hover
+    def _names_that_fit(self, ticks, centre) -> set[str]:
+        """The tick names that can be printed without touching each other (left to right on one row, each beside its
+        tick on the side away from the shaded window): a beamtime with ten fixed lines prints the ones there is room
+        for; the others are named by the hover readout and the tick's tooltip."""
+        from PySide6.QtGui import QFontMetricsF
+        vb = self.plot.getViewBox()
+        width_px = vb.width() if vb.width() > 50 else 300.0      # before the first layout: a narrow column
+        per_ch = width_px / N_CH
+        fm = QFontMetricsF(self.font())
+        kept, out = [], set()
+        for at, label in ticks:
+            w = (fm.horizontalAdvance(label) + 10) / per_ch      # in channels, with the plate's padding
+            if centre is None:
+                lo, hi = at - w / 2, at + w / 2
+            else:
+                lo, hi = (at - w, at) if at < centre else (at, at + w)
+            if lo < 0 or hi > N_CH or any(lo < k_hi and hi > k_lo for k_lo, k_hi in kept):
+                continue
+            kept.append((lo, hi))
+            out.add(label)
+        return out
+
     def readout_text(self, ch: int) -> str:
-        """'channel 66 · 665 eV · SDD1 12.3 · … · sum 50.1 counts per point' (eV only with a calibration)."""
+        """'channel 66 · F Kα window · 665 eV · SDD1 12.3 · … · sum 50.1 counts per point' (eV only with a calibration;
+        the window or fixed line at the channel named)."""
         if self.data is None or not 0 <= ch < N_CH:
             return ""
         parts = [f"channel {ch}"]
+        if self.window and self.window_label is not None and self.window[DETS[0]][0] <= ch < self.window[DETS[0]][1]:
+            parts.append(f"{self.window_label.label.toPlainText()} window")
+        else:
+            near = [(abs(at - (ch + 0.5)), label) for at, label in getattr(self, "tick_names", [])]
+            if near and min(near)[0] <= 4:
+                parts.append(f"near {min(near)[1]}")
         cal = self.calibration
         if cal is not None and getattr(cal, "calibrated", False):
             from aurora.core import xrf_windows as xw
@@ -165,9 +263,16 @@ class EmissionPlot(QWidget):
 
     def _moved(self, pos) -> None:
         if self.data is None or not self.plot.getPlotItem().sceneBoundingRect().contains(pos):
+            self.line.setCurrentWidget(self.legend)
             return
         x = self.plot.getPlotItem().vb.mapSceneToView(pos).x()
         self.readout.setText(self.readout_text(int(np.floor(x))))
+        self.line.setCurrentWidget(self.readout)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if obj is self.plot and ev.type() == QEvent.Leave:
+            self.line.setCurrentWidget(self.legend)         # the pointer left the plot: the legend again
+        return False
 
 
 def window_text(channel: str, bounds: dict | None) -> str:
@@ -200,6 +305,7 @@ class ZonePreviewCard(Card):
         self.body.addWidget(self.summary)
         self.emission = EmissionPlot()
         self.body.addWidget(self.emission, 1)
+        self.legend = self.emission.legend              # under the emission: the curves of both plots
         self.xas_row = QWidget()                        # scan, Open in Reduce (wraps at a large Text size)
         row = FlowLayout(self.xas_row, spacing=6)
         self.scan_combo = QComboBox()
@@ -219,6 +325,11 @@ class ZonePreviewCard(Card):
         self.xas = PreviewPlot(min_plot_px=MIN_PANEL_PX, overlay=False)
         self.xas.set_compact(True)
         self.xas.readout.hide()                         # the emission's readout line is the card's one
+        lg = self.xas.top.legend                        # the card's legend line names the curves: no box over
+        if lg is not None:                              # the short panel (the theme shows a legend that has items)
+            if lg.scene() is not None:
+                lg.scene().removeItem(lg)
+            self.xas.top.legend = None
         self.header.addWidget(self.xas.show_btn)        # its 'Show ▾' (Advanced) beside the card's title: no row
         self.xas.gl.setAccessibleName("XAS of the zone on the scan")
         self.body.addWidget(self.xas, 1)
@@ -313,7 +424,7 @@ class ZonePreviewCard(Card):
             h = self.session.holder()
             self._show_xas(False, MSG_NO_STACK.format(zone=name, holder=h.name if h is not None else ""))
             if n:
-                self.emission.set_windows(bounds, self._other_ticks(), None)
+                self.emission.set_windows(bounds, self._other_ticks(), None, name=self._channel)
             self._summary(parts)
             return
         self._fill_combo(draft is not None)
@@ -323,7 +434,8 @@ class ZonePreviewCard(Card):
         if n:
             scan = self.session.scan_of(sid)
             self.emission.set_windows(bounds, self._other_ticks(), zone_roi,
-                                      f"XRF window of the zone on {scan.time if scan is not None else sid}")
+                                      f"XRF window of the zone on {scan.time if scan is not None else sid}",
+                                      name=self._channel)
         self._summary(parts)
 
     def _summary(self, parts) -> None:

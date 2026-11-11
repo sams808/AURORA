@@ -119,6 +119,16 @@ class _ToolViewBox(pg.ViewBox):
     def _zone_mode(self) -> bool:
         return bool(getattr(self.owner, "zone_tools", False))
 
+    def _view_pos(self, ev, down: bool = False) -> QPointF:
+        """The event's point (or where its button went down) in mm, through the scene. A drag or click that starts
+        on an axis beside the map reaches the view box from pyqtgraph's AxisItem with ev.pos() in the axis item's own
+        coordinates, which mapToView would put a whole axis width away (a rectangle started in the margin, to be sure
+        of the edge pixels, missed them)."""
+        get = getattr(ev, "buttonDownScenePos" if down else "scenePos", None)
+        if get is not None:
+            return self.mapSceneToView(get())
+        return self.mapToView(ev.buttonDownPos() if down else ev.pos())
+
     def drawing(self) -> str:
         """The shape of the stroke in progress ('rect', 'brush', 'lasso', 'polygon'), '' when none."""
         return self._stroke.shape if self._stroke is not None else ""
@@ -225,8 +235,8 @@ class _ToolViewBox(pg.ViewBox):
                 (button == Qt.RightButton and not zone):
             return super().mouseDragEvent(ev, axis)
         ev.accept()
-        p = self.mapToView(ev.pos())
-        p0 = self.mapToView(ev.buttonDownPos())
+        p = self._view_pos(ev)
+        p0 = self._view_pos(ev, down=True)
         if ev.isStart():
             self._cancelled = False
             self._drag_far = False
@@ -320,7 +330,7 @@ class _ToolViewBox(pg.ViewBox):
             self._legacy(self.rect_drawn, *st.rect)
 
     def mouseClickEvent(self, ev):
-        p = self.mapToView(ev.pos())
+        p = self._view_pos(ev)
         x, y = float(p.x()), float(p.y())
         zone = self._zone_mode()
         if ev.button() == Qt.RightButton and getattr(self.owner, "context_menus", False):
@@ -553,11 +563,29 @@ class MapView(pg.GraphicsLayoutWidget):
             self.set_hint(self._hint.text(), idle=True)
 
     def _place_hint(self) -> None:
+        """One line when the sentence fits in 60 % of the map (at least 280 px on a narrow map), else wrapped at that
+        width; QLabel's own word-wrap sizing broke even 'new zone 1: 12 points' over two lines."""
+        lab = self._hint
         w = max(120, int(0.6 * self.width()), min(self.width() - 16, 280))     # a narrow map: fewer lines
-        self._hint.setMaximumWidth(w)
-        self._hint.adjustSize()
+        lab.setMaximumWidth(16777215)
+        lab.setWordWrap(False)
+        one = lab.sizeHint()
+        if one.width() <= w:
+            lab.resize(one)
+        else:
+            lab.setWordWrap(True)
+            lab.resize(w, lab.heightForWidth(w))
         vp = self.viewport().geometry()
-        self._hint.move(vp.left() + 8, vp.top() + 8)
+        lab.move(vp.left() + 8, vp.top() + 8)
+
+    def hint_lines(self) -> int:
+        """The number of text lines the map hint takes (0 when hidden)."""
+        lab = self._hint
+        if not lab.isVisible() or not lab.text():
+            return 0
+        line = lab.fontMetrics().lineSpacing()
+        inner = lab.contentsRect().height()
+        return max(1, int(round(inner / line))) if line else 1
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
