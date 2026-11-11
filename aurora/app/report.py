@@ -232,6 +232,14 @@ class ReportPerspective(QWidget):
         self.maps = QCheckBox("Appendix B: plate maps with the zones"); self.maps.setChecked(True)
         sl.addWidget(self.appendix); sl.addWidget(self.maps)
         left.body.addWidget(self.scope_box)
+        # the Compare plot as the first figure (persona S-05: 'compare two samples' belongs in the report); ticked
+        # by itself while Compare shows rows, until the user changes it
+        self.compare_box = QCheckBox("Add the Compare plot as the first figure")
+        self.compare_box.setToolTip("The spectra ticked Show in Compare, as plotted there (scaled, offset, labelled), "
+                                    "on a page after the cover.")
+        self.compare_box.toggled.connect(lambda _on: (setattr(self, "_compare_set", True), self._scope_text()))
+        self._compare_set = False
+        left.body.addWidget(self.compare_box)
         # groups and holders: an Advanced tab of 'Check before building', next to the contents they decide
         self.scope_page = QWidget()
         lists = QHBoxLayout(self.scope_page); lists.setContentsMargins(6, 6, 6, 6)
@@ -349,7 +357,8 @@ class ReportPerspective(QWidget):
         self.page_scroll = page_scroll(split)
         self.body = overlay_host(self.page_scroll)
         root.addWidget(self.body, 1)
-        self.empty_state = EmptyState("No project open: the report is built from the zones drawn in Reduce.",
+        self.empty_state = EmptyState("No project open: the report is built from the samples you outline (Survey or "
+                                      "Reduce) and keep in Check.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="report",
                                       parent=self.body)
@@ -443,6 +452,7 @@ class ReportPerspective(QWidget):
     def showEvent(self, e) -> None:
         super().showEvent(e)
         self._author_text()
+        self.refresh_compare_box()
         if self._plan_stale:
             self.schedule_check()
 
@@ -487,10 +497,41 @@ class ReportPerspective(QWidget):
         parts.append("the quality notes (Appendix C)")
         then = ", ".join(parts[:-1]) + f" and {parts[-1]}" if len(parts) > 1 else parts[0]
         quality = "print quality" if self.dpi.value() >= 300 else "draft quality"
-        self.scope_line.setText(f"The report will hold one page per sample group ({groups}, {holders}) with the spectra "
-                                f"ticked Looks OK, then {then}. Figures at {quality} ({self.dpi.value()} dpi). Compare "
-                                "and Fit results are not in it: use Export… in Compare and Fit.")
+        first = "the Compare plot, then " if self.compare_box.isChecked() else ""
+        tail = ("Fit results are not in it: use Export… in Fit." if self.compare_box.isChecked() else
+                "Compare and Fit results are not in it: tick the box above for the Compare plot, or use Export… in "
+                "Compare and Fit.")
+        self.scope_line.setText(f"The report will hold {first}one page per sample group ({groups}, {holders}) with the "
+                                f"spectra ticked Looks OK, then {then}. Figures at {quality} ({self.dpi.value()} dpi). "
+                                + tail)
         QTimer.singleShot(0, self, self.fit_options)
+
+    def compare_window(self):
+        from aurora.app import nav
+        win = nav.window_of(self)
+        return getattr(win, "compare", None) if win is not None else None
+
+    def compare_snapshot(self) -> dict | None:
+        """The Compare plot as shown (ComparePerspective.report_snapshot), None without one."""
+        cp = self.compare_window()
+        try:
+            return cp.report_snapshot() if cp is not None else None
+        except Exception:                       # noqa: BLE001  (a row that cannot be drawn: the report goes on)
+            return None
+
+    def refresh_compare_box(self) -> None:
+        """Ticked by itself while Compare shows rows (until the user changes it); off and disabled without any."""
+        cp = self.compare_window()
+        n = len(cp.shown()) if cp is not None else 0
+        self.compare_box.setEnabled(n > 0)
+        if not self._compare_set or n == 0:
+            self.compare_box.blockSignals(True)
+            self.compare_box.setChecked(n > 0)
+            self.compare_box.blockSignals(False)
+            self._scope_text()
+        self.compare_box.setToolTip(f"The {plural(n, 'row')} ticked Show in Compare, as plotted there (scaled, "
+                                    "offset, labelled), on a page after the cover." if n else
+                                    "No row is shown in Compare yet: tick Show on the spectra to compare there.")
 
     def fit_options(self) -> None:
         """The Options card as tall as its wrapped lines at its width (the splitter ignores word wrap)."""
@@ -607,8 +648,13 @@ class ReportPerspective(QWidget):
 
     # ------------------------------------------------------------------ author
     def author(self) -> tuple[str, str]:
-        """(name, where it comes from) without asking: Settings, else the OS account's full name."""
-        from aurora.app.settings_dialog import get
+        """(name, where it comes from) without asking: Settings, else the OS account's full name; ('', 'Settings')
+        when the first-build question was answered blank ('no author line')."""
+        from aurora.app.settings import settings
+        from aurora.app.settings_dialog import AUTHOR_NONE_KEY, get
+        if not str(get("report_author") or "").strip() and settings().value(AUTHOR_NONE_KEY, False) in (True, "true",
+                                                                                                         "True", 1, "1"):
+            return "", "Settings"
         return core_report.resolve_author(get("report_author"))
 
     def _author_text(self) -> None:
@@ -621,28 +667,39 @@ class ReportPerspective(QWidget):
             self.author_line.setText(f"Author: {name}, from {source}")
         else:
             self.author_line.setText("No author line (Settings > report author)")
+        if name and source != "Settings" and not self._prompted() and not is_advanced():
+            self.author_line.setText(f"Author: asked at the first build (your computer account's name, {name}, is "
+                                     "offered; blank prints none)")
         self.author_line.setToolTip("Printed in the page footers and the PDF metadata: Settings > report author, "
                                     "else the full name of the system account; blank gives no author line.")
 
-    def resolve_author(self, ask: bool = True) -> str:
-        """The report author: Settings, else the OS account's full name, else (once per installation) a prompt.
-        A name typed in the prompt is kept in Settings; blank or Cancel builds without an author line."""
-        name, _source = self.author()
-        if name or not ask:
-            return name
+    def _prompted(self) -> bool:
         from aurora.app.settings import settings
+        return settings().value(PROMPTED_KEY, False) in (True, "true", "True", 1, "1")
+
+    def resolve_author(self, ask: bool = True) -> str:
+        """The report author: Settings; otherwise, once per installation, a question at the first build, filled in
+        with the computer account's full name (a shared lab computer would print its owner's name: persona S-10).
+        A name typed is kept in Settings; blank or Cancel keeps 'no author line'. After the question, or with
+        ask=False, the account's name as before."""
+        from aurora.app.settings import settings
+        from aurora.app.settings_dialog import AUTHOR_NONE_KEY
+        name, source = self.author()
+        if not ask or source == "Settings" or self._prompted():
+            return name
         s = settings()
-        if s.value(PROMPTED_KEY, False) in (True, "true", "True", 1, "1"):
-            return ""
         s.setValue(PROMPTED_KEY, True)
         s.sync()
-        text, ok = QInputDialog.getText(self, "Report author",
+        text, ok = QInputDialog.getText(self, "Name printed on your reports",
                                         "The name printed in the report footer and the PDF metadata.\n"
-                                        "Leave it blank for no author line; Settings > report author changes it later.")
+                                        "Leave it blank for no author line; Settings > report author changes it later.",
+                                        text=name)
         name = str(text or "").strip() if ok else ""
         if name:
             s.setValue("report_author", name)
-            s.sync()
+        else:
+            s.setValue(AUTHOR_NONE_KEY, True)
+        s.sync()
         self._author_text()
         return name
 
@@ -803,7 +860,7 @@ class ReportPerspective(QWidget):
 
     def _count_findings(self, ign: set[str]) -> None:
         plan = self._plan
-        self.totals.setText(plan.totals(ign))
+        self.totals.setText(plan.totals(ign, "zone" if is_advanced() else "sample"))
         n_open = len(plan.open_findings(ign))
         self.check_tabs.setTabText(0, f"Findings ({n_open})" if n_open else "Findings")
         self.check_tabs.setTabText(1, f"Contents ({plan.n_zones})")
@@ -949,6 +1006,7 @@ class ReportPerspective(QWidget):
             return
         author = self.resolve_author(ask=True)
         preset = self.preset_key()
+        snap = self.compare_snapshot() if self.compare_box.isChecked() else None
         p = PRESETS[preset]
         out = (Path(self.out_dir.text()) if self.out_dir.text().strip()
                else self.session.project.output_root / "reports" / "aurora")
@@ -959,7 +1017,7 @@ class ReportPerspective(QWidget):
                                 title=self.title.text().strip() or None,
                                 groups=None if len(groups) == self.groups.count() else groups, holders=holders,
                                 preset=preset, author=author, stacks=dict(self.session._stacks),
-                                sheet_rows=list(self.session.sheet_rows), **extra)
+                                sheet_rows=list(self.session.sheet_rows), compare=snap, **extra)
         self._builder = builder
         self.status.setText("building …")
 

@@ -61,7 +61,9 @@ def test_the_os_account_name_from_the_perspective(qapp, tmp_path, monkeypatch):
     from aurora.app.settings_dialog import get
     from PySide6.QtWidgets import QInputDialog
     asked = []
-    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: asked.append(a) or ("", False)))
+    # the first build asks once, the account's name filled in (a shared computer: persona S-10); OK keeps it
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: asked.append(k.get("text")) or
+                                                              (k.get("text", ""), True)))
     monkeypatch.setattr(core_report, "os_full_name", lambda: "Test User")
     quick(monkeypatch)
     assert get("report_author") == ""
@@ -69,10 +71,12 @@ def test_the_os_account_name_from_the_perspective(qapp, tmp_path, monkeypatch):
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     from aurora.app import mode
     assert win.report.author_line.text() == ("Author: Test User, from the system account" if mode.is_advanced() else
-                                             "Author: Test User (from your computer account; change it in Settings > "
-                                             "report author)")
+                                             "Author: asked at the first build (your computer account's name, Test "
+                                             "User, is offered; blank prints none)")
     res, b = _build(qapp, win)
-    assert not asked and res is not None
+    assert asked == ["Test User"] and res is not None and get("report_author") == "Test User"
+    _res2, _b2 = _build(qapp, win)
+    assert asked == ["Test User"]                             # once
     assert b.footers and all(" · Test User · " in f for f in b.footers)
     raw = _pdf_meta(res.pdf)
     assert "/Author (Test User)" in raw

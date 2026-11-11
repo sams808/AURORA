@@ -88,8 +88,28 @@ NORM_TEXT = {"raw": "raw counts", "i0": "divided by I0", "i0pre": "divided by I0
 NORM_WORDS = {"raw": "raw counts", "i0": "÷ beam intensity (I0)", "i0pre": "÷ beam intensity (I0), pre-edge line removed",
               "i0jump": "÷ beam intensity (I0), pre-edge line removed, edge step = 1",
               "area": "÷ beam intensity (I0), area = 1", "max": "÷ beam intensity (I0), maximum = 1"}
-NORM_SHORT = {"raw": "raw counts", "i0": "/ I0", "i0pre": "/ I0, pre-edge = 0", "i0jump": "/ I0, edge jump = 1",
-              "area": "/ I0, area = 1", "max": "/ I0, maximum = 1"}
+NORM_SHORT = {"raw": "raw counts", "i0": "÷ I0", "i0pre": "÷ I0, pre-edge = 0", "i0jump": "÷ I0, edge step = 1",
+              "area": "÷ I0, area = 1", "max": "÷ I0, maximum = 1"}
+
+
+def spikes_words(spikes: dict) -> str:
+    """{'sdd4': 1, 'sum': 2} -> '1 spike (SDD4); 2 spikes (sum)' (Appendix C in the words of the captions: M21)."""
+    return "; ".join(f"{n} spike{'s' if n != 1 else ''} ({k.upper() if k.startswith('sdd') else k})"
+                     for k, n in spikes.items())
+
+
+CAPTION_CHARS = 150              # a figure caption wraps at this many characters (5.8 pt across the page)
+CAPTION_LINE = 0.0105            # the height of one caption line, in figure fractions
+CAPTION_BOTTOM = 0.045           # the captions end above the footer
+CAPTION_MAX = 0.36               # the captions take at most this much of the page (the plots keep the rest)
+
+
+def _when_text(iso: str) -> str:
+    """'2026-11-11T05:51:50' -> '2026-11-11 05:51' (the text itself when it is no date)."""
+    try:
+        return dt.datetime.fromisoformat(str(iso)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return str(iso)
 
 
 def detectors_text(sdd) -> str:
@@ -408,12 +428,13 @@ class Plan:
         ign = set(ignored or ())
         return [f for f in self.findings if f.id not in ign]
 
-    def totals(self, ignored=()) -> str:
-        """'14 zones · 31 spectra · 3 warnings · 1 note' (ignored findings are not counted). Notes (NOTE_KINDS, the
-        findings that drop no data, shown with the muted dot) are counted apart, and only when there is one."""
+    def totals(self, ignored=(), zone_word: str = "zone") -> str:
+        """'14 zones · 31 spectra · 3 warnings · 1 note' (ignored findings are not counted; zone_word 'sample' in Easy
+        mode: M10). Notes (NOTE_KINDS, the findings that drop no data, shown with the muted dot) are counted apart,
+        and only when there is one."""
         found = self.open_findings(ignored)
         notes = sum(1 for f in found if f.kind in NOTE_KINDS)
-        parts = [_plural(self.n_zones, "zone"), _plural(self.n_spectra, "spectrum", "spectra"),
+        parts = [_plural(self.n_zones, zone_word), _plural(self.n_spectra, "spectrum", "spectra"),
                  _plural(len(found) - notes, "warning")]
         return " · ".join(parts + ([_plural(notes, "note")] if notes else []))
 
@@ -476,8 +497,9 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
             who = f"'{z.label}' ({hname})"
             if not z.group.strip():
                 findings.append(Finding(f"ungrouped|{key}|{z.id}", "ungrouped",
-                                        f"{who} has no group: it goes under '{UNGROUPED}' (the group is set in Reduce, "
-                                        "Zone card, Advanced mode).", key, z.id))
+                                        f"{who} has no group: it goes under '{UNGROUPED}' (a sample named as in the "
+                                        "sample sheet takes the sheet's group; or set it in Reduce, Zone card, "
+                                        "Advanced mode).", key, z.id))
             included = [(sid, st) for sid, st in z.settings.items() if st.include]
             good_asked = []
             for sid, st in included:
@@ -531,8 +553,11 @@ def plan(project: Project, zones: ZonesFile, sheet_rows=None, holders=None, days
             if not pz.spectra:
                 if not included:
                     pz.skip = "no scan attached yet" if not z.settings else "no included scan"
+                    from aurora.core.zones import incomplete_text, incomplete_under
+                    gone = incomplete_under(z, h) if not z.settings else None
                     findings.append(Finding(f"no_included|{key}|{z.id}", "no_included",
-                                            f"{who} has {pz.skip}, so it is left out.", key, z.id))
+                                            (incomplete_text(who, gone) + " It is left out." if gone is not None else
+                                             f"{who} has {pz.skip}, so it is left out."), key, z.id))
                 else:
                     pz.skip = "no included scan with a pixel in the zone"
             if sheet and z.label.strip():
@@ -670,7 +695,8 @@ class ReportBuilder:
                  groups: list[str] | None = None, holders: list[str] | None = None, preset: str = "final",
                  author: str = AUTHOR, stacks: dict[str, StackData] | None = None, appendix: bool | None = None,
                  maps: bool | None = None, png_dpi: int | None = None, page_png_dpi: int = 110,
-                 days: list[str] | None = None, sheet_rows: list | None = None, out_dir: Path | None = None):
+                 days: list[str] | None = None, sheet_rows: list | None = None, out_dir: Path | None = None,
+                 compare: dict | None = None):
         if preset not in PRESETS:
             raise ValueError(f"unknown report preset {preset!r} (one of {', '.join(PRESETS)})")
         if out is None and out_dir is None:
@@ -695,6 +721,9 @@ class ReportBuilder:
         self.png_dpi = int(p["png_dpi"] if png_dpi is None else png_dpi)
         self.page_png_dpi = page_png_dpi
         self.sheet_rows = None if sheet_rows is None else list(sheet_rows)
+        # the Compare plot as shown when the build started (traces: aurora.core.figures.FigureTrace, x_range, ylabel,
+        # caption): the first figure of the report, after the cover (persona S-05); None: no Compare page
+        self.compare = copy.deepcopy(compare) if compare and compare.get("traces") else None
         self.skipped: list[str] = []
         self.not_included: list[tuple[str, str, str]] = []
         self.page_pngs: list[Path] = []
@@ -1007,6 +1036,8 @@ class ReportBuilder:
             meta["Author"] = self.author             # the resolved report author; never a default name
         with PdfPages(pdf_path, metadata=meta) as pdf:
             n_pages += self._cover(pdf, entries, groups, by_group)
+            if self.compare is not None:
+                n_pages += self._compare_page(pdf, figures)
             for gi, g in enumerate(groups):
                 if progress:
                     progress(gi, len(groups), f"group {g}")
@@ -1183,8 +1214,8 @@ class ReportBuilder:
             parts.append(f"days {', '.join(self.days)}")
         parts.append(f"groups {', '.join(self.groups)}" if self.groups else "all groups")
         apps = [n for n, on in (("Appendix A", self.appendix), ("Appendix B", self.maps)) if on]
-        parts.append(f"{self.preset.capitalize()} preset (figures at {self.png_dpi} dpi, "
-                     + (" and ".join(apps) if apps else "no Appendix A or B") + ")")
+        parts.append(f"figures at {self.png_dpi} dpi, "
+                     + (" and ".join(apps) if apps else "no Appendix A or B"))
         return "Scope: " + "; ".join(parts)
 
     def _cover(self, pdf, entries, groups, by_group) -> int:
@@ -1195,19 +1226,27 @@ class ReportBuilder:
         holders = sorted({e.holder for e in entries})
         changes = self.changes_lines(self.changes, limit=6)
         prev = self.changes.get("previous") if self.changes else None
+        cal = proj.calibration
+        if cal is not None and getattr(cal, "exists", False):
+            cal_line = cal.describe(proj.root)
+        else:                                   # plain words (M21, S-29): what a missing calibration means
+            cal_line = ("detector energy scale: standard, 10 eV per channel (not calibrated for this beamtime: no "
+                        "config/sdd_calibration.json)")
+        saved = _when_text(self.zones.exported) if self.zones.exported else "(no date recorded)"
         lines = [
-            f"Beamtime project {self.zones.project or proj.root.name}, SGM beamline (ambxas endstation), Canadian Light Source",
+            f"Beamtime project {self.zones.project or proj.root.name}, SGM beamline, Canadian Light Source",
             f"Days: {', '.join(days)}",
             f"Holders: {', '.join(holders)}",
-            f"{_plural(len(entries), 'zone spectrum', 'zone spectra')} in {_plural(len(groups), 'sample group')}; "
-            f"{_plural(len(self.not_included), 'scan')} marked not included; {len(self.skipped)} skipped (see QC pages)",
+            f"{_plural(len(entries), 'spectrum', 'spectra')} in {_plural(len(groups), 'sample group')}; "
+            f"{_plural(len(self.not_included), 'scan')} marked not included; {len(self.skipped)} skipped "
+            "(see Appendix C)",
             self.scope_text(),
             "",
             "Provenance",
-            f"  zones saved {self.zones.exported or '(no date recorded)'}"
+            f"  outlines saved {saved}"
             + (f" (zone tool build {self.zones.built})" if self.zones.built else ""),
-            f"  {proj.calibration.describe(proj.root) if proj.calibration else 'no SDD calibration'}",
-            "  fixed ROI windows: " + (", ".join(proj.roi_bins.describe(l) for l in proj.roi_bins.labels[:6]) if proj.roi_bins and proj.roi_bins.labels else "none")
+            f"  {cal_line}",
+            "  emission windows: " + (", ".join(proj.roi_bins.describe(l) for l in proj.roi_bins.labels[:6]) if proj.roi_bins and proj.roi_bins.labels else "none")
             + (" …" if proj.roi_bins and len(proj.roi_bins.labels) > 6 else ""),
             f"  {APP_NAME} {__version__}, report built {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}"
             + (f" by {self.author}" if self.author else ""),
@@ -1219,7 +1258,9 @@ class ReportBuilder:
         ] + reading_lines() + [
             "",
             "Contents",
-        ] + [f"  {g}: {_plural(len(by_group[g]), 'spectrum', 'spectra')}" for g in groups] + [
+        ] + ([f"  Compare: {_plural(len(self.compare['traces']), 'spectrum', 'spectra')} as shown"]
+             if self.compare is not None else []) + [
+            f"  {g}: {_plural(len(by_group[g]), 'spectrum', 'spectra')}" for g in groups] + [
             "  Appendix A: the four detectors per zone" if self.appendix else "",
             "  Appendix B: plate maps with the zones" if self.maps else "",
             "  Appendix C: quality notes, the check before building, scans not included, skipped",
@@ -1245,6 +1286,52 @@ class ReportBuilder:
         self._footer(fig, "page 1")
         return self._save_page(pdf, fig)
 
+    def _compare_page(self, pdf, figures: list[Path]) -> int:
+        """The Compare plot as shown when the build started, on its own page after the cover: every shown spectrum,
+        at its offset, with its label and the caption that says how they are scaled (persona S-05)."""
+        from aurora.core.figures import LINESTYLES
+        c = self.compare
+        traces = c["traces"]
+        fig = plt.figure(figsize=PAGE)
+        ax = fig.add_axes([0.1, 0.2, 0.78, 0.68])
+        xs, ys = [], []
+        for t in traces:
+            E, y = np.asarray(t.E, float), np.asarray(t.y, float)
+            ax.plot(E, y, color=t.colour, linestyle=LINESTYLES.get(t.dash, "-") if isinstance(t.dash, str) else
+                    STYLES[int(t.dash) % len(STYLES)], lw=1.2)
+            xs.append(E); ys.append(y)
+        xr = c.get("x_range")
+        allx = np.concatenate([x[np.isfinite(x)] for x in xs])
+        x0, x1 = (min(xr), max(xr)) if xr else (float(allx.min()), float(allx.max()))
+        ax.set_xlim(x0, x1)
+        for t, E, y in zip(traces, xs, ys):               # each label at the right end of its curve
+            fin = np.isfinite(y) & (E >= x0) & (E <= x1)
+            if fin.any():
+                e, v = E[fin], y[fin]
+                ax.text(float(e[-1]), float(v[-1]), f" {t.label}", fontsize=9, color=t.label_colour or t.colour,
+                        va="center", ha="left")
+        ax.set_xlabel("incident energy (eV)")
+        ax.set_ylabel(c.get("ylabel") or "absorption (step = 1), offset")
+        ax.set_yticks([])
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        fig.suptitle(f"Compare · {_plural(len(traces), 'spectrum', 'spectra')}", fontsize=12, weight="bold", x=0.1,
+                     ha="left", color="#15213B")
+        import textwrap
+        caption = c.get("caption") or ("The spectra shown in Compare when the report was built, scaled as there "
+                                       "(the part before the edge is 0, the rise at the edge is 1), each curve "
+                                       "offset above the one before for clarity.")
+        fig.text(0.1, CAPTION_BOTTOM + 0.02, "\n".join(textwrap.wrap(caption, 120)), fontsize=7.5, color="#3A4866",
+                 va="bottom")
+        name = self._claim("figures", "compare", "compare")
+        for ext in ("png", "svg"):
+            fp = self._target(self.out / "figures" / f"{name}.{ext}")
+            fig.savefig(fp, dpi=self.png_dpi if ext == "png" else None)
+            if ext == "png":
+                figures.append(fp)
+        self._footer(fig)
+        return self._save_page(pdf, fig)
+
     def _group_pages(self, pdf, group: str, entries: list[Entry], figures: list[Path]) -> int:
         n = 0
         # DEFAULT: within a group, one figure per edge type, at most TRACES_PER_PAGE traces per page
@@ -1268,13 +1355,13 @@ class ReportBuilder:
     def _waterfall_figure(self, group: str, edge: str, items: list[Entry], page: int, pages: int):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=PAGE, gridspec_kw={"height_ratios": [3, 2], "hspace": 0.28},
                                        constrained_layout=False)
-        fig.subplots_adjust(left=0.1, right=0.78, top=0.9, bottom=0.07 + 0.0125 * len(items))     # room for the captions
         fig.suptitle(f"{group} · {edge} · {_plural(len(items), 'spectrum', 'spectra')}"
                      + (f" (page {page} of {pages})" if pages > 1 else ""),
                      fontsize=12, weight="bold", x=0.1, ha="left", color="#15213B")
         off1 = off2 = 0.0
         gap1 = 0.0
         captions = []
+        edge_line = ""
         e_min = min(float(e.traces.E[0]) for e in items); e_max = max(float(e.traces.E[-1]) for e in items)
         for i, e in enumerate(items):
             t = e.traces
@@ -1302,12 +1389,28 @@ class ReportBuilder:
             if e.stack.edge_ev and e_min < e.stack.edge_ev < e_max:
                 for ax in (ax1, ax2):
                     ax.axvline(e.stack.edge_ev, color="#999999", lw=0.6, ls=":")
+                edge_line = f"Dotted line: the tabulated {e.stack.edge_text or 'edge'} energy, {e.stack.edge_ev:.1f} eV."
         ax1.set_ylabel("fluorescence (offset)"); ax2.set_ylabel("TEY (offset)")
         ax2.set_xlabel("incident energy (eV)")
         ax1.set_xlim(e_min, e_max); ax2.set_xlim(e_min, e_max)
         for ax in (ax1, ax2):
             ax.tick_params(labelsize=8); ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-        fig.text(0.1, 0.03, "\n".join(c[:160] for c in captions), fontsize=5.8, color="#3A4866", va="bottom")
+        # every caption whole, wrapped at the page width, above the footer (persona M16: cut at the margin, on the
+        # footer line); the plots end above them
+        import textwrap
+        lines = [w for c in captions + ([edge_line] if edge_line else []) for w in textwrap.wrap(c, CAPTION_CHARS)]
+        # many spectra with long notes: smaller type first (down to 4 pt), then the lines that still do not fit are
+        # named (Appendix C lists every spectrum); the plots keep at least half of the page
+        size, line = 5.8, CAPTION_LINE
+        if line * len(lines) > CAPTION_MAX:
+            k = max(4.0 / 5.8, CAPTION_MAX / (line * len(lines)))
+            size, line = 5.8 * k, CAPTION_LINE * k
+        fit = int(CAPTION_MAX // line)
+        if len(lines) > fit:
+            lines = lines[:fit - 1] + [f"… {len(lines) - fit + 1} more caption lines: Appendix C lists every spectrum"]
+        h = line * len(lines)
+        fig.subplots_adjust(left=0.1, right=0.78, top=0.9, bottom=CAPTION_BOTTOM + h + 0.045)
+        fig.text(0.1, CAPTION_BOTTOM, "\n".join(lines), fontsize=size, color="#3A4866", va="bottom", linespacing=1.25)
         self._footer(fig)
         return fig
 
@@ -1355,6 +1458,7 @@ class ReportBuilder:
                 hz = self.zones.holders.get(key)
                 surv = self.project.find(hz.survey) if hz and hz.survey else None
                 ax.set_title(f"holder {es[0].holder} · {es[0].day}" + (f" · survey {surv.name}" if surv else ""), fontsize=8)
+                sv = None
                 if surv is not None:
                     try:
                         sv = SurveyData.load(surv, self.project.roi_bins, keep_spectra=False)
@@ -1364,23 +1468,18 @@ class ReportBuilder:
                         ax.pcolormesh(np.r_[g.xs - dx / 2, g.xs[-1] + dx / 2], np.r_[g.ys - dy / 2, g.ys[-1] + dy / 2], g.img,
                                       cmap="viridis", shading="flat", rasterized=True)
                         ax.set_aspect("equal")
+                        ax.text(0.0, -0.16, f"Colour: {ch} counts at {sv.energy:.0f} eV ÷ beam intensity (I0), log "
+                                "scale. Each sample: the pixels it holds, filled (an erased part is left out).",
+                                transform=ax.transAxes, fontsize=6.5, color="#4E5D7A", va="top")
                     except Exception as err:
+                        sv = None
                         ax.text(0.02, 0.95, f"survey unreadable: {err}", transform=ax.transAxes, fontsize=7, va="top")
-                seen = set()
-                for i, e in enumerate(es):
-                    z = e.zone
-                    if z.id in seen:
-                        continue
-                    seen.add(z.id)
-                    col = PAL[i % len(PAL)]
-                    for r in z.rects:
-                        ax.add_patch(plt.Rectangle((r[0], r[2]), r[1] - r[0], r[3] - r[2], fill=False, ec=col, lw=0.9))
-                    for s in z.paint:
-                        ax.add_patch(plt.Rectangle((s[0] - s[2] / 2, s[1] - s[3] / 2), s[2], s[3], fill=False, ec=col, lw=0.6))
-                    pts = [(r[0], r[3]) for r in z.rects] + [(s[0], s[1]) for s in z.paint]
-                    if pts:
-                        x, y = pts[0]
-                        ax.text(x, y, z.label, fontsize=5, color=col, va="bottom")
+                in_report = {e.zone.id for e in es}
+                zones = list(hz.zones) if hz else []
+                zones += [e.zone for e in es if e.zone.id not in {z.id for z in zones}]
+                taken: dict = {}                    # label places used: a second label there goes one line lower
+                for i, z in enumerate(zones):
+                    self._draw_map_zone(ax, z, PAL[i % len(PAL)], sv, left_out=z.id not in in_report, taken=taken)
                 ax.set_xlabel("x (mm)", fontsize=7); ax.set_ylabel("y (mm)", fontsize=7); ax.tick_params(labelsize=6)
             for ax in axes[len(keys[p0:p0 + 2]):]:
                 ax.axis("off")
@@ -1388,11 +1487,46 @@ class ReportBuilder:
             n += self._save_page(pdf, fig)
         return n
 
+    @staticmethod
+    def _draw_map_zone(ax, z, col: str, sv=None, left_out: bool = False, taken: dict | None = None) -> None:
+        """One sample on a holder map (Appendix B, persona M06): the survey pixels it holds, filled, so an erased
+        part shows as a gap; without survey pixels in it, its drawn shapes (the erased ones dashed). The label at
+        8 pt with a white halo; '(left out)' for a sample the report has no spectrum of."""
+        import matplotlib.patheffects as pe
+        from matplotlib.collections import PatchCollection
+        from aurora.core.zones import members, zone_bbox
+        label_at = None
+        mem = members(z, sv.x, sv.y, sv.pitch) if sv is not None and getattr(sv, "n", 0) else np.zeros(0, int)
+        if mem.size:
+            px, py = sv.pitch
+            sq = [plt.Rectangle((sv.x[i] - px / 2, sv.y[i] - py / 2), px, py) for i in mem]
+            ax.add_collection(PatchCollection(sq, facecolor=col, alpha=0.45, edgecolor=col, linewidth=0.5))
+            i = int(mem[np.lexsort((sv.x[mem], -sv.y[mem]))[0]])
+            label_at = (float(sv.x[i]) - px / 2, float(sv.y[i]) + py / 2)
+        else:
+            for r in z.rects:
+                ax.add_patch(plt.Rectangle((r[0], r[2]), r[1] - r[0], r[3] - r[2], fill=False, ec=col, lw=0.9))
+            for s in z.paint:
+                ax.add_patch(plt.Rectangle((s[0] - s[2] / 2, s[1] - s[3] / 2), s[2], s[3], fill=False, ec=col, lw=0.6))
+            for r in z.erects:
+                ax.add_patch(plt.Rectangle((r[0], r[2]), r[1] - r[0], r[3] - r[2], fill=False, ec=col, lw=0.6, ls="--"))
+            bb = zone_bbox(z)
+            if bb is not None:
+                label_at = (bb[0], bb[3])
+        if label_at is not None:
+            key = (round(label_at[0], 2), round(label_at[1], 2))
+            k = taken.get(key, 0) if taken is not None else 0
+            if taken is not None:
+                taken[key] = k + 1
+            ax.annotate(z.label + (" (left out)" if left_out else ""), xy=label_at, xytext=(0, -11 * k),
+                        textcoords="offset points", fontsize=8, color="#15213B", va="bottom",
+                        path_effects=[pe.withStroke(linewidth=2.5, foreground="white")])
+
     def _qc_pages(self, pdf, entries: list[Entry]) -> int:
         lines = self.appendix_c = self.qc_lines(entries)
         n = 0
         per_page = 62
-        heads = ("Appendix", "Zone spectra", "Scans marked", "Skipped", "Scans covering", "Check before")
+        heads = ("Appendix", "Spectra included", "Scans marked", "Skipped", "Scans covering", "Check before")
         for p0 in range(0, len(lines), per_page):
             fig = plt.figure(figsize=PAGE)
             y = 0.95
@@ -1409,16 +1543,18 @@ class ReportBuilder:
         """The text of Appendix C: the included spectra, scans covering a zone without settings, the other findings
         of the check before building (ignored ones marked), scans not included, anything skipped."""
         rows = []
+        head = (f"{'holder':>6} {'sample':24} {'scan':26} {'edge':7} {'pixels':>6} {'detectors':22} "
+                f"{'scaled':20} {'spikes removed':24} flags")
         for e in entries:
-            sp = ", ".join(f"{k} {v}" for k, v in e.spikes_removed.items())
+            sp = spikes_words(e.spikes_removed)
             flags = "; ".join(e.flags).replace(" (sgm_report)", " [sgm]").replace(" (AURORA check)", " [check]").replace(
                 "good-I0 requested but no good scan ticked: own I0 used (report)", "no good I0 ticked")
-            rows.append(f"{e.holder:>5} {e.zone.label[:24]:24} {e.scan.time} {e.scan.label[:20]:20} {e.edge_key:7} "
-                        f"{e.traces.n_pix:4d} pixels {detectors_text(e.settings.sdd):22.22} "
-                        f"{NORM_SHORT.get(e.settings.fluo_norm, e.settings.fluo_norm):19.19} "
-                        f"{('spikes ' + sp) if sp else '':24.24} {flags[:40]}")
-        lines = ["Appendix C · quality notes", "", "Zone spectra included (holder, zone, scan, edge, pixels, detectors, "
-                 "normalisation, spikes interpolated, flags with their source):"] + rows
+            scan = f"{e.scan.time} {e.scan.label}"
+            rows.append(f"{e.holder:>6.6} {e.zone.label[:24]:24} {scan[:26]:26} {e.edge_key:7} "
+                        f"{e.traces.n_pix:6d} {detectors_text(e.settings.sdd):22.22} "
+                        f"{NORM_SHORT.get(e.settings.fluo_norm, e.settings.fluo_norm):20.20} "
+                        f"{sp:24.24} {flags[:40]}")
+        lines = ["Appendix C · quality notes", "", "Spectra included (the flags with their source):", head] + rows
         findings = self.plan.findings if self.plan else []
         ignored = set(self.zones.ui.get("preflight_ignored") or [])
         no_set = [f for f in findings if f.kind == "no_settings"]

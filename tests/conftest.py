@@ -210,3 +210,17 @@ def real_expect(real_project) -> dict:
     if data is None:
         pytest.skip("no aurora_expectations.json for the real beamtime (see tests/real_expectations.example.json)")
     return data
+
+
+@pytest.fixture(autouse=True)
+def no_modal_inputs(monkeypatch):
+    """QInputDialog.getText / getItem never open a modal box in a test (offscreen, nothing would close it): they
+    answer Cancel unless the test sets its own answer. The Report asks for the author once, at the first build."""
+    try:
+        from PySide6.QtWidgets import QInputDialog
+    except ImportError:
+        yield
+        return
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("", False)))
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("", False)))
+    yield

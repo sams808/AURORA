@@ -133,8 +133,9 @@ def test_guide_next_step_table():
         (S(has_project=True, read_only=True), "home", "This beamtime folder is read-only"),
         (S(has_project=True), "home", "This beamtime has no complete stack"),
         (S(has_project=True, n_complete_stacks=2), "survey", "Next: find your samples"),
-        (S(has_project=True, n_complete_stacks=2, visited=frozenset({"survey"})), "reduce", "Next: outline your first"),
-        (S(has_project=True, n_complete_stacks=2, n_zones=1), "reduce", "Next: in Reduce, select a sample"),
+        (S(has_project=True, n_complete_stacks=2, visited=frozenset({"survey"})), "survey",
+         "Next: draw around your first sample (Draw, then drag)"),
+        (S(has_project=True, n_complete_stacks=2, n_zones=1), "reduce", "Next: select the sample and press Add"),
         (S(has_project=True, n_complete_stacks=2, n_zones=1, n_queued=1), "check", "Next: look at each spectrum"),
         (S(has_project=True, n_complete_stacks=2, n_zones=1, n_queued=1, n_saved=1), "compare", "Next: plot your"),
         (S(has_project=True, n_complete_stacks=2, n_zones=1, n_queued=1, n_saved=1, visited=frozenset({"compare"})),
@@ -181,7 +182,7 @@ def test_guide_follows_the_user(qapp, tmp_path):
         strip.action_btn.click()
         assert win.current_key() == "survey"
         win.refresh_guide()
-        assert win.next_text().startswith("Next: Reduce – outline your first sample")
+        assert win.next_text().startswith("Here: draw around your first sample")       # the Survey draws (M23)
         ses = win.session
         sd = ses.stack(ses.stack_id(Project.discover(demo).find(testdata.STACK)))
         ses.select_stack(sd.id)
@@ -194,8 +195,8 @@ def test_guide_follows_the_user(qapp, tmp_path):
         win.reduce.scan_list.setCurrentRow(0)
         pump(qapp, 5)
         win.refresh_guide()
-        assert win.next_step.sentence == "Next: in Reduce, select a sample and press Add to Check."
-        assert win.next_text().startswith("Here: in Reduce")              # Reduce is the current page: no link
+        assert win.next_step.sentence == "Next: select the sample and press Add to Check."
+        assert win.next_text().startswith("Here: select the sample")      # Reduce is the current page: no link
         assert win.reduce.add_to_check() == 1
         assert win.reduce.next_link.isVisible() and "Go to Check" in win.reduce.next_link.text()
         win.refresh_guide()
@@ -336,7 +337,7 @@ def test_step4_sentence(qapp, easy_demo):
     text = rd.step4_line.plain_text()
     assert "divided by the beam intensity (I0)" in text and "the four detectors" in text
     assert not any(w in text for w in ("mcc", "Au mesh", "k =", "SDD1-4"))
-    assert rd.step4_line.toolTip().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean")
+    assert rd.step4_line.toolTip().startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · mean of the outlined pixels")
     st = rd.settings_in_force(sid)
     st.sdd = [True, True, False, True]
     from aurora.core.flags import Flag
@@ -674,7 +675,7 @@ def test_findings_grouped_by_kind(qapp):
         def by_group(self):
             return {}
 
-        def totals(self, ign):
+        def totals(self, ign, zone_word="zone"):
             return f"{len(self.open_findings(ign))} warnings"
 
         def open_findings(self, ign):

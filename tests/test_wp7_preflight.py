@@ -33,8 +33,9 @@ def test_exactly_the_three_findings(tmp_path):
         ("ungrouped", "holderA", 2, None), ("no_included", "holderA", 3, None), ("uncovered_stack", "holderB", None, sid2)])
     assert [f.id for f in preflight(proj, zf)] == [f.id for f in found]                  # stable ids
     texts = {f.kind: f.text for f in found}
-    assert texts["ungrouped"] == ("'2 beta' (holderA) has no group: it goes under 'Ungrouped' (the group is set in Reduce, "
-                                  "Zone card, Advanced mode).")
+    assert texts["ungrouped"] == ("'2 beta' (holderA) has no group: it goes under 'Ungrouped' (a sample named as in "
+                                  "the sample sheet takes the sheet's group; or set it in Reduce, Zone card, Advanced "
+                                  "mode).")
     assert texts["no_included"] == "'3 gamma' (holderA) has no included scan, so it is left out."
     assert "covered by no zone" in texts["uncovered_stack"]
     p = plan(proj, zf)
@@ -140,7 +141,7 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     win = report_window(qapp, proj, testdata.make_fake_zones(proj), tmp_path)
     rp = win.report
     lst = rp.preflight_list
-    assert lst.topLevelItemCount() == 3 and rp.totals.text() == "2 zones · 2 spectra · 2 warnings · 1 note"
+    assert lst.topLevelItemCount() == 3 and rp.totals.text() == "2 samples · 2 spectra · 2 warnings · 1 note"  # Easy
     assert rp.check_tabs.tabText(0) == "Findings (3)" and rp.check_tabs.tabText(1) == "Contents (2)"
     # the Contents tree: group ▸ holder ▸ zone, a skipped zone with the warning icon and the reason
     groups = [rp.contents.topLevelItem(i) for i in range(rp.contents.topLevelItemCount())]
@@ -176,7 +177,7 @@ def test_the_check_list_jump_ignore_contents_and_totals(qapp, tmp_path, monkeypa
     pump(qapp)
     res = rp._result
     n = len(ReportBuilder(proj, win.session.zones, tmp_path / "x").collect())
-    assert res.entries == n == 2 and rp.totals.text().startswith(f"2 zones · {n} spectra")
+    assert res.entries == n == 2 and rp.totals.text().startswith(f"2 samples · {n} spectra")
     close(win)
     # reopen: the ignored finding stays ignored
     from aurora.core.model import Project

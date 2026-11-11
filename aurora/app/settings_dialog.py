@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from aurora.app.settings import settings
 
+AUTHOR_NONE_KEY = "report_author_none"      # the first-build question was answered blank: no author line
 DEFAULTS = {
     "despike_k": 6.0,
     "fluo_norm": "i0jump",
@@ -100,7 +101,7 @@ class SettingsDialog(QDialog):
         self.text_size.setCurrentIndex(max(0, self.text_size.findData(get("text_size"))))
         form.addRow("text size", self.text_size)
         self.author = QLineEdit(get("report_author"))
-        self.author.setPlaceholderText("blank: resolved when a report is built")
+        self.author.setPlaceholderText("blank: the name of your computer account (asked at the first report)")
         form.addRow("report author", self.author)
         self.open_last = QCheckBox("open the last project at start"); self.open_last.setChecked(get("open_last_project"))
         form.addRow("", self.open_last)
@@ -128,8 +129,10 @@ class SettingsDialog(QDialog):
         form.addRow("map colour map", self.cmap)
         self.ref_dir = QLineEdit(get("reference_dir")); form.addRow("reference spectra folder", self.ref_dir)
         lay.addLayout(form)
-        note = QLabel("Per-scan choices (detectors, lines, normalisation, I0 source) live with each zone in the session file, "
-                      "not here.")
+        from aurora.app.mode import is_advanced
+        note = QLabel("Per-scan choices (detectors, lines, normalisation, I0 source) live with each zone in the session "
+                      "file, not here." if is_advanced() else
+                      "How each sample's spectrum is made is kept with the beamtime, not here.")
         note.setObjectName("muted"); note.setWordWrap(True)
         lay.addWidget(note)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Help)
@@ -157,6 +160,8 @@ class SettingsDialog(QDialog):
         s.setValue("tey_norm", self.tn.currentData())
         s.setValue("map_colormap", self.cmap.currentText())
         s.setValue("report_author", self.author.text().strip())
+        if self.author.text().strip() != str(get("report_author") or "").strip() or self.author.text().strip():
+            s.setValue(AUTHOR_NONE_KEY, False)         # a name typed here, or the field changed: no 'no author' left
         s.setValue("open_last_project", self.open_last.isChecked())
         s.setValue("update_check", self.update_check.isChecked())
         s.setValue("show_guide", self.show_guide.isChecked())
