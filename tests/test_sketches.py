@@ -196,16 +196,19 @@ def test_a_protected_beamtime_offers_no_load(qapp, fake_project, monkeypatch):
 
 
 def test_the_sample_card_collapses_to_one_line(qapp, fake_project):
-    from aurora.app.survey import NO_SHEET_TEXT
+    from aurora.app.survey import NO_SHEET
     win = _window(qapp, fake_project, (1200, 760), False)                  # the test variant has no sample sheet
     try:
         sv = win.survey
-        assert sv.sheet_note.isVisible() and NO_SHEET_TEXT in sv.sheet_note.text() and not sv.sheet_table.isVisible()
+        assert sv.sheet_note.isVisible() and NO_SHEET in sv.sheet_note.text() and not sv.sheet_table.isVisible()
         assert "How to add one" in sv.sheet_note.text() and ".csv" not in sv.sheet_note.text()
+        assert sv.new_sheet_btn.isVisible() and sv.choose_sheet_btn.isVisible()        # the blank core's two ways
         from aurora.app.help import section_of
         from aurora.app.survey import SHEET_ANCHOR
         assert section_of(SHEET_ANCHOR) == "2.4"                           # the link opens the sample-sheet section
-        assert sv.samples_card.height() < 120
+        card = sv.samples_card                                             # the line and the two buttons only
+        assert card.height() <= card.minimumSizeHint().height() + 1 and card.height() < 200
+        assert card.height() < sv.zones_card.height()
     finally:
         _close(win)
     (fake_project / "samples.csv").write_text("Sample ID,Holder,Group\nq1,holderZ,G\nq2,holderY,G\n", encoding="utf-8")

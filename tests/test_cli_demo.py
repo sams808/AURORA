@@ -17,7 +17,7 @@ def test_demo_command(tmp_path, capsys):
     rows = read_sample_sheet(tmp_path / "demo" / testdata.SHEET)
     assert [r.sample_id for r in rows] == ["1 alpha", "2 beta"]
     assert all(r.plate == proj.days[0].holders[0].name for r in rows)   # so Reduce offers the IDs for the holder
-    assert [r.group for r in rows] == [testdata.GROUP1, testdata.GROUP2] and {r.other_edges for r in rows} == {"F K"}
+    assert [r.group for r in rows] == [testdata.GROUP1, testdata.GROUP2] and {r.edges for r in rows} == {"F K"}
     assert (tmp_path / "demo" / testdata.SHEET).read_text(encoding="utf-8").splitlines()[0] == \
         "Sample ID,Holder,Group,Composition,Edges,Notes"                  # the generic columns, no title line
     assert main(["project", str(tmp_path / "demo")]) == 0

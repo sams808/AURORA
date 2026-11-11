@@ -224,6 +224,13 @@ VARIANTS = {
                            "config/plate_layout.json": "", "samples.csv": ""}),
     "not_json": _write({"config/roi_bins.json": "{not json", "config/sdd_calibration.json": "[1, 2",
                         "config/plate_layout.json": "{"}),
+    # JSON of the wrong shape (the blank core, BL-09 / BL-10): a detector that is a number, a list for the lines, a
+    # holder that is a number; then one line without sdd4 next to a good one
+    "wrong_types": _write({"config/roi_bins.json": '["a"]', "config/sdd_calibration.json": '{"sdd1": 5}',
+                           "config/plate_layout.json": '{"holderA": 5}'}),
+    "line_missing_sdd": _write({"config/roi_bins.json": '{"F K\u03b1": {"sdd1": [60, 74], "sdd2": [61, 75], '
+                                                        '"sdd3": [62, 76]}, "O K\u03b1": {"sdd1": [46, 58], '
+                                                        '"sdd2": [46, 58], "sdd3": [46, 58], "sdd4": [46, 58]}}'}),
     "raw_only": _raw_only,
 }
 
@@ -262,8 +269,12 @@ def test_every_config_file_is_optional_in_the_core_and_the_cli(demo_base, tmp_pa
     rows = dict(overview.project_rows(proj, overview.project_facts(proj)))
     for key in ("calibration", "ROI bins", "sample sheet"):
         assert rows.get(key), (key, rows)                 # the summary always says what it found, or that it found none
-    if name in ("no_roi_bins", "no_config", "empty_files", "not_json", "raw_only"):
+    if name in ("no_roi_bins", "no_config", "raw_only"):
         assert rows["ROI bins"].startswith("none found")
+    if name in ("empty_files", "not_json", "wrong_types"):   # the file is there but holds no line (blank core, BL-10)
+        assert rows["ROI bins"].startswith("config/roi_bins.json has no usable line: total XRF only")
+    if name == "line_missing_sdd":                           # the good line is kept, the other one is named
+        assert rows["ROI bins"].endswith("O Kα") and any("sdd4" in v for k, v in rows.items() if k == "config problem")
     if name in ("no_sheet", "empty_files", "raw_only"):
         assert rows["sample sheet"].startswith("none found")
     from aurora.core import testdata
@@ -303,7 +314,8 @@ def qapp():
     return create_app(["aurora-tests"])
 
 
-@pytest.mark.parametrize("name", ["full", "no_config", "no_sheet", "empty_files", "not_json", "raw_only"])
+@pytest.mark.parametrize("name", ["full", "no_config", "no_sheet", "empty_files", "not_json", "wrong_types",
+                                  "raw_only"])
 def test_every_config_file_is_optional_in_the_window(qapp, demo_base, tmp_path, error_dialogs, name):
     """Every perspective in Easy and Advanced mode on the variant: no exception reaches the excepthook (conftest) and
     no error dialog opens."""

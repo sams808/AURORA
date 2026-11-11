@@ -373,7 +373,7 @@ def test_survey_explains_a_holder_without_survey_and_no_sheet(qapp, tmp_path, si
             assert sv.no_map_state.isVisible() and sv.no_map_state.text() == NO_SURVEY_MAP
             assert sv.holder_combo.currentText().startswith(BEFORE_SURVEY)
             assert sv.zones_card.title.text().startswith("Zones of the stacks before the first survey")
-            assert sv.sheet_note.isVisible() and sv.sheet_note.text() == NO_SHEET and not sv.sheet_table.isVisible()
+            assert sv.sheet_note.isVisible() and sv.sheet_note.text().startswith(NO_SHEET) and not sv.sheet_table.isVisible()
             assert sv.new_sheet_btn.isVisible() and sv.choose_sheet_btn.isVisible()
         mode.set_advanced(False)
     finally:
@@ -389,8 +389,7 @@ def test_survey_names_the_holders_a_sheet_lists(qapp, tmp_path):
         pump(qapp)
         sv = win.survey
         assert not sv.no_map_state.isVisible()
-        assert sv.sheet_note.text() == (f"The sample sheet lists no sample on holder {HOLDER} (its Plate column names "
-                                        "elsewhere, other).")
+        assert sv.sheet_note.text() == f"The sample sheet lists no sample on holder {HOLDER} (its holders: elsewhere, other)."
         assert not sv.sheet_actions.isVisible() and not sv.sheet_table.isVisible()
     finally:
         close(win)
