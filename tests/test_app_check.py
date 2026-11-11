@@ -44,7 +44,9 @@ def test_check_perspective(qapp, fake_project):
     ses.select_stack(sid)
     ses.select_zone(z.id)
     qapp.processEvents()
-    assert "total XRF" in ck.sdd_note.text()
+    # no roi_bins.json in the synthetic project: the new zone is on the window of the edge's own line, John Bussey's
+    # 60:83 for F Kα (final polish g06#3), not the total XRF
+    assert "line F Kα" in ck.sdd_note.text() and "60:83" in ck.sdd_note.text(), ck.sdd_note.text()
     win.show_perspective("check")
     assert win.rail_buttons["check"].isChecked()
     win.close()
