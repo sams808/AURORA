@@ -131,27 +131,24 @@ def _destroy_leftover_windows(_isolated_settings):
         import gc
         if gc.isenabled():
             gc.collect()
-        _COLLECT_AFTER[0] = True
-
-
-_COLLECT_AFTER = [False]          # a test destroyed windows: collect again once pytest has released its arguments
 
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_protocol(item, nextitem):
-    """The garbage of the windows a test destroyed, collected on the GUI thread once the test is over. The collection
-    in _destroy_leftover_windows runs while the test's fixture values (item.funcargs, cleared by pytest only after
-    the teardown) and its own locals still hold the windows' wrappers, so most of what they own (pyqtgraph's
-    parentless menus and items, about 15 000 objects per window) is not garbage yet; left to the automatic
-    collector it was freed at an allocation inside a later MainWindow() (an access violation in test_theme after
-    test_layout and test_zone_drawing)."""
+    """After every test once a QApplication exists, its garbage is collected on the GUI thread, between tests. The
+    collection in _destroy_leftover_windows runs while the test's fixture values (item.funcargs, cleared by pytest only
+    after the teardown) and its locals still hold the windows, so most of what a window owns (pyqtgraph's parentless
+    menus and items, about 15 000 objects) is not garbage yet; and a test without a main window (a dialog, a plot, a
+    perspective on its own) leaves its widgets to the collector too. Left to the automatic collector, that garbage was
+    freed at an allocation in the middle of a later test: an access violation inside MainWindow() of test_theme after
+    test_layout and test_zone_drawing, an abort in a job's progress slot of test_app after test_ui_monkey."""
     try:
         return (yield)
     finally:
-        if _COLLECT_AFTER[0]:
-            _COLLECT_AFTER[0] = False
-            import gc
-            if gc.isenabled():
+        import gc
+        if gc.isenabled() and "PySide6.QtWidgets" in sys.modules:
+            from PySide6.QtWidgets import QApplication
+            if QApplication.instance() is not None:
                 gc.collect()
 
 
