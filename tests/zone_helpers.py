@@ -16,7 +16,7 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 
 def ctime(hhmmss: str, day: str | None = None) -> str:
-    """The ctime form the beamline writes into the h5 files ('Thu Nov  5 09:30:00 2026') on testdata.DAY, with English
+    """The ctime form the beamline writes into the h5 files ('Fri Mar 14 09:30:00 2025') on testdata.DAY, with English
     names whatever the locale: the stacks of this fixture stay on the fixture's day whatever day testdata uses."""
     import datetime as dt
     d = dt.date.fromisoformat(day or testdata.DAY)
