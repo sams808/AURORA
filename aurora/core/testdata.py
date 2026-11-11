@@ -356,8 +356,8 @@ DEMO_ROI_BINS = {
     "O Kα": {"sdd1": [46, 58], "sdd2": [46, 58], "sdd3": [46, 58], "sdd4": [46, 58], "line_ev": 525.0}}
 # the demo's sample sheet: the generic columns, UTF-8, one row per sample
 SHEET_HEADER = ("Sample ID", "Holder", "Group", "Composition", "Edges", "Notes")
-DEMO_SHEET_ROWS = (("1 alpha", HOLDER, GROUP1, "NaF", "F K", "synthetic demo sample, left pad"),
-                   ("2 beta", HOLDER, GROUP2, "CaF2-LiF in silica", "F K", "synthetic demo sample, right pad"))
+DEMO_SHEET_ROWS = (("1 alpha", HOLDER, GROUP1, "NaF", "F K", "synthetic demo sample on the left pad"),
+                   ("2 beta", HOLDER, GROUP2, "CaF2-LiF in silica", "F K", "synthetic demo sample on the right pad"))
 
 
 def write_demo(root: Path) -> dict:

@@ -37,12 +37,13 @@ from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsPolygonItem, QGraphics
 from aurora.app.theme import MAP_OVERLAY, TOKENS, map_casing, style_plot, with_alpha
 from aurora.core.grid import Grid
 from aurora.core.io.config import Zone
-from aurora.core.zones import Stroke, interpolate_path
+from aurora.core.zones import Stroke, interpolate_path, members
 
 TOOLS = ("navigate", "rect+", "rect-", "brush+", "brush-", "lasso+", "polygon+", "lasso-", "polygon-")
 ADD_TOOLS = ("rect+", "brush+", "lasso+", "polygon+")       # the Draw tools (the others erase, or navigate)
 SHAPES = ("navigate", "rect", "brush", "lasso", "polygon")
 STRAY_PITCH = 0.5                 # drags shorter than this many pitches are ignored
+MEMBER_OUTLINE_MAX = 4000         # draw_zone: one outline round at most this many member pixels (else the shapes')
 LASSO_STEP_PITCH = 0.5            # a lasso vertex every ~0.5 pitch
 
 
@@ -299,8 +300,13 @@ class _ToolViewBox(pg.ViewBox):
     def _finish_drag(self, st: Stroke) -> None:
         """Release of a rectangle or brush drag: a stray drag (< 0.5 pitch) is cancelled, any other one finished."""
         if not self._drag_far:
+            erase = st.erase
             self.cancel_stroke()
             self._cancelled = False
+            owner = getattr(self, "owner", None)       # the MapView (this is its view box)
+            if erase and owner is not None and owner.zone_tools:     # say why nothing happened, and what does (S-15)
+                from aurora.app.zone_tools import TINY_ERASE_TEXT
+                owner.set_hint(TINY_ERASE_TEXT)
             return
         self._end()
         self.stroke_finished.emit(st)
@@ -433,6 +439,8 @@ class MapView(pg.GraphicsLayoutWidget):
         from aurora.app.settings_dialog import on_settings_changed
         on_settings_changed(self, self.apply_colormap_setting)
         self._overlays: list = []
+        self._fitted: list = []                 # (TextItem, full text, short text, x0, x1): labels inside a box
+        self.vb.sigRangeChanged.connect(lambda *_a: self._fit_labels())
         self._zones: list[Zone] = []                             # the zones drawn (hit tests, context menus)
         self.selected_zone: int | None = None
         self.zone_tools = False
@@ -694,13 +702,18 @@ class MapView(pg.GraphicsLayoutWidget):
         """The values at the two ends of the colour scale (None for a map without one)."""
         return tuple(float(v) for v in self.bar.levels()) if self.bar in self.ci.items else None
 
-    def set_grid(self, g: Grid | None) -> None:
+    def set_grid(self, g: Grid | None, floor: float | None = None) -> None:
+        """Show a grid, its colour scale from the smallest to the largest value; with `floor`, from at most `floor`
+        (Easy Reduce: from 0, so a grain with half the signal of its neighbour is drawn half as bright, not dark like
+        bare plate: persona S-07)."""
         if g is None or g.img.size == 0:
             self.image.clear()
             return
         img = g.img.astype(float)
         fin = np.isfinite(img)
         lo, hi = (float(np.nanmin(img)), float(np.nanmax(img))) if fin.any() else (0.0, 1.0)
+        if floor is not None and np.isfinite(floor) and floor < hi:
+            lo = min(lo, float(floor))
         if hi <= lo:
             hi = lo + 1.0
         self.image.setImage(img, levels=(lo, hi), autoLevels=False)
@@ -728,6 +741,7 @@ class MapView(pg.GraphicsLayoutWidget):
         for it in self._overlays:
             self.plot.removeItem(it)
         self._overlays.clear()
+        self._fitted.clear()
         self._zones.clear()
         self._member_sets = {}
         self.selected_zone = None
@@ -802,12 +816,83 @@ class MapView(pg.GraphicsLayoutWidget):
         self._overlays.append(t)
         return t
 
-    def draw_zone(self, zone: Zone, colour: str, selected: bool = False, label: bool = True) -> None:
+    def add_fitted_label(self, x0: float, x1: float, y_bottom: float, text: str, short: str,
+                         colour: str) -> pg.TextItem:
+        """A footprint label inside its box, at the bottom left (the zones' labels sit at their top), never wider than
+        the box: `text` when it fits, else `short` (the time), else nothing; re-fitted when the view zooms.
+        Neighbouring footprints' labels then never cover each other or run off the map (persona M07, S-04); the full
+        name is in the hover line."""
+        t = self.add_label(x0, y_bottom, text, colour, anchor=(0, 1))
+        self._fitted.append((t, text, short, float(x0), float(x1)))
+        self._fit_label(t, text, short, float(x0), float(x1))
+        return t
+
+    def _fit_label(self, t, text: str, short: str, x0: float, x1: float) -> None:
+        from PySide6.QtGui import QFontMetrics
+        try:
+            mm_per_px = float(self.vb.viewPixelSize()[0])
+        except (TypeError, ValueError, ZeroDivisionError):
+            mm_per_px = 0.0
+        if not np.isfinite(mm_per_px) or mm_per_px <= 0:
+            t.setText(text)
+            return
+        room = (x1 - x0) / mm_per_px - 8                 # the plate's padding and border
+        fm = QFontMetrics(t.textItem.font())
+        if fm.horizontalAdvance(text) <= room:
+            shown = text
+        else:
+            shown = fm.elidedText(text, Qt.ElideRight, int(room)) if room >= fm.horizontalAdvance(short + " ab…") else (
+                short if fm.horizontalAdvance(short) <= room else "")
+            if shown.strip() in ("…", ""):
+                shown = short if fm.horizontalAdvance(short) <= room else ""
+        t.setText(shown)
+        t.setVisible(bool(shown))
+
+    def _fit_labels(self) -> None:
+        for t, text, short, x0, x1 in list(self._fitted):
+            self._fit_label(t, text, short, x0, x1)
+
+    def fitted_labels(self) -> list[str]:
+        """The footprint labels as drawn now (tests)."""
+        return [t.textItem.toPlainText() if t.isVisible() else "" for t, *_r in self._fitted]
+
+    def draw_zone(self, zone: Zone, colour: str, selected: bool = False, label: bool = True, points=None,
+                  label_text: str | None = None) -> None:
+        """A zone on the map. With `points` (x, y, pitch of the map's points) and at least one of them in the zone,
+        what the zone holds is drawn: its member pixels filled, one outline round them (an erased part is a gap in
+        the fill and outside the outline; a one-pixel zone is its pixel square: persona M11, S-08), the erase shapes
+        dashed. Otherwise (no points, or none of them in the zone: a zone of another scan) its drawn shapes."""
         self._zones.append(zone)
         if selected:
             self.selected_zone = zone.id
         w = 2.5 if selected else 1.2
         erase = MAP_OVERLAY["erase"]
+        text = zone.label if label_text is None else label_text
+        if points is not None and points[0] is not None:
+            px, py, pitch = np.asarray(points[0], float), np.asarray(points[1], float), tuple(points[2])
+            mem = members(zone, px, py, pitch)
+            if mem.size:
+                it = pg.ScatterPlotItem(x=px[mem], y=py[mem], symbol=_cell_symbol(pitch), size=max(pitch),
+                                        pxMode=False, pen=pg.mkPen(None),
+                                        brush=pg.mkBrush(with_alpha(colour, 0.34 if selected else 0.2)))
+                it.mouseClickEvent = _pass_click        # the fill is a picture: clicks go to the map underneath
+                it.setZValue(4)
+                self.plot.addItem(it, ignoreBounds=True)
+                self._overlays.append(it)
+                if mem.size <= MEMBER_OUTLINE_MAX:          # one outline round what the zone holds
+                    sq = [(float(a), float(b), pitch[0], pitch[1]) for a, b in zip(px[mem], py[mem])]
+                    self.add_casing(_union([], [], sq), colour, w)
+                else:
+                    self.add_casing(_union(zone.rects, zone.polys, zone.paint), colour, w)
+                for r in zone.erects:
+                    self.add_rect(r[0], r[1], r[2], r[3], erase, 1.0, dashed=True, casing=False)
+                for poly in zone.epolys:
+                    if len(poly) >= 3:
+                        self.add_polygon(poly, erase, 1.0, casing=False, dashed=True)
+                if label:
+                    i = int(mem[np.lexsort((px[mem], -py[mem]))[0]])     # the top-left member pixel
+                    self.add_label(float(px[i]) - pitch[0] / 2, float(py[i]) + pitch[1] / 2, text, colour)
+                return
         self.add_casing(_union(zone.rects, zone.polys, zone.paint), colour, w)        # one casing round the zone
         self.add_casing(_union(zone.erects, zone.epolys, zone.erase), erase, 1.0)
         for r in zone.rects:
@@ -832,7 +917,7 @@ class MapView(pg.GraphicsLayoutWidget):
             pts += [(min(p[0] for p in poly), max(p[1] for p in poly)) for poly in zone.polys if poly]
             if pts:
                 x, y = min(pts, key=lambda p: (-p[1], p[0]))
-                self.add_label(x, y, zone.label, colour)
+                self.add_label(x, y, text, colour)
 
     def draw_pixels(self, x: np.ndarray, y: np.ndarray, pitch: tuple[float, float], colour: str) -> None:
         """Outline every pixel square (used to show the members of a zone on the stack map) as one scatter item of
@@ -926,6 +1011,11 @@ class MapView(pg.GraphicsLayoutWidget):
         if getattr(self, "_hint_idle", False):
             self._hint.hide()
         super().leaveEvent(ev)
+
+
+def _pass_click(ev) -> None:
+    """mouseClickEvent of a scatter drawn as a picture (member pixels): the click goes on to the map's view box."""
+    ev.ignore()
 
 
 def _cell_symbol(pitch) -> QPainterPath:

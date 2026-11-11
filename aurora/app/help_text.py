@@ -137,6 +137,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                      "scans of the holder", "41-scans-of-the-holder"),
     "reduce.new_zone": ("Start a new, empty sample, then draw its outline on the map (Draw, then drag).", "New sample",
                         "43-zones"),
+    "survey.new_zone": ("Start the next sample (N): the next stroke outlines it. A stroke beside the selected sample "
+                        "starts one too; Esc or a click on the bare map (Move) deselects.", "New sample", "3-survey"),
     "reduce.delete_zone": ("Delete the selected sample: its outline, its name and its settings for every scan.",
                            "Delete sample", "43-zones"),
     "reduce.propose": ("Zones from sgm_report's summary of the day, else from the bright pads of the survey map, as "
@@ -195,8 +197,7 @@ HELP: dict[str, tuple[str, str, str]] = {
     "preview.all_scans": ("Overlay every included scan of the sample.", "all scans of the sample", "47-preview"),
     # Reduce, WP3: map tools, XRF windows (step 2), Easy steps, batch settings
     "reduce.clear": ("Remove the outline of the selected sample to draw it again (the sample and its name stay). To "
-                     "take every pixel of the map instead (the earlier SGM XAS GUI's 'Clear (full map)'), draw a "
-                     "Rectangle over the whole map.",
+                     "take every pixel of the map instead, draw a Rectangle over the whole map.",
                      "Clear the region", "42-stack-map"),
     "reduce.zones": ("The samples (zones) of the holder: pick one to edit it. A click inside a zone on the map also "
                      "selects it.", "samples of the holder", "43-zones"),
@@ -208,17 +209,18 @@ HELP: dict[str, tuple[str, str, str]] = {
                              "(config/roi_bins.json), the line of the edge element (needs a detector calibration), "
                              "all X-rays, or a band you drag on the plot.", "which X-rays to count", "48-xrf-windows"),
     "reduce.window.lo": ("First detector channel of the window (included).", "window first channel", "48-xrf-windows"),
-    "reduce.window.hi": ("End of the window (excluded): from 60 to 83 counts channels 60 to 82.",
-                         "window end channel", "48-xrf-windows"),
+    "reduce.window.hi": ("Last detector channel of the window (included): from 60 to 73 counts the channels 60 to "
+                         "73.", "window last channel", "48-xrf-windows"),
     "reduce.window.source": ("The emission spectrum shown: the whole stack summed over its energies, the survey of "
                              "the holder, the pixels of the selected sample, or the survey points inside the selected "
                              "sample (the earlier SGM XAS GUI's 'only inside region').", "emission spectrum source",
                              "48-xrf-windows"),
     # zones: the tool bar of the Survey map and the stack map, the Survey's zone preview
-    "zones.draw": ("Draw zones: drag on the map to add to the zone; right-drag erases (D).", "draw zones",
-                   "42-stack-map"),
-    "zones.erase": ("Erase: drag on the map to remove from the selected zone (E). Right-drag draws.",
-                    "erase from the zone", "42-stack-map"),
+    "zones.draw": ("Draw: drag around a sample on the map to outline it (D). A stroke over the selected sample adds "
+                   "to it; a stroke beside it starts a new sample (hold Ctrl to add it anyway). Right-drag erases.",
+                   "draw zones", "42-stack-map"),
+    "zones.erase": ("Erase: drag over the selected sample to remove that part, or click a pixel to erase just that "
+                    "one (E). Right-drag draws.", "erase from the zone", "42-stack-map"),
     "zones.move": ("Move the view: drag to pan, the wheel zooms (V). A click on a zone selects it.", "move the view",
                    "42-stack-map"),
     "zones.rect": ("Drag a rectangle (R).", "rectangle", "42-stack-map"),
@@ -235,8 +237,8 @@ HELP: dict[str, tuple[str, str, str]] = {
                    "42-stack-map"),
     "zones.clear": ("Remove the drawing of the selected sample (every drawn and erased shape), to draw it again; the "
                     "sample and its name stay. One step of Undo.", "Clear the region", "42-stack-map"),
-    "zones.new_each": ("Every stroke starts a new zone, even one that touches the selected zone (drawing many samples "
-                       "in a row).", "every stroke starts a new zone", "42-stack-map"),
+    "zones.new_each": ("Every stroke starts a new zone, even one over the selected zone (drawing many samples in a "
+                       "row).", "every stroke starts a new zone", "42-stack-map"),
     "zones.preview.scan": ("The scan whose spectrum of the zone is shown: the scans the zone covers.",
                            "scan of the zone preview", "3-survey"),
     "zones.preview.open": ("Open this scan in Reduce with the zone selected.", "Open in Reduce", "3-survey"),
@@ -736,7 +738,7 @@ HELP_TERMS: dict[str, tuple[str, ...]] = {
     "reduce.window.preset": ("xrf-window", "emission-line"),
     "reduce.window.lo": ("channel",), "reduce.window.hi": ("channel",),
     "reduce.window.source": ("emission-spectrum",),
-    "reduce.new_zone": ("zone",), "reduce.zones": ("zone",), "reduce.delete_zone": ("zone",), "reduce.clear": ("zone",),
+    "reduce.new_zone": ("zone",), "survey.new_zone": ("zone",), "reduce.zones": ("zone",), "reduce.delete_zone": ("zone",), "reduce.clear": ("zone",),
     "reduce.label": ("sample-sheet",),
     "reduce.add_to_check": ("normalisation", "de-spike"),
     "reduce.signal": ("fluorescence", "ipfy"),
@@ -775,11 +777,15 @@ def help_terms(key: str):
     return [term(k) for k in HELP_TERMS.get(key, ())]
 
 
+NO_TERM_LINES = {"main.mode"}          # the tooltip already says what the term says (persona S-23: said twice)
+
+
 def tooltip(key: str) -> str:
-    """HELP[key]'s tooltip, then a blank line and one 'What is …?' line per glossary term of HELP_TERMS[key]."""
+    """HELP[key]'s tooltip, then a blank line and one 'What is …?' line per glossary term of HELP_TERMS[key] (none for
+    NO_TERM_LINES: their own text is the term's definition; the What's This text still names the term)."""
     from aurora.glossary import what_is
     tip = HELP[key][0]
-    lines = [what_is(k) for k in HELP_TERMS.get(key, ())]
+    lines = [] if key in NO_TERM_LINES else [what_is(k) for k in HELP_TERMS.get(key, ())]
     return tip + ("\n\n" + "\n".join(lines) if lines else "")
 
 

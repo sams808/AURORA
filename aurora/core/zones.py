@@ -109,6 +109,47 @@ def members(zone: Zone, x: np.ndarray, y: np.ndarray, pitch: tuple[float, float]
     return np.where(inside)[0]
 
 
+def incomplete_under(zone: Zone, holder) -> object | None:
+    """The first stack of the holder that gives no spectrum (stopped early, still running, a beamline test) whose
+    footprint the zone overlaps, when the zone covers no complete stack's footprint; None otherwise."""
+    bb = zone_bbox(zone)
+    if bb is None or holder is None:
+        return None
+
+    def box(s):
+        try:
+            x0, x1, y0, y1 = (float(s.md[k]) for k in ("xstart", "xstop", "ystart", "ystop"))
+        except (KeyError, TypeError, ValueError):
+            return None
+        return min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+
+    def over(b):
+        return b is not None and b[0] < bb[1] and bb[0] < b[1] and b[2] < bb[3] and bb[2] < b[3]
+    if any(over(box(s)) for s in getattr(holder, "stacks", [])):
+        return None
+    return next((s for s in getattr(holder, "dropped", []) if over(box(s))), None)
+
+
+def incomplete_text(who: str, scan) -> str:
+    """One sentence for a sample outlined on a stack that gives no spectrum, the same in the Survey's preview, Reduce
+    and the report (persona S-09): '3 gamma lies on 10:14 gamma, which stopped early (20 of 66 energies): no spectrum
+    can be made from it. Only complete stacks give spectra.'"""
+    import re as _re
+    what = f"{scan.time} {scan.label}".strip()
+    status = getattr(scan, "status", "")
+    if status == "aborted":
+        m = _re.search(r"(\d+)\s*/\s*(\d+)", getattr(scan, "status_reason", "") or "")
+        which = "stopped early" + (f" ({m.group(1)} of {m.group(2)} energies)" if m else "")
+    elif status == "in_progress":
+        which = "is still being measured"
+    elif status == "test":
+        which = "is a beamline test"
+    else:
+        which = "gives no spectrum"
+    return (f"{who} lies on {what}, which {which}: no spectrum can be made from it. Only complete stacks give "
+            "spectra.")
+
+
 def zone_bbox(zone: Zone) -> tuple[float, float, float, float] | None:
     """(x0, x1, y0, y1) mm around the zone's rectangles, painted squares and polygons; None for an empty zone."""
     xs, ys = [], []
@@ -145,11 +186,13 @@ def set_geometry(zone: Zone, geo: dict, dx: float = 0.0, dy: float = 0.0) -> Non
 
 
 def shape_text(zone: Zone) -> str:
-    """'polygon with 12 vertices', '1 rectangle', '2 rectangles, 3 painted pixels', '1 rectangle, minus 1 erased
-    outline', 'nothing drawn'."""
+    """'polygon with 12 vertices', '1 rectangle', '2 rectangles, 3 painted pixels', '1 rectangle, 1 part erased',
+    '1 rectangle, 2 parts erased', 'nothing drawn'. Every erase shape (rectangle, outline, erased pixels) counts as
+    a part: a rectangle with a strip erased no longer reads '1 rectangle' (persona D21)."""
     def n_of(n: int, word: str) -> str:
         return f"{n} {word}" if n == 1 else f"{n} {word}s"
-    minus = f", minus {n_of(len(zone.epolys), 'erased outline')}" if zone.epolys else ""
+    n_erased = len(zone.epolys) + len(zone.erects) + (1 if zone.erase else 0)
+    minus = (f", {n_erased} part erased" if n_erased == 1 else f", {n_erased} parts erased") if n_erased else ""
     if len(zone.polys) == 1 and not (zone.rects or zone.paint):
         return f"polygon with {len(zone.polys[0])} vertices{minus}"
     parts = []

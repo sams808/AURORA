@@ -656,6 +656,7 @@ class _FitColumns(QObject):
     def __init__(self, tree, first_chars: int):
         super().__init__(tree)
         self.first_chars = first_chars
+        self.keep: tuple[int, ...] = ()            # columns never cut below their content (Edge, Status: M01)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(0)
@@ -685,15 +686,16 @@ class _FitColumns(QObject):
         floor = {i: min(want[i], head.sectionSizeHint(i)) for i in cols}       # the header word stays readable
         room = width - self.first_chars * digit - 3 * tree.indentation()       # days > holders > scans
         total = sum(want.values())
-        if total > room > 0:                        # shrink the wide columns first, never below their header word
-            spare = sum(want[i] - floor[i] for i in cols)
+        if total > room > 0:                        # shrink the wide columns first, never below their header word;
+            cuttable = [i for i in cols if i not in self.keep]          # the kept columns keep their words whole
+            spare = sum(want[i] - floor[i] for i in cuttable)
             cut = min(1.0, (total - room) / spare) if spare else 0.0
-            want = {i: int(want[i] - cut * (want[i] - floor[i])) for i in cols}
+            want = {i: (want[i] if i not in cuttable else int(want[i] - cut * (want[i] - floor[i]))) for i in cols}
         for i in cols:
             head.resizeSection(i, want[i])
 
 
-def fit_columns(tree, first_chars: int = 16):
+def fit_columns(tree, first_chars: int = 16, keep: tuple[int, ...] = ()):
     """Every column of `tree` in view: the first column stretches and keeps room for `first_chars` characters at its
     deepest level; the others take their content width, cut in proportion when the tree is narrow (their text elides
     with the tree's elide mode). Wider fonts (DejaVu Sans on Linux) left the Scan column 36 px with ResizeToContents.
@@ -706,6 +708,7 @@ def fit_columns(tree, first_chars: int = 16):
         head.setSectionResizeMode(i, QHeaderView.Interactive)
     keeper = next((ch for ch in tree.children() if isinstance(ch, _FitColumns)), None) or _FitColumns(tree, first_chars)
     keeper.first_chars = first_chars
+    keeper.keep = tuple(keep)
     return keeper
 
 
@@ -1097,6 +1100,9 @@ def covered(widget: QWidget) -> bool:
     return False
 
 
+PLOT_HINT_CHARS = 42                 # a plot's placeholder sentence wraps at this many characters
+
+
 def set_plot_hint(plot, text: str | None) -> None:
     """An empty plot shows a muted, centred sentence instead of bare 0..1 axes; None removes it (after drawing)."""
     import pyqtgraph as pg
@@ -1115,6 +1121,16 @@ def set_plot_hint(plot, text: str | None) -> None:
         hint = pg.TextItem("", anchor=(0.5, 0.5))
         item._aurora_hint = hint
     hint.setText(text, color=TOKENS["muted"])
+    # a long sentence on a narrow plot wraps (two or three centred lines), never cut at both ends (M13); its text
+    # stays one string for screen readers and tests
+    from PySide6.QtGui import QFontMetrics, QTextOption
+    if len(text) > PLOT_HINT_CHARS and "\n" not in text:
+        hint.setTextWidth(QFontMetrics(hint.textItem.font()).averageCharWidth() * PLOT_HINT_CHARS)
+        opt = QTextOption(Qt.AlignHCenter)
+        opt.setWrapMode(QTextOption.WordWrap)
+        hint.textItem.document().setDefaultTextOption(opt)
+    else:
+        hint.setTextWidth(-1)
     if hint.scene() is None:
         item.addItem(hint, ignoreBounds=True)
     if isinstance(plot, QWidget):

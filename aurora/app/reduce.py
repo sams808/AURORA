@@ -17,7 +17,7 @@ import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-                               QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMenu, QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
 from aurora.app import jobs, nav, shortcuts
@@ -29,7 +29,8 @@ from aurora.app.reduce_window import XrfWindowCard
 from aurora.app.session import DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import TOKENS, curve, min_height, on_theme_changed, refill_tones, set_item_tone
 from aurora.app.trace_cache import zone_traces_cached
-from aurora.app.zone_tools import PreviewThrottle, ZoneEditor, ZoneToolBar, fast_settings, register_shortcuts, zone_name
+from aurora.app.zone_tools import (PreviewThrottle, ZoneEditor, ZoneToolBar, fast_settings, register_shortcuts,
+                                   shown_label, zone_drawn)
 from aurora.app.vocab import (DET_LABELS, ELEMENT_NAMES, NORM_LABELS, channel_words, det_items, det_words, edge_words,
                               flag_words, plural, unit_suffix)
 from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, fit_height,
@@ -38,7 +39,7 @@ from aurora.core import rules as rl
 from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
 from aurora.core.model import ScanInfo
-from aurora.core.names import pretty_edge, short_time, split_stack_id
+from aurora.core.names import pretty_edge, sample_part, short_time, split_stack_id
 from aurora.core.spectra import NORM_MODES
 from aurora.core.zones import Stroke, geometry, members, set_geometry, shape_text, zone_bbox
 
@@ -393,7 +394,7 @@ class ReducePerspective(QWidget):
         self.load_all_btn.clicked.connect(self.load_all)
         sc.header.addWidget(self.load_all_btn)
         self.scan_list = QListWidget()
-        self.scan_list.setTextElideMode(Qt.ElideMiddle)
+        self.scan_list.setTextElideMode(Qt.ElideNone)          # _relabel_scans elides each of the two lines
         self.scan_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)       # long names elide (full text in the tooltip)
         self.scan_list.currentItemChanged.connect(self._scan_picked)
         sc.body.addWidget(self.scan_list, 1)
@@ -403,7 +404,12 @@ class ReducePerspective(QWidget):
         self.window_card.remember_requested.connect(self.remember_windows)
         left.addWidget(fit_height(self.window_card))
         left.setStretchFactor(0, 1); left.setStretchFactor(1, 3)
-        left.setSizes([170, 470])
+        left.setSizes([230, 470])
+        # three two-line rows at least: ten stacks of a holder differ only by the sample's name (M01)
+        self.scan_list.setMinimumHeight(3 * (2 * self.scan_list.fontMetrics().lineSpacing() + 8)
+                                        + 2 * self.scan_list.frameWidth())
+        on_theme_changed(self.scan_list, lambda _s, w=self.scan_list: w.setMinimumHeight(
+            3 * (2 * w.fontMetrics().lineSpacing() + 8) + 2 * w.frameWidth()))
         split.addWidget(left)
 
         # ---- centre: 3 · the region: tools, sample row, zone list | stack map, caption
@@ -445,6 +451,7 @@ class ReducePerspective(QWidget):
         self.name_edit.escaped.connect(self._name_dismissed)
         self.name_row.hide()
         self._naming: int | None = None             # the zone id the field names
+        on_theme_changed(self, lambda _s: self._paint_next_link())     # its link colour follows the scheme (M02)
         centre.body.addWidget(self.name_row)
         self.show_row = QWidget()                       # map line / SDD / mode / energy / I0 / log: Advanced
         show = FlowLayout(self.show_row, spacing=6)
@@ -467,7 +474,7 @@ class ReducePerspective(QWidget):
         self.zone_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.zone_list.setAccessibleName("zones of the holder")
         self.zone_list.currentItemChanged.connect(self._zone_picked)
-        self.zone_list.setMinimumWidth(110)
+        self.zone_list.setMinimumWidth(80)
         zl_box = QWidget()
         zlb = QVBoxLayout(zl_box); zlb.setContentsMargins(0, 0, 0, 0); zlb.setSpacing(2)
         self.zone_list_title = QLabel("Samples on this holder")
@@ -501,13 +508,18 @@ class ReducePerspective(QWidget):
         self.zone_split.addWidget(self.map)
         min_height(self.map, 200)
         self.zone_split.setStretchFactor(0, 0); self.zone_split.setStretchFactor(1, 1)
-        self.zone_split.setSizes([120, 480])
+        self.zone_split.setSizes([96, 504])             # a narrow list: the map keeps the width (S-16)
         self.map_caption = TermLabel("")                 # Easy: what the colour of the map shows
         self.map_caption.setObjectName("muted")
         centre.body.addWidget(self.map_caption)
         centre.body.addWidget(self.zone_split, 1)
         self.region_caption = ElidedLabel("", Qt.ElideMiddle)
-        centre.body.addWidget(self.region_caption)
+        cap_row = QHBoxLayout()
+        cap_row.setContentsMargins(0, 0, 0, 0)
+        cap_row.addWidget(self.region_caption, 1)
+        self.hover_label = QLabel(""); self.hover_label.setObjectName("muted")
+        cap_row.addWidget(self.hover_label)             # the pointer's position, beside the region (M24)
+        centre.body.addLayout(cap_row)
         self.map_hint = ElidedLabel("", Qt.ElideMiddle); self.map_hint.setObjectName("muted")
         centre.body.addWidget(self.map_hint)
         split.addWidget(centre)
@@ -646,7 +658,7 @@ class ReducePerspective(QWidget):
         self._shortcuts()
         # Easy mode: John Bussey's four steps (scan, XRF window, region, reduce); everything else is Advanced
         mark_advanced(self.load_all_btn, self.show_row,
-                      self.propose_btn, self.stitch_btn, self.save_poly_btn, self.group_box,
+                      self.propose_btn, self.stitch_btn, self.load_poly_btn, self.save_poly_btn, self.group_box,
                       self.comment_box, self.z_info, self.send_btn, self.rules_btn, self.cards_area, self.map_hint)
         mark_easy(self.step4_line, self.add_check_btn, self.map_caption, *self._badges)
         session.check_queue_changed.connect(self._paint_next_link)
@@ -766,14 +778,28 @@ class ReducePerspective(QWidget):
         set_enabled(self.rules_btn, has, NO_PROJECT)
         k, _m, _sd = self.region_count()
         set_enabled(self.add_check_btn, k > 0,
-                    NO_PROJECT if not has else ("pick a scan in step 1" if _sd is None else say("reduce.nothing")))
+                    NO_PROJECT if not has else ("pick a scan in step 1" if _sd is None else
+                                                (self.preview_message(z, _sd) if zone_drawn(z) else
+                                                 say("reduce.nothing"))))
         self.scans_card.set_title(f"Scans of holder {h.name}" if h else "Scans of the holder")
         self.empty_state.set_shown(not has)
         hz = ses.holder_zones(create=False) if has else None
-        self.zone_state.set_shown(has and h is not None and not (hz and hz.zones))
+        shown = has and h is not None and not (hz and hz.zones) and not getattr(self, "_drafted", False)
+        if shown != (not self.zone_state.isHidden()):
+            self.zone_state.set_shown(shown)
+            if shown and not getattr(self.preview, "_traces", None):
+                self.preview.redraw()                   # one placeholder: the plot's own hint goes under the card
         self._caption()
         self._refresh_easy()
         self._paint_next_link()
+
+    def showEvent(self, ev) -> None:
+        super().showEvent(ev)
+        ses = self.session                      # nothing selected (a project reopened): the holder's first sample,
+        if ses.project is not None and ses.current_zone is None:        # so its spectrum shows (M13)
+            hz = ses.holder_zones(create=False)
+            if hz and hz.zones:
+                ses.select_zone(hz.zones[0].id)
 
     def _paint_next_link(self) -> None:
         """'Go to Check ›' in the step-4 row while spectra wait in Check (Easy mode)."""
@@ -835,8 +861,22 @@ class ReducePerspective(QWidget):
         parts = [s.time, s.label if label is None else label, edge_words(s.edge_text), rng]
         return " · ".join(p for p in parts if p) + (f"   [{flags}]" if flags else "")
 
+    def scan_row_lines(self, s) -> tuple[str, str]:
+        """The two lines of a step-1 row: the time and the sample's name first ('02:11 · quartz_grains': in Easy the
+        sample part of the scan name, without the holder tag and the edge and lab suffix), then the edge, the range
+        and the flags. Ten stacks of one holder differ by the name only: it must not be the part that is cut (M01,
+        S-04); the full scan name is the tooltip."""
+        rng = (f"{s.e_min:.0f}–{s.e_max:.0f} eV" if s.n_energies and s.e_min == s.e_min else s.energy_text)
+        flags = (", ".join(s.flags) if is_advanced() else "; ".join(flag_words(f) for f in s.flags))
+        h = self.session.holder() if self.session.project is not None else None
+        name = s.label if is_advanced() else sample_part(s.name, h.name if h is not None else None)
+        first = " · ".join(p for p in (s.time, name) if p)
+        second = " · ".join(p for p in (edge_words(s.edge_text), rng) if p) + (f"   [{flags}]" if flags else "")
+        return first, second
+
     def _relabel_scans(self) -> None:
-        """The scan rows at the list's width: only the label part is elided, the edge and the range stay whole."""
+        """The scan rows at the list's width, on two lines: the name line elides at its end only, the second line
+        (edge, range, flags) at its end."""
         lst = self.scan_list
         fm = lst.fontMetrics()
         width = max(lst.viewport().width(), 120) - 2 * fm.horizontalAdvance("m")
@@ -845,12 +885,8 @@ class ReducePerspective(QWidget):
             s = it.data(SCAN_ROLE)
             if s is None:
                 continue
-            full = self.scan_row_text(s)
-            if fm.horizontalAdvance(full) > width:
-                rest = fm.horizontalAdvance(self.scan_row_text(s, ""))
-                label = fm.elidedText(s.label, Qt.ElideRight, max(width - rest, fm.horizontalAdvance("m…")))
-                full = self.scan_row_text(s, label)
-            it.setText(full)
+            first, second = self.scan_row_lines(s)
+            it.setText(fm.elidedText(first, Qt.ElideRight, width) + "\n" + fm.elidedText(second, Qt.ElideRight, width))
 
     def _scan_picked(self, cur, _prev=None) -> None:
         if cur is None:
@@ -1122,13 +1158,14 @@ class ReducePerspective(QWidget):
             with np.errstate(all="ignore"):
                 vals = np.log10(np.maximum(vals, 0) + 1.0)
         from aurora.core.grid import to_grid
-        self.map.set_grid(to_grid(sd.x, sd.y, vals))
+        # Easy: the colour from 0, so a grain with half the signal of its neighbour looks half as bright, not empty
+        self.map.set_grid(to_grid(sd.x, sd.y, vals), floor=None if is_advanced() else 0.0)
         self.map.set_scale_label(scale_label("edge jump, counts" if self.map_mode.currentData() == "jump" else "counts",
                                              per_i0=self.map_i0.isChecked(), log=self.map_log.isChecked()))
         hz = self.session.holder_zones(create=False)
         for i, z in enumerate(hz.zones if hz else []):
             sel = z.id == self.session.current_zone
-            self.map.draw_zone(z, curve(i), selected=sel)
+            self.map.draw_zone(z, curve(i), selected=sel, points=(sd.x, sd.y, sd.pitch), label_text=shown_label(z))
             if sel:
                 pix = members(z, sd.x, sd.y, sd.pitch)
                 self.map.draw_pixels(sd.x[pix], sd.y[pix], sd.pitch, curve(i))
@@ -1149,7 +1186,8 @@ class ReducePerspective(QWidget):
         what = channel_words(line if line != xw.WINDOW_LABEL else "the step-2 window")
         per = ", divided by the {{i0|beam intensity}}" if self.map_i0.isChecked() else ""
         log = ", log scale" if self.map_log.isChecked() else ""
-        return f"Colour: {what}, {how}{per}{log} (brighter = more signal). Drag around your sample."
+        scale = "" if is_advanced() else ", from 0 (no signal) to the brightest pixel"
+        return f"Colour: {what}, {how}{per}{log}{scale} (brighter = more signal). Drag around your sample."
 
     def region_count(self) -> tuple[int, int, object]:
         """(K members of the current zone on the current stack, M points of the stack, the stack)."""
@@ -1166,7 +1204,7 @@ class ReducePerspective(QWidget):
         if sd is None:
             text = say("reduce.caption.no_scan") if self.session.project is not None else ""
         elif k == 0:
-            text = say("reduce.caption.empty")
+            text = self.preview_message(z, sd) if z is not None and zone_drawn(z) else say("reduce.caption.empty")
         else:
             text = say("reduce.caption.region", shape=shape_text(z), k=k, m=m, scan=sd.name)
         self.region_caption.setText(text)
@@ -1182,7 +1220,7 @@ class ReducePerspective(QWidget):
             hit = np.where((np.abs(sd.x - x) <= px / 2) & (np.abs(sd.y - y) <= py / 2))[0]
             if hit.size and is_advanced():
                 txt += f" · pixel {hit[0]}"
-        self.status_label.setText(txt)
+        self.hover_label.setText(txt)                   # under the map: the status line keeps what an action said
 
     def _map_points(self):
         """(x, y, pitch, name) of the stack shown, for the zone editor; None without one. The name is the one of the
@@ -1281,15 +1319,11 @@ class ReducePerspective(QWidget):
         z = self.session.zone(zid)
         if z is None:
             return
+        from aurora.app.zone_tools import ask_sample_name, rename_zone
         if label is None:
-            label, ok = QInputDialog.getText(self, "Rename the sample", "label", text=z.label)
-            if not ok:
-                return
-        label = (label or "").strip()
-        if not label or label == z.label:
-            return
-        with self.session.edit(f"rename zone {zid}"):
-            z.label = label
+            ask_sample_name(self, self.session, zid)          # the holder's unused sheet names offered (S-14)
+        else:
+            rename_zone(self.session, zid, label)
         if zid == self.session.current_zone:
             self._fill_zone_card(z)
 
@@ -1430,7 +1464,8 @@ class ReducePerspective(QWidget):
         self.zone_list.clear()
         for z in (hz.zones if hz else []):
             n = sum(1 for s in z.settings.values() if s.include)
-            it = QListWidgetItem(f"{z.id}  {z.label}" + (f"  ({z.group})" if z.group else "") + f"  · {plural(n, 'scan')}")
+            it = QListWidgetItem(f"{z.id}  {shown_label(z)}" + (f"  ({z.group})" if z.group else "")
+                                 + f"  · {plural(n, 'scan')}")
             it.setToolTip(it.text())
             it.setData(Qt.UserRole, z.id)
             self.zone_list.addItem(it)
@@ -1705,12 +1740,15 @@ class ReducePerspective(QWidget):
         else:
             i0 = "I0 mcc ch1 (Au mesh)" + (" (flagged invalid, still used)" if bad_i0 else "")
         despike = "de-spike off"
+        adv = is_advanced()                     # the comparisons with the earlier program: Advanced only (S-27)
         if st.despike:          # a session without a de-spike rule keeps the earlier one (no control sets it)
-            despike = (f"de-spike k = {st.k:g} (the earlier rule; off by default in the earlier SGM XAS GUI)"
+            despike = (f"de-spike k = {st.k:g} (the earlier rule" + ("; off by default in the earlier SGM XAS GUI)"
+                                                                     if adv else ")")
                        if st.despike_mode == "classic" else
-                       f"de-spike k = {st.k:g} (off by default in the earlier SGM XAS GUI)")
+                       f"de-spike k = {st.k:g}" + (" (off by default in the earlier SGM XAS GUI)" if adv else ""))
         sig = ("IPFY " if st.signal == "ipfy" else "PFY ") + self._line_words(st)
-        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", "zone mean (as the earlier SGM XAS GUI)",
+        mean = "zone mean (as the earlier SGM XAS GUI)" if adv else "mean of the outlined pixels"
+        return " · ".join([i0, "TEY mcc ch4" if st.tey else "TEY off", mean,
                            f"fluorescence {NORM_LABELS.get(st.fluo_norm, st.fluo_norm)}", despike, dets, sig])
 
     def ipfy_note(self) -> str:
@@ -1812,9 +1850,8 @@ class ReducePerspective(QWidget):
                 z.settings[sd.id] = st
         n = self.session.queue_for_check([CheckItem(self.session.current_holder, z.id, sd.id)])
         # a default name would be saved as it is (the earlier GUI asked for a label first): ask for one here
-        unnamed = ""
+        unnamed = ""                            # the name field below says how (the status line stays short: M24)
         if DEFAULT_LABEL.match(z.label):
-            unnamed = f" · name the sample in the field below (Enter), or press Esc to keep '{z.label}'"
             self.ask_name(z)
         self.status_label.setText(say("reduce.added", label=z.label, scan=short_time(sd.id) or sd.name,
                                       waiting=len(self.session.check_queue)) + unnamed if n else
@@ -1824,9 +1861,24 @@ class ReducePerspective(QWidget):
 
     def ask_name(self, z: Zone) -> None:
         """Show the inline 'Name this sample:' field for a zone still named 'zone N', with the focus."""
+        from PySide6.QtCore import QStringListModel
+        from PySide6.QtWidgets import QCompleter
+        from aurora.app.zone_tools import unused_sheet_names
         self._naming = z.id
         self.name_edit.clear()
         self.name_edit.setPlaceholderText(z.label)
+        self.name_prompt.setText(f"Name this sample (Enter; Esc keeps '{z.label}'):")
+        names = unused_sheet_names(self.session)          # the sheet's names not used yet, as in the box above (S-17)
+        comp = self.name_edit.completer()
+        if comp is None:
+            comp = QCompleter(self.name_edit)
+            comp.setCaseSensitivity(Qt.CaseInsensitive)
+            comp.setFilterMode(Qt.MatchContains)
+            self.name_edit.setCompleter(comp)
+        comp.setModel(QStringListModel(names, comp))
+        self.name_edit.setToolTip("The sample's name, as it goes into the saved files and the report"
+                                  + (f" (the sample sheet's: {', '.join(names[:6])}{' …' if len(names) > 6 else ''})"
+                                     if names else "") + ". Enter names it; Esc keeps the name it has.")
         self.name_row.show()
         self.name_edit.setFocus(Qt.OtherFocusReason)
 
@@ -2025,6 +2077,7 @@ class ReducePerspective(QWidget):
             if not self.editor.last_committed:          # nothing written: the zone as it was (a commit redrew it)
                 self.update_preview()
                 self._caption()
+                self.update_actions()                   # 'No sample yet' again when the stroke wrote nothing
 
     def _draft_settings(self, draft, sd) -> ScanSettings | None:
         """The settings the stroke's zone has, or would get, on the stack (the Easy rules and the saved rules for a
@@ -2048,6 +2101,8 @@ class ReducePerspective(QWidget):
             return
         self._drafted = True
         pix = np.asarray(draft.members_after, int)
+        if pix.size and not self.zone_state.isHidden():
+            self.zone_state.set_shown(False)            # the first sample's live traces are not under 'No sample yet'
         name = short_time(sd.id) or sd.name
         st = self._draft_settings(draft, sd)
         note = ""
@@ -2090,6 +2145,11 @@ class ReducePerspective(QWidget):
             return f"{who} is empty: drag on the map to draw it"
         if sd.id not in z.settings:
             name = short_time(sd.id) or sd.name
+            if not z.settings:                          # over a stack that stopped early: the one sentence (S-09)
+                from aurora.core.zones import incomplete_text, incomplete_under
+                gone = incomplete_under(z, self.session.holder())
+                if gone is not None:
+                    return incomplete_text(who, gone)
             others = [short_time(s) or split_stack_id(s)[1] for s in z.settings]
             if others:
                 return (f"{who} holds no pixel of {name}: it lies outside this scan. Scans it covers: "

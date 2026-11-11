@@ -137,7 +137,7 @@ def test_context_menus(qapp, win, monkeypatch):
     texts = [a.text() for a in rd.zone_menu(z1.id).actions() if a.text()]
     assert {"Set group", "Send to Compare"} <= set(texts)
     mode.set_advanced(False)
-    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("13 alpha_beta", True)))
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("13 alpha_beta", True)))
     next(a for a in rd.zone_menu(z1.id).actions() if a.text() == "Rename…").trigger()
     assert z1.label == "13 alpha_beta"
     # the right-click on the map pops the menu of the zone under the pointer (non-blocking)

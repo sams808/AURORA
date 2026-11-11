@@ -267,11 +267,11 @@ def test_same_range_moves_all_four_and_presets(qapp, tmp_path):
         wc.regions[1].setRegion((50, 70))
         pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(49, 69), (50, 70), (51, 71), (52, 72)]
-        assert (wc.lo.value(), wc.hi.value()) == (49, 69) and wc.preset.currentData() == ("custom", "")
+        assert (wc.lo.value(), wc.hi.value()) == (49, 68) and wc.preset.currentData() == ("custom", "")   # last in
         wc.set_window(None, 50, 70)                    # det None: the same window for all four
         pump(qapp)
         assert [tuple(round(v) for v in r.getRegion()) for r in wc.regions] == [(50, 70)] * 4
-        assert (wc.lo.value(), wc.hi.value()) == (50, 70) and wc.preset.currentData() == ("custom", "")
+        assert (wc.lo.value(), wc.hi.value()) == (50, 69) and wc.preset.currentData() == ("custom", "")
         wc.commit_now()
         pump(qapp)
         st = z.settings[sid]
@@ -320,14 +320,14 @@ def test_easy_nudges_keep_the_per_detector_windows(qapp, tmp_path):
         rd.map.rect_drawn.emit(*ses.stack_loaded(sid).bbox)
         pump(qapp)
         assert not wc.same_range.isVisible() and not wc.det_box.isVisible()
-        assert "SDD2 61:75, SDD3 62:76, SDD4 63:77 move with it" in wc.ev_label.text()
+        assert "detectors 2–4 use the same band on their own scale (61–74, 62–75, 63–76)" in wc.ev_label.text()
         wc.hi.setValue(wc.hi.value() + 1)
         wc.lo.setValue(wc.lo.value() - 1)
         wc.commit_now()
         pump(qapp)
         expect = {"sdd1": [59, 75], "sdd2": [60, 76], "sdd3": [61, 77], "sdd4": [62, 78]}
         assert wc.windows() == expect and ses.zone().settings[sid].roi == expect
-        assert wc.ev_label.text().startswith("Detector 1 (SDD1): 590–750 eV (channels 59 to 74")   # Easy words
+        assert wc.ev_label.text().startswith("Detector 1 (SDD1): 590–750 eV (channels 59–74")   # Easy words
         # the same with the hidden 'same range' unticked (left so by Advanced): Easy still moves all four
         wc.same_range.setChecked(False)
         wc.det.setCurrentIndex(2)
@@ -476,7 +476,7 @@ def test_without_roi_bins_easy_offers_johns_window_and_says_what_total_xrf_is(qa
         pump(qapp)
         assert wc.preset.currentText() == "all X-rays (total XRF)"
         assert "every emission line, not only the F Kα of the edge" in wc.ev_label.text()
-        assert "the earlier SGM XAS GUI started with 60:83" in wc.ev_label.text()          # Easy: no person name
+        assert "earlier" not in wc.ev_label.text()          # Easy names no earlier program (persona M20, S-27)
         st = ses.zone().settings[sid]
         assert st.line == xw.TOTAL_LABEL and not st.roi
         wc.preset.setCurrentIndex(1)

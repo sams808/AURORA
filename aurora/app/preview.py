@@ -32,7 +32,7 @@ MIN_PLOT_PX = 180               # the compact fluorescence panel never gets less
 MIN_TOP_PX = 110                # the fluorescence panel never gets less
 COMPACT_BELOW_PX = 260          # below this plot height, the TEY and I0 panels hide (compact)
 SHOW_TEXT = "Show ▾"
-TITLES = {"pfy": "Fluorescence of the sample (each detector and their sum)",
+TITLES = {"pfy": "Fluorescence (each detector and the sum)",      # short: it fits the Survey's column (S-26)
           "ipfy": "Inverse yield (IPFY) of the sample", "tey": "Electron yield (TEY): the surface",
           "i0": "Beam intensity (I0) during the scan"}
 SUM_NAME = "sum"            # the title says "each detector and their sum", a detector left out is named so: one

@@ -172,6 +172,29 @@ def short_label(label: str, holder: str | None) -> str:
     return label
 
 
+@lru_cache(maxsize=1)
+def _edge_inside() -> re.Pattern:
+    """An edge token anywhere in a label, followed by more tokens or the end ('_f_k' in 'glass_f_k_lab')."""
+    names = "|".join(sorted(element_names(), key=len, reverse=True))
+    edge = (rf"(?:{names})_?(?:{SHELL})|[a-z]{{1,2}}_(?:{SHELL})|[a-z]{{1,2}}(?:{SHELL_DIGIT})|"
+            rf"(?:{'|'.join(GLUED_K)})k")
+    return re.compile(rf"(?i)_(?:{edge})(?:coarse|fine)?(?=_|$)")
+
+
+def sample_part(name: str, holder: str | None = None, words=()) -> str:
+    """The part of a scan name that names the sample, for lists and map labels where a long name is cut (the full
+    name stays in the tooltip): the time, the plan suffix, the holder tag, the edge and everything after it (a lab or
+    plan word) removed. '101500_holderB_quartz_grains_f_k_lab_stack' on holderB -> 'quartz_grains'. Never empty:
+    the sample label when nothing would be left."""
+    label = label_from_name(name, words)
+    s = label
+    m = _edge_inside().search(s)
+    if m and m.start() >= 2:
+        s = s[:m.start()]
+    s = short_label(s, holder) if holder else s
+    return s if len(s) >= 2 else label
+
+
 def target_edge(name: str) -> tuple[str, str] | None:
     """Edge the scan was set up for, from its name: ('F', 'K'), ('U', 'N45'), ('Se', 'L3L2'), ('Fe', 'L23') ...; None
     if not stated. Read: `fe_l23`, `Fe_L2,3`, `mnL23`, `iron_l3`, `CK`, `OK`, `u_n45coarse`.

@@ -18,8 +18,9 @@ from aurora.app import mode  # noqa: E402
 # Open folder (I40 adds the findings view to the eight of WP0).
 # Survey and Reduce: the zone tool bar (Draw, Erase, Move, Rectangle, Brush, Lasso, Undo, Clear; owner's request 3: an
 # easy way to draw and erase zones), and on the Survey the holder, Load a sketch… and the Zone preview's scan and
-# Open in Reduce.
-LIMITS = {"home": 8, "survey": 12, "reduce": 22, "check": 10, "compare": 12, "fit": 10, "report": 9}
+# Open in Reduce; the Survey's New sample (persona S-01: grains side by side must not merge into one sample), the
+# Report's 'Add the Compare plot as the first figure' (persona S-05: the comparison belongs in the report).
+LIMITS = {"home": 8, "survey": 13, "reduce": 22, "check": 10, "compare": 12, "fit": 10, "report": 10}
 VIEWS_NOT_COUNTED = {"survey", "check"}
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider)
 

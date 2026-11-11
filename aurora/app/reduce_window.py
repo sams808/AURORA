@@ -134,7 +134,8 @@ class XrfWindowCard(Card):
         self.body.addWidget(self.plot, 1)
         # lo / hi in channels, the eV equivalent
         self.lo = QSpinBox(); self.lo.setRange(0, N_CH - 1); self.lo.setSuffix(unit_suffix("ch"))
-        self.hi = QSpinBox(); self.hi.setRange(1, N_CH); self.hi.setSuffix(unit_suffix("ch"))
+        # 'to' is the last channel counted (inclusive), as every text writes a window ('60–73'; M15)
+        self.hi = QSpinBox(); self.hi.setRange(0, N_CH - 1); self.hi.setSuffix(unit_suffix("ch"))
         for s in (self.lo, self.hi):
             s.setMaximumWidth(86)
         row = QWidget()
@@ -379,10 +380,8 @@ class XrfWindowCard(Card):
         if self._updating:
             return
         k = self._shown_det()
-        lo, hi = self.lo.value(), self.hi.value()
-        if hi <= lo:
-            hi = lo + 1
-        self.set_window(k, lo, hi)
+        lo, last = self.lo.value(), self.hi.value()      # the box shows the last channel counted
+        self.set_window(k, lo, max(last, lo) + 1)
 
     def _same_toggled(self, on: bool) -> None:
         self.det.setEnabled(not on and self._sd is not None)
@@ -494,7 +493,7 @@ class XrfWindowCard(Card):
         self._updating = True
         try:
             self.lo.setValue(lo)
-            self.hi.setValue(hi)
+            self.hi.setValue(hi - 1)                    # the last channel counted
         finally:
             self._updating = old
         self._describe()
@@ -515,27 +514,29 @@ class XrfWindowCard(Card):
             who = "all detectors" if self._linked() and same else DET_LABELS[k]
             others = ""
             if self._linked() and not same:             # one lo / hi pair, four different windows: name them all
-                others = " · " + ", ".join(f"{DET_LABELS[j]} {self._windows[d][0]}:{self._windows[d][1]}"
-                                           for j, d in enumerate(DETS) if j != k) + " move with it"
+                others = " · " + ", ".join(f"{DET_LABELS[j]} {self._windows[d][0]}–{self._windows[d][1] - 1}"
+                                           for j, d in enumerate(DETS) if j != k) + " follow it (their own scale)"
             if total:
                 from aurora.core.lines import resonant_line
                 others += (f" · total XRF holds every emission line, not only the {resonant_line(*self._sd.edge)} of the "
                            "edge" + (f" (John Bussey's GUI started with {xw.JOHN_DEFAULT[0]}:{xw.JOHN_DEFAULT[1]})"
                                      if self._john is not None else ""))
-            self.ev_label.setText(f"{who}: channels {lo}:{hi} = {a:.0f}–{b:.0f} eV"
+            self.ev_label.setText(f"{who}: channels {lo}–{hi - 1} = {a:.0f}–{b:.0f} eV"
                                   + (" (10 eV/ch nominal)" if nominal else " (calibrated)") + others)
             return
         who = "All four detectors" if self._linked() and same else f"Detector {k + 1} ({DET_LABELS[k]})"
         scale = "10 eV per channel, not calibrated" if nominal else "calibrated"
-        text = f"{who}: {a:.0f}–{b:.0f} eV (channels {lo} to {hi - 1}, {scale})"
-        if self._linked() and not same:                 # one from / to pair, four different windows: name them all
-            text += " · " + ", ".join(f"{DET_LABELS[j]} {self._windows[d][0]}:{self._windows[d][1]}"
-                                      for j, d in enumerate(DETS) if j != k) + " move with it"
+        text = f"{who}: {a:.0f}–{b:.0f} eV (channels {lo}–{hi - 1}, {scale})"
+        if self._linked() and not same:                 # one from / to pair, four different windows: say how they follow
+            nums = [j for j in range(len(DETS)) if j != k]
+            span = (f"detectors {nums[0] + 1}–{nums[-1] + 1}" if nums == list(range(nums[0], nums[-1] + 1))
+                    else "the other detectors")
+            text += (f" · {span} use the same band on their own scale ("
+                     + ", ".join(f"{self._windows[DETS[j]][0]}–{self._windows[DETS[j]][1] - 1}" for j in nums) + ")")
         if total:
             from aurora.core.lines import resonant_line
             text += (f". All X-rays count here, every emission line, not only the {resonant_line(*self._sd.edge)} "
-                     "of the edge element" + (f" (the earlier SGM XAS GUI started with {xw.JOHN_DEFAULT[0]}:"
-                                              f"{xw.JOHN_DEFAULT[1]})" if self._john is not None else ""))
+                     "of the edge element")
         self.ev_label.setText(text)
 
     def refresh_spectrum(self) -> None:

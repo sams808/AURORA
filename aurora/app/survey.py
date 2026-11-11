@@ -39,9 +39,10 @@ from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, defau
                                 notify_saved, overlay_host, pair, remember_dir, set_enabled)
 from aurora.app.zone_preview import ZonePreviewCard
 from aurora.app.zone_tools import (FEEDBACK_MS, PreviewThrottle, ZoneEditor, ZoneToolBar, clear_zone, register_shortcuts,
-                                   zone_drawn, zone_menu, zone_name)
+                                   shown_label, who, zone_drawn, zone_menu)
 from aurora.core import sketches
 from aurora.core.model import BEFORE_SURVEY, ScanInfo
+from aurora.core.names import sample_part
 from aurora.core.zones import zone_bbox
 
 SHEET_ANCHOR = "24-the-sample-sheet"             # MANUAL.md: what a sample sheet holds and where it goes
@@ -125,8 +126,42 @@ class SketchLabel(QLabel):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._image = QPixmap()
+        self.viewer = None                      # the full-size window of the last click (tests)
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Click to see the sketch at full size")
+
+    def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.LeftButton and not self._image.isNull():
+            self.open_full()
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def open_full(self):
+        """The sketch at its own size in a window that scrolls (a whole page shrunk to the card is unreadable:
+        persona M19, S-34)."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("Sketch of the holder")
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        lay = QVBoxLayout(dlg)
+        area = QScrollArea()
+        lab = QLabel()
+        lab.setPixmap(self._image)
+        area.setWidget(lab)
+        lay.addWidget(area, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        scr = self.screen().availableGeometry() if self.screen() is not None else None
+        w = min(self._image.width() + 40, int(scr.width() * 0.9) if scr else 1200)
+        h = min(self._image.height() + 80, int(scr.height() * 0.9) if scr else 900)
+        dlg.resize(max(w, 400), max(h, 300))
+        dlg.show()
+        self.viewer = dlg
+        return dlg
 
     def set_image(self, pm: QPixmap) -> None:
         self._image = QPixmap(pm)
@@ -208,6 +243,11 @@ class SurveyPerspective(QWidget):
         self.toolbar.tool_changed.connect(self.set_tool)
         self.toolbar.clear_btn.clicked.connect(self.clear_zone)
         self.clear_btn = self.toolbar.clear_btn
+        # New sample, as in Reduce: the next stroke starts the next sample (a grain drawn next to the selected one
+        # starts one too; persona S-01)
+        self.new_zone_btn = QPushButton("New sample")
+        self.new_zone_btn.clicked.connect(self._new_zone)
+        self.toolbar.layout().addWidget(self.new_zone_btn)
         left.body.addWidget(self.toolbar)
         self.map = MapView()
         self.map.setAccessibleName("plate map of the holder")
@@ -224,7 +264,8 @@ class SurveyPerspective(QWidget):
         self.editor.feedback_ms = FEEDBACK_MS           # thousands of survey points: the feedback every 50 ms at most
         self.editor.enabled = lambda: not self.grid_btn.isChecked()
         self.editor.new_each = lambda: self.toolbar.new_each.isChecked() and is_advanced()
-        self.editor.message.connect(lambda t: self.hint.setText(t))
+        self.editor.next_name = self._take_armed_name   # a clicked sheet row names the next new sample (M08)
+        self.editor.message.connect(self._say)
         self.throttle = PreviewThrottle(self.preview_draft, self)
         self.editor.throttle = self.throttle
         self.throttle.state_changed.connect(self.editor.refresh_hint)
@@ -276,18 +317,26 @@ class SurveyPerspective(QWidget):
         sc.setVisible(False)
         right.addWidget(sc)
         self.samples_card = tc = Card("Samples on the holder (sample sheet)", help_anchor="3-survey")
-        self.sheet_table = QTableWidget(0, 4)
-        self.sheet_table.setHorizontalHeaderLabels(["Sample", "Group", "Composition", "Edges"])
+        self.sheet_table = QTableWidget(0, 5)
+        self.sheet_table.setHorizontalHeaderLabels(["Sample", "Group", "Composition", "Edges", "Notes"])
         self.sheet_table.setAccessibleName("samples of the holder")
         # the sample name takes the room; the short columns their content (their headers included: a squeezed
-        # Composition column printed 'nposi'); no row numbers
+        # Composition column printed 'nposi'); the notes (where a sample sits: 'left pad') elided, whole in the row's
+        # tooltip; no row numbers
         head = self.sheet_table.horizontalHeader()
         head.setSectionResizeMode(0, QHeaderView.Stretch)
         for col in (1, 2, 3):
             head.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(4, QHeaderView.Stretch)
         self.sheet_table.verticalHeader().hide()
         self.sheet_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.sheet_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.sheet_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.sheet_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.sheet_table.cellClicked.connect(self._sheet_row_clicked)
+        self._fit_rows(self.sheet_table, 4)
         tc.body.addWidget(self.sheet_table, 1)
+        self.armed_name = ""                            # a sheet row clicked: the next new sample takes its name
         # without a sheet (or without a row for this holder): one line and the two ways to add one, no empty table
         self.sheet_note = QLabel("")
         self.sheet_note.setObjectName("muted")
@@ -309,7 +358,7 @@ class SurveyPerspective(QWidget):
         right.setCollapsible(1, False)
         for i, f in enumerate((1, 4, 1, 1)):            # the Zone preview takes the height
             right.setStretchFactor(i, f)
-        right.setSizes([130, 440, 150, 150])
+        right.setSizes([150, 420, 150, 150])         # the zones card: four rows when the window is tall enough
         self.right = self.right_split = right
         # at the smallest window the column scrolls rather than squeezing the preview's plots below their minimum
         self.right_scroll = ColumnScroll(400)           # the preview's plots stay readable at 1200 px
@@ -326,7 +375,15 @@ class SurveyPerspective(QWidget):
         self.clip.valueChanged.connect(self.redraw_map)
 
         self.no_map_state = EmptyState(NO_SURVEY_MAP, [], icon="survey", parent=self.map)
-        self.zones_state = EmptyState(say("survey.zones_empty"), [], icon="survey", parent=self.zone_table)
+        # no sample yet: one muted sentence in the table's place (a card over a two-row table showed only its icon:
+        # persona S-12, M13)
+        self.zones_note = QLabel(say("survey.zones_empty"))
+        self.zones_note.setObjectName("muted")
+        self.zones_note.setWordWrap(True)
+        self.zones_note.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.zones_note.hide()
+        self.zones_note.installEventFilter(self)            # as tall as its wrapped lines (a splitter ignores wrap)
+        zc.body.insertWidget(zc.body.indexOf(self.zone_table), self.zones_note, 1)
         self.empty_state = EmptyState("No project open: the plate map of each holder appears here.",
                                       [("Open project…", lambda: nav.open_project_dialog(self)),
                                        ("Open the demo beamtime", lambda: nav.open_demo(self))], icon="survey",
@@ -337,6 +394,7 @@ class SurveyPerspective(QWidget):
         explain(self.grid_btn, "survey.grid")
         explain_all([(self.new_sheet_btn, "survey.new_sheet"), (self.choose_sheet_btn, "survey.choose_sheet")])
         explain(self.sketch_btn, "survey.sketch_load")
+        explain(self.new_zone_btn, "survey.new_zone")
         explain(self.remove_sketch_btn, "survey.sketch_remove")
         session.project_changed.connect(self._project_changed)
         session.holder_changed.connect(self._holder_changed)
@@ -364,6 +422,8 @@ class SurveyPerspective(QWidget):
         z = self.session.zone() if has else None
         set_enabled(self.clear_btn, zone_drawn(z), "open a project first" if not has else (
             "select a zone first" if z is None else "the zone is empty"))
+        set_enabled(self.new_zone_btn, has and self.session.holder() is not None,
+                    "open a project first" if not has else "this project has no holder")
         self.toolbar.setEnabled(has and self._survey is not None and not self.grid_btn.isChecked())
         if not self.grid_btn.isEnabled() and self.grid_btn.isChecked():
             self.grid_btn.setChecked(False)
@@ -380,6 +440,7 @@ class SurveyPerspective(QWidget):
                                                          self.session.project.work)
         set_enabled(self.remove_sketch_btn, own and not why,
                     why or "this sketch is a file of the beamtime folder: AURORA removes only the copy it made")
+        self.remove_sketch_btn.setVisible(bool(own))     # a beamtime file's sketch: no button that cannot act (M19)
         title = holder_title(h)
         if is_advanced():
             self.zones_card.set_title(f"Zones of {'the ' if title == BEFORE_SURVEY else ''}{title}" if h else
@@ -387,8 +448,10 @@ class SurveyPerspective(QWidget):
         else:
             self.zones_card.set_title(say("survey.zones_title"))
         hz = self.session.holder_zones(create=False) if has else None
-        self.zones_state.set_content(say("survey.zones_empty"))
-        self.zones_state.set_shown(has and h is not None and not (hz and hz.zones))
+        self.zones_note.setText(say("survey.zones_empty"))
+        empty = has and h is not None and not (hz and hz.zones)
+        self.zones_note.setVisible(empty)
+        self.zone_table.setVisible(not empty)
         self.samples_card.set_title(("Samples (sample sheet)" if title == BEFORE_SURVEY else
                                      f"Samples on {title} (sample sheet)") if h else "Samples on the holder (sample sheet)")
 
@@ -485,11 +548,15 @@ class SurveyPerspective(QWidget):
                 col, style = FOOTPRINTS.get(s.status, FOOTPRINTS["complete"])
                 sel = self.session.stack_id(s) == self.session.current_stack
                 self.map.add_rect(*box, col, 2.5 if sel else 1.2, style=style)
-                self.map.add_label(box[0], box[3], f"{s.time} {s.label}", col)
+                h = self.session.holder()
+                name = s.label if is_advanced() else sample_part(s.name, h.name if h else None)
+                self.map.add_fitted_label(box[0], box[1], box[2], f"{s.time} {name}".strip(), s.time or name, col)
         if self.show_zones.isChecked():
             hz = self.session.holder_zones(create=False)
-            for i, z in enumerate(hz.zones if hz else []):
-                self.map.draw_zone(z, curve(i), selected=(z.id == self.session.current_zone))
+            pts = (sv.x, sv.y, sv.pitch) if sv.n else None
+            for i, z in enumerate(hz.zones if hz else []):       # what each zone holds, filled (erasures show)
+                self.map.draw_zone(z, curve(i), selected=(z.id == self.session.current_zone), points=pts,
+                                   label_text=shown_label(z))
         if self._grid_preview is not None:              # the grid of zones before Accept: dashed, skipped cells dotted
             zones, skipped = self._grid_preview
             add, off = MAP_OVERLAY["rect_add"], MAP_OVERLAY["erase"]
@@ -641,16 +708,23 @@ class SurveyPerspective(QWidget):
         for r, z in enumerate(zones):
             it = QTableWidgetItem(str(z.id)); it.setData(Qt.UserRole, z.id)
             self.zone_table.setItem(r, 0, it)
-            self.zone_table.setItem(r, 1, QTableWidgetItem(z.label))
+            self.zone_table.setItem(r, 1, QTableWidgetItem(shown_label(z)))     # Easy: 'sample 1', not 'zone 1'
             self.zone_table.setItem(r, 2, QTableWidgetItem(z.group))
             self.zone_table.setItem(r, 3, QTableWidgetItem(str(sum(1 for s in z.settings.values() if s.include))))
         self.zone_table.blockSignals(False)
 
-    def _fit_zone_table(self) -> None:
-        """The zones table never shows less than its header and two rows (the column scrolls below the preview)."""
-        t = self.zone_table
-        t.setMinimumHeight(t.horizontalHeader().sizeHint().height() + 2 * t.verticalHeader().defaultSectionSize()
+    @staticmethod
+    def _fit_rows(t, rows: int) -> None:
+        """A table never shows less than its header and `rows` rows (the column scrolls below the preview)."""
+        t.setMinimumHeight(t.horizontalHeader().sizeHint().height() + rows * t.verticalHeader().defaultSectionSize()
                            + 2 * t.frameWidth())
+
+    def _fit_zone_table(self) -> None:
+        """The zones table never shows less than its header and two rows (the Zone preview stays whole on screen at
+        the smallest window; the splitter gives the card more rows when the window is taller), its empty-state
+        sentence without an icon, so it fits those two rows (persona S-12, M13); the sample sheet four rows."""
+        self._fit_rows(self.zone_table, 2)
+        self._fit_rows(self.sheet_table, 4) if hasattr(self, "sheet_table") else None
 
     def _zone_row_selected(self) -> None:
         rows = self.zone_table.selectionModel().selectedRows()
@@ -662,9 +736,47 @@ class SurveyPerspective(QWidget):
         rows = self.session.sheet_for(h.name) if h else []
         self.sheet_table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            for c, v in enumerate((row.sample_id, row.group, row.composition, row.edges)):
-                self.sheet_table.setItem(r, c, QTableWidgetItem(v))
+            notes = getattr(row, "notes", "") or ""
+            tip = " · ".join(t for t in (row.sample_id, row.group, row.composition, row.edges, notes) if t)
+            tip += "\nClick: select its outline, or draw it next (the new sample takes this name)."
+            for c, v in enumerate((row.sample_id, row.group, row.composition, row.edges, notes)):
+                it = QTableWidgetItem(v)
+                it.setToolTip(tip)
+                self.sheet_table.setItem(r, c, it)
         self._sheet_state(h, rows)
+
+    def _sheet_row_clicked(self, r: int, _c: int = 0) -> None:
+        """A click on a sheet row (persona M08): the sample's outline when the holder has one of that name (selected,
+        highlighted on the map); otherwise Draw is armed and the next new sample takes the row's name."""
+        it = self.sheet_table.item(r, 0)
+        name = it.text().strip() if it is not None else ""
+        if not name or self.session.project is None:
+            return
+        hz = self.session.holder_zones(create=False)
+        z = next((z for z in (hz.zones if hz else []) if (z.label or "").strip().lower() == name.lower()), None)
+        if z is not None:
+            self.armed_name = ""
+            self.session.select_zone(z.id)
+            self.hint.setText(f"{name} selected: its outline is drawn thicker on the map")
+            return
+        self.armed_name = name
+        self.session.select_zone(None)                  # the next stroke starts a new sample ...
+        if self.toolbar.shape() == "navigate" or self.toolbar.erase():
+            self.toolbar.set_tool("rect+")              # ... drawn with Draw
+            self.set_tool(self.toolbar.tool())
+        self.hint.setText(f"Draw around {name} on the map: the new sample takes this name")
+
+    def _say(self, text: str) -> None:
+        """What a stroke did or why it wrote nothing: in the line under the map and the status line (the line under
+        the map goes back to the colour caption at the next redraw)."""
+        self.hint.setText(text)
+        if text:
+            self.session.status.emit(text)
+
+    def _take_armed_name(self) -> str:
+        """The name of the sheet row clicked before this stroke ('' none); used once (ZoneEditor.next_name)."""
+        name, self.armed_name = self.armed_name, ""
+        return name
 
     def _sheet_state(self, h, rows) -> None:
         """No sheet: one line with a link to the manual's sample-sheet section, and New / Choose sample sheet… (never a
@@ -710,6 +822,10 @@ class SurveyPerspective(QWidget):
         from PySide6.QtCore import QEvent
         if obj is self.samples_card and event.type() == QEvent.Resize and event.oldSize().width() != event.size().width():
             self._fit_samples_card()
+        if obj is getattr(self, "zones_note", None) and event.type() in (QEvent.Resize, QEvent.Show):
+            need = obj.heightForWidth(obj.width())
+            if need > 0 and obj.minimumHeight() != need:
+                obj.setMinimumHeight(need)
         return super().eventFilter(obj, event)
 
     def _project_files(self, what: str) -> None:
@@ -820,7 +936,7 @@ class SurveyPerspective(QWidget):
         zid = self.map.zone_at(x, y)
         z = self.session.zone(zid) if zid is not None else None
         if z is not None:
-            txt += f" · {zone_name(z)}"
+            txt += f" · {who(z)}"
         self.hint.setText(txt)
 
     def _footprint_at(self, x: float, y: float) -> ScanInfo | None:
@@ -839,6 +955,8 @@ class SurveyPerspective(QWidget):
         if s is not None:
             self.open_requested.emit(s)
             self.redraw_map()
+        elif self.session.current_zone is not None:
+            self.session.select_zone(None)              # a click on the bare map deselects (S-01)
 
     def _double_clicked(self, x: float, y: float) -> None:
         """A double-click in Move inside a zone over a complete footprint: that stack in Reduce, the zone selected."""
@@ -910,12 +1028,17 @@ class SurveyPerspective(QWidget):
         a = self.shortcut_actions = register_shortcuts(self, self.toolbar, "Survey")
         a.update({
             "new": add("New sample", "N", self._new_zone),
+            "deselect": add("Deselect the sample (the next stroke starts a new one)", "Esc",
+                            lambda: self.session.select_zone(None) if self.session.current_zone is not None else None),
             "delete": add("Delete the sample", "Delete", self._delete_zone),
             "prev_zone": add("Previous sample", "Alt+Up", lambda: self.step_zone(-1)),
             "next_zone": add("Next sample", "Alt+Down", lambda: self.step_zone(1)),
             "fit": add("Fit the view", "F", self.fit_view),
         })
         a["delete"].setShortcuts(shortcuts.delete_keys())
+        esc = getattr(getattr(self.zone_preview, "taskbar", None), "esc_action", None)
+        if esc is not None:                             # one Esc at a time: a running preview task takes it
+            esc.changed.connect(lambda: a["deselect"].setEnabled(not esc.isEnabled()))
 
     def zone_menu(self, zid: int):
         """The right-click menu of a zone on the plate map: the shared zone entries, then 'Open <scan> in Reduce' for

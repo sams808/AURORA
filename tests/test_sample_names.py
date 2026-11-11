@@ -86,7 +86,7 @@ def test_without_a_sheet_the_box_offers_the_scan_labels_and_add_to_check_asks(qa
         assert rd.name_row.isHidden()
         assert rd.add_to_check() == 1
         assert not rd.name_row.isHidden() and rd.name_edit.placeholderText() == "zone 1"
-        assert "press Esc to keep 'zone 1'" in rd.status_label.text()
+        assert "Esc keeps 'zone 1'" in rd.name_prompt.text()                 # the field says it (M24)
         rd.name_edit.setFocus()
         QTest.keyClick(rd.name_edit, Qt.Key_Escape)
         assert rd.name_row.isHidden() and ses.zone().label == "zone 1"           # Esc keeps the name

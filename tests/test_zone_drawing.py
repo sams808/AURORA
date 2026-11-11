@@ -185,7 +185,7 @@ def test_right_drag_and_shift_drag_erase(qapp, wide):
     n = ses.undo_stack.count()
     qdrag(qapp, rd.map, _around(sd, row[:2]), button=Qt.RightButton)
     assert ses.undo_stack.count() == n and len(z.erects) == 2
-    assert rd.status_label.text() == f"nothing of zone {z.id} there to erase" == rd.map.hint_text()
+    assert rd.status_label.text() == f"nothing of sample {z.id} there to erase" == rd.map.hint_text()   # Easy words
     # with Erase as the tool's mode, the right button draws
     rd.set_tool("rect-")
     qdrag(qapp, rd.map, _around(sd, row[:2]), button=Qt.RightButton)
@@ -217,7 +217,7 @@ def test_lasso_erase_stores_an_epoly(qapp, wide, project):
     from aurora.core.zones import polygon_inside
     inside = np.where(polygon_inside(z.epolys[0], sd.x, sd.y))[0]
     assert inside.size >= 4 and not set(inside.tolist()) & set(members(z, sd.x, sd.y, sd.pitch).tolist())
-    assert rd.region_caption.text().startswith("Region: 1 rectangle, minus 1 erased outline")
+    assert rd.region_caption.text().startswith("Region: 1 rectangle, 1 part erased")
     dashed = [it for it in rd.map._overlays if isinstance(it, QGraphicsPolygonItem) and
               it.pen().style() == Qt.DashLine and it.pen().color().name().lower() == MAP_OVERLAY["erase"].lower()]
     assert len(dashed) == 1
@@ -249,8 +249,10 @@ def test_esc_cancels_any_stroke(qapp, wide):
     for tool in ("rect+", "brush+", "lasso+"):
         rd.set_tool(tool)
         n = ses.undo_stack.count()
-        qdrag(qapp, rd.map, pts[:4] + [(pts[3][0], pts[3][1] + sd.pitch[1])], release=False)
-        assert rd.map.vb.drawing() == tool[:-1] and rd.map.hint_text().startswith("new zone 1")
+        hp = sd.pitch[1] / 2                               # half a pitch off the centres: no point on an edge
+        path = [(x, y - hp) for x, y in pts[:4]] + [(pts[3][0] + hp, pts[3][1] + hp)]
+        qdrag(qapp, rd.map, path, release=False)
+        assert rd.map.vb.drawing() == tool[:-1] and rd.map.hint_text().startswith("new sample 1")
         assert rd.map.stroke_preview_counts()[0] > 0                            # the points it would add
         rd.map.setFocus()
         QTest.keyClick(rd.map, Qt.Key_Escape)
@@ -282,6 +284,8 @@ def test_empty_strokes_are_not_written(qapp, win):
     rd.set_tool("rect+")
     n = ses.undo_stack.count()
     below = _box_path(x0, x1, y0 - 0.6, y0 - 0.3)           # inside the view, under the scan's footprint
+    rd.map.zoom_to(x0, x1, y0 - 1.0, y1)                    # whatever the map's shape at this window size
+    pump(qapp)
     qdrag(qapp, rd.map, below, release=False)
     reason = f"outside scan {rd._map_points()[3]}: draw over its pixels"
     assert rd._map_points()[3] == f"09:27 {ses.scan_of(win.sid).label}"
@@ -307,16 +311,27 @@ def test_target_zone_rules(qapp, wide):
     qdrag(qapp, rd.map, _around(sd, col(0, 2)))
     z1 = ses.zone()
     assert z1.id == 1 and len(members(z1, sd.x, sd.y, sd.pitch)) == 12
-    # a stroke that touches zone 1 adds to it, and the hint says so before the release
+    # a rectangle beside zone 1 (touching, not over it) starts a new sample: neighbouring grains always touch
+    # (persona S-01); Easy names samples and pixels
     qdrag(qapp, rd.map, _around(sd, col(3, 4)), release=False)
-    assert rd.map.hint_text() == "adds 8 points to zone 1"
+    assert rd.map.hint_text() == "new sample 2: 8 pixels (hold Ctrl to add it to sample 1)"
     qrelease(qapp, rd.map, _around(sd, col(3, 4))[-1])
     pump(qapp)
+    assert [z.id for z in _zones(ses)] == [1, 2] and ses.current_zone == 2
+    ses.undo(); pump(qapp)
+    ses.select_zone(1); pump(qapp)
+    # a stroke over zone 1 adds to it, and the hint says so before the release; the line says how to start another
+    qdrag(qapp, rd.map, _around(sd, col(2, 4)), release=False)
+    assert rd.map.hint_text() == "adds 8 pixels to sample 1"
+    qrelease(qapp, rd.map, _around(sd, col(2, 4))[-1])
+    pump(qapp)
+    z1 = ses.zone(1)                                       # the undo above put a copy of zone 1 back
     assert len(_zones(ses)) == 1 and len(members(z1, sd.x, sd.y, sd.pitch)) == 20
+    assert rd.status_label.text() == "Added to sample 1. To start another sample, press New sample (N)."
     # a stroke apart starts zone 2 ...
     apart = _around(sd, col(8, 10))
     qdrag(qapp, rd.map, apart, release=False)
-    assert rd.map.hint_text() == "new zone 2: 12 points (hold Ctrl to add it to zone 1)"
+    assert rd.map.hint_text() == "new sample 2: 12 pixels (hold Ctrl to add it to sample 1)"
     qrelease(qapp, rd.map, apart[-1])
     pump(qapp)
     assert [z.id for z in _zones(ses)] == [1, 2] and ses.current_zone == 2
@@ -635,7 +650,7 @@ def test_survey_draws_and_clicks(qapp, swin):
     assert sv.zone_table.rowCount() == 1 and sv.map.hint_text() == idle_hint("rect+")
     c = sd.bbox
     sv._hover((c[0] + c[1]) / 2, (c[2] + c[3]) / 2)                # the hover line names the footprint and the zone
-    assert testdata.STACK in sv.hint.full_text() and sv.hint.full_text().endswith(" · zone 1")
+    assert testdata.STACK in sv.hint.full_text() and sv.hint.full_text().endswith(" · sample 1")
     # a stroke over no survey point writes nothing and says why
     sv.set_tool("rect+")
     ses.select_zone(None); pump(qapp)
@@ -707,12 +722,12 @@ def test_survey_preview_emission(qapp, swin):
     assert np.allclose(d["per_point"], want) and np.allclose(d["sum"], want.sum(axis=0)) and d["n"] == pix.size
     y = zp.emission.curves[0].yData
     assert np.allclose(y[np.isfinite(y)], want[0][want[0] > 0])
-    assert zp.emission.plot.getPlotItem().titleLabel.text == f"XRF at {survey.energy:.1f} eV · {pix.size} survey points"
+    assert zp.emission.plot.getPlotItem().titleLabel.text == f"XRF at {survey.energy:.1f} eV · {pix.size} pixels"
     assert [tuple(r.getRegion()) for r in zp.emission.regions] == [tuple(BINS[LINE_A][d]) for d in DETS]
     assert [t.value() for t in zp.emission.ticks] == [np.mean([(lo + hi) / 2 for lo, hi in BINS[LINE_B].values()])]
-    # Easy names the sample (its default label: "sample 1"), Advanced the zone; the detector in words
-    assert zp.summary.full_text().startswith(f"sample 1: {pix.size} survey points · {LINE_A} window 60–73 ch on "
-                                             "detector 1 (SDD1)")
+    # Easy names the sample (its default label: "sample 1") and its pixels, the window in eV (M10); Advanced the
+    # zone, its survey points and the channels, the detector in words
+    assert zp.summary.full_text().startswith(f"sample 1: {pix.size} pixels · {LINE_A} window 600–740 eV")
     mode.set_advanced(True); pump(qapp)
     assert zp.summary.full_text().startswith(f"zone 1: {pix.size} survey points · {LINE_A} window 60–73 ch on "
                                              "detector 1 (SDD1)")
@@ -879,7 +894,7 @@ def test_preview_messages(qapp, swin):
     with ses.edit("a zone off the plate"):
         z.rects.append([-3.0, -2.5, 8.0, 8.5])
     pump(qapp)
-    assert zp.summary.full_text().startswith(f"sample {z.id}: 0 survey points") and \
+    assert zp.summary.full_text().startswith(f"sample {z.id}: 0 pixels") and \
         zp.emission.plot.getPlotItem()._aurora_hint.toPlainText() == EASY_OFF_PLATE.format(zone=f"sample {z.id}")
     mode.set_advanced(True); pump(qapp)                        # Advanced: the zone, the zones spec words
     assert zp.summary.full_text().startswith(f"zone {z.id}: 0 survey points") and \
@@ -939,7 +954,8 @@ def test_map_feedback(qapp, wide):
     rd.set_tool("rect+")
     assert m.hint_text() == idle_hint("rect+") and m.vb.cursor().shape() == Qt.CrossCursor
     rd.set_tool("rect-")
-    assert m.hint_text() == idle_hint("rect-") == "Drag over the selected zone to erase · right-drag draws"
+    assert m.hint_text() == idle_hint("rect-") == ("Drag over the selected sample to erase · a click erases one pixel "
+                                                   "· right-drag draws")
     rd.set_tool("navigate")
     assert m.hint_text() == ""
     # the points a stroke adds, in the new zone's colour; the points an erase removes, crossed
@@ -983,11 +999,13 @@ def test_member_pixels_are_one_item(qapp, wide):
     z = ses.zone()
     pix = members(z, sd.x, sd.y, sd.pitch)
     items = [it for it in rd.map._overlays if isinstance(it, pg.ScatterPlotItem)]
-    assert len(items) == 1 and len(items[0].data) == pix.size == sd.n_pix
-    xs, ys = items[0].getData()
-    assert set(zip(np.round(xs, 6), np.round(ys, 6))) == set(zip(np.round(sd.x[pix], 6), np.round(sd.y[pix], 6)))
-    br = items[0].boundingRect()                             # pitch-sized squares, not points
-    assert np.ptp(sd.x) + sd.pitch[0] - 1e-6 <= br.width() <= np.ptp(sd.x) + 2 * sd.pitch[0]
+    # two items whatever the size: the member pixels filled (every zone, M11) and outlined (the selected zone)
+    assert len(items) == 2 and all(len(it.data) == pix.size == sd.n_pix for it in items)
+    for it in items:
+        xs, ys = it.getData()
+        assert set(zip(np.round(xs, 6), np.round(ys, 6))) == set(zip(np.round(sd.x[pix], 6), np.round(sd.y[pix], 6)))
+        br = it.boundingRect()                               # pitch-sized squares, not points
+        assert np.ptp(sd.x) + sd.pitch[0] - 1e-6 <= br.width() <= np.ptp(sd.x) + 2 * sd.pitch[0]
 
 
 # ----------------------------------------------------------------------------- Z14: survey, inside the zone
@@ -1073,12 +1091,12 @@ def test_the_map_hint_is_one_line_when_it_fits(qapp, small):
     rd.set_tool("rect+")
     box = _box_path(*inner_box(sd, 0.05))
     qdrag(qapp, m, box, release=False)
-    assert m.hint_text().startswith("new zone 1: ") and m.hint_lines() == 1
+    assert m.hint_text().startswith("new sample 1: ") and m.hint_lines() == 1
     qrelease(qapp, m, box[-1]); pump(qapp)
     rd.set_tool("rect-")
     two = _around(sd, np.array([0, 1]))
     qdrag(qapp, m, two, release=False)
-    assert m.hint_text().startswith("erases 2 points from zone 1") and m.hint_lines() == 1, m.hint_text()
+    assert m.hint_text().startswith("erases 2 pixels from sample 1") and m.hint_lines() == 1, m.hint_text()
     qrelease(qapp, m, two[-1]); pump(qapp)
     long = "a sentence much longer than the map is wide, which has to wrap over several lines to be read at all"
     m.set_hint(long)

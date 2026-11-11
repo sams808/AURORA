@@ -169,9 +169,9 @@ def test_erase_polygons_round_trip_copy_and_export(tmp_path):
     from aurora.core.zones import export_json, export_ready, geometry, set_geometry, shape_text
     x, y, pitch = _grid()
     z = Zone(id=1, label="z", rects=[[-0.5, 0.25, 5.0, 5.5]], epolys=[TRIANGLE])
-    assert shape_text(z) == "1 rectangle, minus 1 erased outline"
+    assert shape_text(z) == "1 rectangle, 1 part erased"
     assert shape_text(Zone(id=2, label="p", polys=[TRIANGLE], epolys=[TRIANGLE, TRIANGLE])) == \
-        "polygon with 3 vertices, minus 2 erased outlines"
+        "polygon with 3 vertices, 2 parts erased"
     back = Zone.from_json(z.to_json())
     assert back.epolys == [TRIANGLE] and "epolys" not in back.extra
     assert "epolys" not in Zone(id=3, label="e").to_json()                 # written only when there is one

@@ -5,9 +5,9 @@ The map (aurora.app.mapview.MapView) turns every gesture into an aurora.core.zon
 - picks the zone the stroke goes to (target_for). An Erase stroke goes to the selected zone, or else to the zone under
   its start (which then becomes selected); with no zone there it does nothing. A Draw stroke starts a new zone when no
   zone is selected or when 'every stroke starts a new zone' is on (new_each); otherwise it goes to the selected zone,
-  except a stroke that neither overlaps nor touches (within TOUCH_PITCH) the selected zone's points on this map: that
-  one starts a new zone ("draw one sample, then the next"), unless Ctrl is held at release (force_add: a sample in
-  two parts);
+  except a stroke that holds none of the selected zone's points on this map: that one starts a new zone ("draw one
+  sample, then the next": neighbouring grains always touch, so touching is not enough to add; a brush stroke that
+  touches, within TOUCH_PITCH, paints on), unless Ctrl is held at release (force_add: a sample in two parts);
 - keeps the provisional result while the stroke moves (draft(), a ZoneDraft: the points before and after, the points
   added or removed), without touching the session, and says on the map what the release will do (MapView.set_hint):
   "adds 12 points to zone 3 'NaF'", "new zone 4: 12 points", "erases 5 points from zone 3 'NaF'";
@@ -38,12 +38,17 @@ from aurora.app.vocab import plural
 from aurora.core.io.config import Zone
 from aurora.core.zones import Stroke, apply_stroke, brush_squares, members, stroke_covers, stroke_zone
 
-TOUCH_PITCH = 1.0               # a Draw stroke within this many pitches of the selected zone's points adds to it
+TOUCH_PITCH = 1.0               # a brush stroke within this many pitches of the selected zone's points adds to it
 TOUCH_TOL = 1.25                # ... measured with this slack (jittered stage positions)
 FEEDBACK_MS = 50                # the Survey's stroke feedback at most this often (thousands of points)
 NO_PROJECT = "open a project first"
 IDLE_DRAW = "Drag to draw a zone · right-drag erases · Ctrl+Z undoes"
-IDLE_ERASE = "Drag over the selected zone to erase · right-drag draws"
+IDLE_ERASE = "Drag over the selected zone to erase · a click erases one point · right-drag draws"
+EASY_IDLE_DRAW = "Drag around a sample to outline it · right-drag erases · Ctrl+Z undoes"
+EASY_IDLE_ERASE = "Drag over the selected sample to erase · a click erases one pixel · right-drag draws"
+GREW_TEXT = "Added to {who}. To start another sample, press New sample (N)."
+CLICK_NEW_TEXT = "A click adds the pixel under it to a new sample {zid} (1 pixel). Ctrl+Z undoes."
+TINY_ERASE_TEXT = "Too small to be a drag: click a pixel to erase just that one."
 IDLE_POLYGON = "Click the corners of the zone · double-click closes it · Esc cancels"
 IDLE_POLYGON_ERASE = "Click the corners of the part to erase · double-click closes it · Esc cancels"
 _DEFAULT_LABEL = re.compile(r"^zone \d+$")
@@ -67,6 +72,35 @@ def sample_name(z, next_id: int = 0) -> str:
         return "the new sample"
     label = (getattr(z, "label", "") or "").strip()
     return label if label and not _DEFAULT_LABEL.match(label) else f"sample {zid}"
+
+
+def who(z) -> str:
+    """The zone in a stroke hint: zone_name in Advanced mode ("zone 3 'NaF'"), the sample's name in Easy mode ('NaF',
+    'sample 3' while it keeps its default label): one word for one thing on the screen (Easy says sample)."""
+    from aurora.app.mode import is_advanced
+    return zone_name(z) if is_advanced() else sample_name(z)
+
+
+def new_who(zid: int) -> str:
+    """A zone a stroke starts: 'new zone 4' (Advanced), 'new sample 4' (Easy)."""
+    from aurora.app.mode import is_advanced
+    return f"new zone {zid}" if is_advanced() else f"new sample {zid}"
+
+
+def points_word(n: int) -> str:
+    """'12 points' (Advanced), '12 pixels' (Easy: a point of a map is a pixel, the word of the previews)."""
+    from aurora.app.mode import is_advanced
+    return plural(int(n), "point" if is_advanced() else "pixel")
+
+
+def shown_label(z) -> str:
+    """A zone's label as the tables and maps show it: the label; in Easy mode 'sample 3' for a zone that keeps its
+    default label 'zone 3' (the file keeps 'zone 3')."""
+    from aurora.app.mode import is_advanced
+    label = (getattr(z, "label", "") or "").strip()
+    if not is_advanced() and (not label or _DEFAULT_LABEL.match(label)):
+        return f"sample {getattr(z, 'id', '')}".strip()
+    return label
 
 
 def description(stroke: Stroke, zid: int | None) -> str:
@@ -132,6 +166,7 @@ class ZoneEditor(QObject):
         self.where = where
         self.new_each = lambda: False
         self.enabled = lambda: True
+        self.next_name = lambda: ""             # the name a new zone takes (the Survey's clicked sheet row), '' none
         self.throttle = None                    # the perspective's PreviewThrottle: its 'release' state shows in the hint
         self.feedback_ms = 0                    # > 0: stroke feedback coalesced (the Survey's survey points)
         self.last_committed = False             # the last stroke that ended was written
@@ -239,9 +274,11 @@ class ZoneEditor(QObject):
             self._before[z.id] = members(z, x, y, pitch)
         return self._before[z.id]
 
-    def _apart(self, z: Zone, covered: np.ndarray, pts) -> bool:
-        """Z13: True when the stroke's points neither overlap nor touch (within TOUCH_PITCH) the zone's points on this
-        map. A zone without a point on this map is never 'apart' (an empty zone from New sample, a zone drawn on
+    def _apart(self, z: Zone, covered: np.ndarray, pts, touch: bool = False) -> bool:
+        """Z13: True when the stroke holds none of the zone's points on this map: a rectangle or lasso drawn next to
+        the selected grain touches it and still starts a new sample (persona S-01). touch=True (a brush stroke,
+        which paints on where the last one stopped): a stroke within TOUCH_PITCH of the zone's points is not apart
+        either. A zone without a point on this map is never 'apart' (an empty zone from New sample, a zone drawn on
         another scan: the stroke goes to it)."""
         if pts is None or covered.size == 0:
             return False
@@ -250,6 +287,10 @@ class ZoneEditor(QObject):
             return False
         if np.intersect1d(covered, mem, assume_unique=False).size:
             return False
+        if np.intersect1d(covered, self._drawn_area(z, pts), assume_unique=False).size:
+            return False                        # over a part erased from the zone: drawing it back in
+        if not touch:
+            return True
         x, y, pitch = pts[:3]
         px, py = float(pitch[0]), float(pitch[1])
         reach = TOUCH_PITCH * TOUCH_TOL
@@ -265,6 +306,16 @@ class ZoneEditor(QObject):
             if (d <= reach).any():
                 return False
         return True
+
+    def _drawn_area(self, z: Zone, pts) -> np.ndarray:
+        """The map points inside the zone's drawn shapes, its erasures ignored (a hole erased in a sample is still
+        part of it for the target rule)."""
+        key = ("area", z.id)
+        if key not in self._near:
+            x, y, pitch = pts[:3]
+            self._near[key] = members(Zone(id=0, label="", rects=list(z.rects), paint=list(z.paint),
+                                           polys=list(z.polys)), x, y, pitch)
+        return self._near[key]
 
     def target_for(self, stroke: Stroke, covered: np.ndarray | None = None) -> tuple[Zone | None, bool, str]:
         """(zone, new, reason): the zone the stroke goes to (None with new=True: a new zone), or a reason why it goes
@@ -283,7 +334,8 @@ class ZoneEditor(QObject):
             return None, True, ""
         if stroke.force_add or covered is None:
             return sel, False, ""
-        if self._apart(sel, np.asarray(covered, int), self._points()):
+        touch = stroke.verb_shape == "brush" or stroke.shape == "pixel"      # painting on, a pixel touch-up
+        if self._apart(sel, np.asarray(covered, int), self._points(), touch=touch):
             return None, True, ""
         return sel, False, ""
 
@@ -334,20 +386,43 @@ class ZoneEditor(QObject):
             if stroke.erase:
                 n = int(before.size - after.size)
                 if n == 0:
-                    reason = f"nothing of {zone_name(target)} there to erase"
+                    reason = f"nothing of {who(target)} there to erase"
                 else:
-                    hint = f"erases {plural(n, 'point')} from {zone_name(target)}"
+                    hint = f"erases {points_word(n)} from {who(target)}" + self._erase_effect(target, stroke)
             elif covered.size == 0:
                 reason = self._empty_draw_reason(pts)
             elif new:
-                hint = f"new zone {self._next_id()}: {plural(int(covered.size), 'point')}"
+                hint = f"{new_who(self._next_id())}: {points_word(covered.size)}"
                 if sel is not None and not self.new_each():
-                    hint += f" (hold Ctrl to add it to {zone_name(sel)})"
+                    hint += f" (hold Ctrl to add it to {who(sel)})"
             else:
                 n = int(after.size - before.size)
-                hint = (f"adds {plural(n, 'point')} to {zone_name(target)}" if n else
-                        f"{zone_name(target)} already holds these {plural(int(covered.size), 'point')}")
+                hint = (f"adds {points_word(n)} to {who(target)}" if n else
+                        f"{who(target)} already holds these {points_word(covered.size)}")
         return ZoneDraft(stroke, target, new, before, after, covered, pts, reason=reason, hint=hint)
+
+    def _erase_effect(self, target: Zone | None, stroke: Stroke) -> str:
+        """On the Survey: what an erase does to the sample on the complete stacks it covers (a stack pixel counts as
+        erased once its square reaches the erase area, so 4 survey points can take 2 of 6 stack pixels): ' · on 09:27
+        the sample keeps 4 of 6 pixels' (persona S-20). '' elsewhere, or when the zone covers no loaded stack."""
+        ses = self.session
+        if self.where != "Survey" or target is None or not hasattr(ses, "stacks_of"):
+            return ""
+        parts = []
+        pts = self._points()
+        try:
+            after = stroke_zone(target, stroke, *(pts[:3] if pts is not None else ()))
+            for s in ses.stacks_of():
+                c = ses.coordinates(ses.stack_id(s))
+                if c is None:
+                    continue
+                n0 = members(target, c[0], c[1], c[2]).size
+                n1 = members(after, c[0], c[1], c[2]).size if n0 else 0
+                if n0 and n1 != n0:
+                    parts.append(f"on {s.time} the sample keeps {n1} of {plural(n0, 'pixel')}")
+        except Exception:                       # noqa: BLE001  (a stack being loaded or dropped)
+            return ""
+        return (" · " + "; ".join(parts[:2])) if parts else ""
 
     def _started(self, stroke: Stroke) -> None:
         if not self.enabled():
@@ -448,12 +523,24 @@ class ZoneEditor(QObject):
             if z is not None:
                 empty = new or not (z.rects or z.paint or getattr(z, "polys", None))
                 apply_stroke(z, stroke, x, y, pitch)
-                if empty and not stroke.erase and hasattr(ses, "name_from_sheet"):
+                name = (self.next_name() or "").strip() if new and not stroke.erase else ""
+                if name and _DEFAULT_LABEL.match(z.label or ""):
+                    z.label = name                  # a sheet row clicked on the Survey names the sample it starts
+                    row = sheet_row_named(ses, name) if hasattr(ses, "sheet_for") else None
+                    if row is not None and row.group and not z.group:
+                        z.group = row.group
+                elif empty and not stroke.erase and hasattr(ses, "name_from_sheet"):
                     ses.name_from_sheet(z)          # 'zone N' takes the sample-sheet name its stack holds
         if z is None:
             return None
         if not legacy:
             self.map.set_hint(self.idle_hint(), idle=True)
+            from aurora.app.mode import is_advanced
+            if not is_advanced() and not stroke.erase:
+                if not new:
+                    self.message.emit(GREW_TEXT.format(who=who(z)))     # S-01: how to start the next sample
+                elif stroke.shape == "pixel":
+                    self.message.emit(CLICK_NEW_TEXT.format(zid=z.id))  # S-08: a click made a one-pixel sample
         self.committed.emit(z.id)
         return z.id
 
@@ -508,6 +595,17 @@ class ZoneToolBar(QWidget):
         for b in (self.draw_btn, self.erase_btn):
             self.mode_group.addButton(b)
             lay.addWidget(b)
+
+        def separator() -> QWidget:
+            from PySide6.QtWidgets import QFrame
+            f = QFrame()
+            f.setObjectName("toolsep")
+            f.setFrameShape(QFrame.VLine)
+            f.setFrameShadow(QFrame.Plain)
+            f.setFixedWidth(3)
+            return f
+        self.separators = [separator()]
+        lay.addWidget(self.separators[0])       # Draw · Erase | Move · Rectangle · Brush · Lasso (M09)
         self.draw_btn.clicked.connect(lambda: self.set_erase(False))
         self.erase_btn.clicked.connect(lambda: self.set_erase(True))
         self.shape_group = QButtonGroup(self)
@@ -600,9 +698,14 @@ class ZoneToolBar(QWidget):
             self.tool_changed.emit(self.tool())
 
     def _show_state(self) -> None:
-        for b, on in ((self.draw_btn, not self._erase), (self.erase_btn, self._erase)):
+        # while Move is the shape a drag pans: neither Draw nor Erase is lit (M09: Draw and Move lit together read
+        # as 'a drag draws'); Draw or Erase lights again with the first drawing shape
+        moving = self._shape == "navigate"
+        self.mode_group.setExclusive(not moving)
+        for b, on in ((self.draw_btn, not self._erase and not moving), (self.erase_btn, self._erase and not moving)):
             if b.isChecked() != on:
                 b.setChecked(on)
+        self.mode_group.setExclusive(True)
         b = self.shape_buttons.get(self._shape)
         if b is not None and not b.isChecked():
             b.setChecked(True)
@@ -632,11 +735,14 @@ class ZoneToolBar(QWidget):
 def idle_hint(tool: str) -> str:
     """The map hint while no stroke is in progress: what a drag does with this tool ('' in Move)."""
     from aurora.app.shortcuts import native_text
+    from aurora.app.mode import is_advanced
     shape, erase = split_tool(tool)
     if shape == "navigate":
         return ""
     if shape == "polygon":
         return IDLE_POLYGON_ERASE if erase else IDLE_POLYGON
+    if not is_advanced():
+        return native_text(EASY_IDLE_ERASE if erase else EASY_IDLE_DRAW)
     return native_text(IDLE_ERASE if erase else IDLE_DRAW)
 
 
@@ -777,14 +883,62 @@ def zone_drawn(z: Zone | None) -> bool:
     return z is not None and bool(z.rects or z.erects or z.paint or z.erase or z.polys or z.epolys)
 
 
+def sheet_row_named(session, label: str):
+    """The sample-sheet row whose sample ID is `label` (case aside) on the current holder first, then anywhere."""
+    label = (label or "").strip().lower()
+    if not label:
+        return None
+    h = session.holder() if session.project is not None else None
+    rows = list(session.sheet_for(h.name) if h is not None else []) + list(getattr(session, "sheet_rows", []) or [])
+    return next((r for r in rows if r.sample_id and r.sample_id.strip().lower() == label), None)
+
+
+def unused_sheet_names(session, keep: str = "") -> list[str]:
+    """The sample IDs of the current holder's sheet rows that no zone of the holder is named yet (`keep` stays in the
+    list): the names a 'Name this sample' field offers first."""
+    h = session.holder() if session.project is not None else None
+    if h is None:
+        return []
+    hz = session.holder_zones(create=False)
+    used = {(z.label or "").strip().lower() for z in (hz.zones if hz else [])} - {(keep or "").strip().lower()}
+    out = []
+    for r in session.sheet_for(h.name):
+        sid = (r.sample_id or "").strip()
+        if sid and sid.lower() not in used and sid not in out:
+            out.append(sid)
+    return out
+
+
 def rename_zone(session, zid: int, label: str) -> bool:
+    """The zone takes the name (one undo step); a name of the sample sheet also gives an empty group the sheet's group
+    (as Reduce's name field does: persona S-14)."""
     z = session.zone(zid)
     label = (label or "").strip()
     if z is None or not label or label == z.label:
         return False
     with session.edit(f"rename zone {zid}"):
         z.label = label
+        row = sheet_row_named(session, label)
+        if row is not None and row.group and not z.group:
+            z.group = row.group
     return True
+
+
+def ask_sample_name(parent, session, zid: int) -> bool:
+    """'Name this sample': an editable list of the holder's sheet names not yet used (the current name first); the
+    zone takes the chosen or typed name. True when renamed."""
+    from PySide6.QtWidgets import QInputDialog
+    z = session.zone(zid)
+    if z is None:
+        return False
+    names = unused_sheet_names(session, keep=z.label)
+    current = shown_label(z)
+    items = [current] + [n for n in names if n != current]
+    label, ok = QInputDialog.getItem(parent, "Name this sample", "sample name (from the sample sheet, or type one)",
+                                     items, 0, True)
+    if ok and label.strip() and label.strip() != current:
+        return rename_zone(session, zid, label)
+    return False
 
 
 def duplicate_zone(session, zid: int) -> Zone | None:
@@ -816,18 +970,14 @@ def geometry_text(z: Zone) -> str:
 def zone_menu(parent, session, zid: int, map_view, extra=()):
     """The right-click menu of a zone on a map: Rename…, Duplicate, Delete, Copy geometry, Zoom to zone, then the
     `extra` (text, callable) entries (the Survey's 'Open <scan> in Reduce')."""
-    from PySide6.QtWidgets import QApplication, QInputDialog, QMenu
+    from PySide6.QtWidgets import QApplication, QMenu
     from aurora.core.zones import zone_bbox
     m = QMenu(parent)
     z = session.zone(zid)
     if z is None:
         return m
 
-    def rename():
-        label, ok = QInputDialog.getText(parent, "Rename the sample", "label", text=z.label)
-        if ok:
-            rename_zone(session, zid, label)
-    m.addAction("Rename…", rename)
+    m.addAction("Rename…", lambda: ask_sample_name(parent, session, zid))      # the sheet's names offered (S-14)
     m.addAction("Duplicate", lambda: duplicate_zone(session, zid))
     m.addAction("Delete", lambda: session.delete_zone(zid))
     m.addSeparator()

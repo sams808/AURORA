@@ -307,13 +307,19 @@ class EmissionPlot(QWidget):
         return False
 
 
-def window_text(channel: str, bounds: dict | None) -> str:
+def window_text(channel: str, bounds: dict | None, calibration=None) -> str:
     """'F Kα window 60–73 ch' (first and last channel, SDD1; 'on detector 1 (SDD1)' when the detectors'
-    windows differ)."""
+    windows differ); Easy mode in eV (the calibration, else 10 eV per channel): 'F Kα window 600–740 eV' (channels
+    and one detector named read as if only that one counted, M10)."""
+    from aurora.app.mode import is_advanced
     if not bounds:
         return ""
     lo, hi = bounds[DETS[0]]
     same = len({tuple(v) for v in bounds.values()}) == 1
+    if not is_advanced():
+        from aurora.core.xrf_windows import channel_ev
+        a, b = channel_ev(calibration, DETS[0], lo), channel_ev(calibration, DETS[0], hi)
+        return f"{channel} window {a:.0f}–{b:.0f} eV"
     return f"{channel} window {lo}–{hi - 1} ch" + ("" if same else " on detector 1 (SDD1)")
 
 
@@ -423,8 +429,8 @@ class ZonePreviewCard(Card):
         from aurora.app.zone_tools import zone_drawn
         from aurora.core.zones import members
         sv = self._sv
-        if sv is None:
-            self._say(self._sv_error or msg("NO_SURVEY"))
+        if sv is None:                          # no project: nothing to say about a survey (M13)
+            self._say("" if self.session.project is None else (self._sv_error or msg("NO_SURVEY")))
             return
         if z is None:
             self._say(msg("NO_ZONE"))
@@ -437,20 +443,25 @@ class ZonePreviewCard(Card):
             pix = members(z, sv.x, sv.y, sv.pitch)
         n = int(len(pix))
         bounds = self._bounds(self._channel)
-        parts = [f"{name}: {plural(n, 'survey point')}"]
+        from aurora.app.mode import is_advanced
+        parts = [f"{name}: {plural(n, 'survey point' if is_advanced() else 'pixel')}"]   # one word (M10)
+        cal = getattr(self.session.project, "calibration", None) if self.session.project is not None else None
         if bounds:
-            parts.append(window_text(self._channel, bounds))
+            parts.append(window_text(self._channel, bounds, cal))
         if n == 0:
             self.emission.show_message(msg("OFF_PLATE", zone=name))
         elif not (sv.has_spectra or sv.reload_spectra()):
             self.emission.show_message(MSG_NO_SPECTRA)
         else:
-            self.emission.set_spectrum(sv.zone_spectrum(pix) / n, n,
-                                       f"XRF at {sv.energy:.1f} eV · {plural(n, 'survey point')}")
+            word = "survey point" if is_advanced() else "pixel"
+            self.emission.set_spectrum(sv.zone_spectrum(pix) / n, n, f"XRF at {sv.energy:.1f} eV · {plural(n, word)}")
         self._covered = self._covering(z)
         if not self._covered:
             h = self.session.holder()
-            self._show_xas(False, msg("NO_STACK", zone=name, holder=h.name if h is not None else ""))
+            from aurora.core.zones import incomplete_text, incomplete_under
+            gone = incomplete_under(z, h)                 # over a stack that stopped early: say so (S-09)
+            self._show_xas(False, incomplete_text(name, gone) if gone is not None else
+                           msg("NO_STACK", zone=name, holder=h.name if h is not None else ""))
             if n:
                 self.emission.set_windows(bounds, self._other_ticks(), None, name=self._channel)
             self._summary(parts)

@@ -298,7 +298,7 @@ def test_import_sdd_calibration(qapp, tmp_path, monkeypatch):
         assert list((root / "config").glob("sdd_calibration.backup-*.json"))       # the previous file is kept
         pump(qapp)
         assert "config/sdd_calibration.json" in details(win)
-        ev = win.reduce.window_card.ev_label.text()  # Easy: '(channels 5 to 199, calibrated)'
+        ev = win.reduce.window_card.ev_label.text()  # Easy: '(channels 5–199, calibrated)'
         assert (", calibrated)" in ev and "not calibrated" not in ev) or win.reduce.window_card._sd is None, ev
     finally:
         close(win)

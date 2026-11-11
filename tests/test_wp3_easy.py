@@ -62,8 +62,8 @@ def test_easy_shows_four_numbered_steps_within_the_limit(qapp, demo):
     assert "averaged over the outlined pixels" in rd.step4_line.plain_text()
     assert not any(w in rd.step4_line.plain_text() for w in ("mcc", "Au mesh", "k =", "SDD1-4"))
     tip = rd.step4_line.toolTip()
-    assert tip.startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · zone mean (as the earlier SGM XAS GUI)")
-    assert "de-spike k = 6 (off by default in the earlier SGM XAS GUI)" in tip and tip.endswith("SDD1-4 · PFY F Kα")
+    assert tip.startswith("I0 mcc ch1 (Au mesh) · TEY mcc ch4 · mean of the outlined pixels")   # no earlier program
+    assert "de-spike k = 6 ·" in tip and tip.endswith("SDD1-4 · PFY F Kα") and "earlier" not in tip       # (S-27)
     assert rd.preview.all_scans.isVisible() and rd.preview.all_scans.text() == "all scans of the sample"
     assert not rd.preview.toggles.isVisible()
     # step 2: preset, spectrum, lo / hi
@@ -144,8 +144,9 @@ def test_nothing_selected_away_from_the_footprint(qapp, fake_project):
         x0, x1, y0, y1 = sd.bbox
         rd.map.rect_drawn.emit(x1 + 2.0, x1 + 3.0, y1 + 2.0, y1 + 3.0)
         pump(qapp)
-        assert ses.zone() is not None and "Nothing outlined yet" in rd.region_caption.text()
-        assert not rd.add_check_btn.isEnabled() and "drag over the map around your sample" in rd.add_check_btn.toolTip()
+        # drawn, but off this scan: the caption and the button say where it lies, one sentence (persona S-09)
+        assert ses.zone() is not None and "holds no pixel of 09:27: it lies outside this scan" in rd.region_caption.text()
+        assert not rd.add_check_btn.isEnabled() and "it lies outside this scan" in rd.add_check_btn.toolTip()
         assert rd.add_to_check() == 0 and not ses.check_queue
     finally:
         close(win)
@@ -273,18 +274,19 @@ def test_a_label_picked_from_the_list_renames_at_once(qapp, fake_project):
 
 def test_johns_step_3_conveniences_in_easy(qapp, fake_project):
     """John Bussey's step 3 had 'Load json...' (his _polygon_roi.json) and asked for a sample label before reducing:
-    Load polygon... is in Easy mode too, and a sample still called 'zone N' is named as such when it is sent to Check
-    and when Check saves it."""
+    Load polygon... is in Advanced mode only (persona M20, S-27: a newcomer never used that program), and a sample
+    still called 'zone N' is named as such when it is sent to Check and when Check saves it."""
     win, sid = open_window(qapp, Project.discover(fake_project))
     try:
         rd, ses, ck = win.reduce, win.session, win.check
-        assert not mode.is_advanced() and rd.load_poly_btn.isVisible() and not rd.save_poly_btn.isVisible()
-        assert "Clear (full map)" in rd.clear_btn.toolTip()
+        assert not mode.is_advanced() and not rd.load_poly_btn.isVisible() and not rd.save_poly_btn.isVisible()
+        assert "earlier" not in rd.clear_btn.toolTip()
         x0, x1, y0, y1 = ses.stack_loaded(sid).bbox
         rd.map.rect_drawn.emit(x0, x1, y0, y1)
         pump(qapp)
         assert ses.zone().label == "zone 1"
-        assert rd.add_to_check() == 1 and "name the sample in the field below" in rd.status_label.text()
+        assert rd.add_to_check() == 1 and rd.status_label.text().endswith("added to Check (1 waiting)")
+        assert "Esc keeps 'zone 1'" in rd.name_prompt.text()                 # the field says it (M24)
         assert not rd.name_row.isHidden()                       # 'Name this sample:' asks (plain PL-20)
         win.show_perspective("check")
         assert win.jobs.wait_idle(30000)
