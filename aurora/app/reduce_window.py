@@ -99,7 +99,7 @@ class XrfWindowCard(Card):
         self._label = ""                                   # the selected sample's name (the status line)
         # the spectrum
         self.plot = make_plot(x=axis_x(False), y="counts (log scale)")
-        min_height(self.plot, 120)
+        min_height(self.plot, 125)                         # 80 px of data under the axis (Easy's caption takes the rest)
         self.plot.getViewBox().disableAutoRange()
         self.plot.setLogMode(x=False, y=True)
         self.plot.setAccessibleName("emission spectrum with the four detector windows")
@@ -176,6 +176,8 @@ class XrfWindowCard(Card):
     # ------------------------------------------------------------------ the stack and its presets
     def set_stack(self, sd, scan, choice: dict | None = None) -> None:
         """Show a stack (None: nothing loaded) with a choice {'line', 'roi'} (None: the stack's main line)."""
+        if getattr(getattr(self, "_sd", None), "id", None) != getattr(sd, "id", None):
+            self._pix = None                # the region's pixels index the previous stack: Reduce sets this one's
         self._sd, self._scan = sd, scan
         self._labels = list(sd.labels) if sd is not None else []
         proj = self.session.project
