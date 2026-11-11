@@ -174,19 +174,19 @@ def test_the_shortcuts_dialog_lists_only_keys_that_work(qapp, two_holders):
     rows = shortcut_rows(win)
     assert [(s, t) for s, t, k, _a in rows if k == ctrl7] == [("Go to", "Maps (Advanced mode only)")]
     texts = {(s, t) for s, t, _k, _a in rows}
-    assert ("Reduce", "Brush tool (brush+) (Advanced mode)") in texts and ("Reduce", "Rectangle tool (rect+)") in texts
+    assert ("Reduce", "Polygon (Advanced mode)") in texts and ("Reduce", "Rectangle") in texts
     for s, t, _k, acts in rows:
         assert any(a.isVisible() for a in acts) or t.endswith(" (Advanced mode)"), (s, t)
     win.show_perspective("reduce")
     pump(qapp)
-    QTest.keyClick(win.reduce.map, Qt.Key_B)                  # the dialog's word: B does nothing in Easy mode
-    assert win.reduce.map.vb.tool != "brush+"
+    QTest.keyClick(win.reduce.map, Qt.Key_P)                  # the dialog's word: P does nothing in Easy mode
+    assert not win.reduce.map.vb.tool.startswith("polygon")
     mode.set_advanced(True)
     try:
         rows = shortcut_rows(win)
         assert [(s, t) for s, t, k, _a in rows if k == ctrl7] == [("Go to", "Maps")]
         assert not [t for _s, t, _k, _a in rows if "(Advanced mode)" in t]
-        assert ("Reduce", "Brush tool (brush+)") in {(s, t) for s, t, _k, _a in rows}
+        assert ("Reduce", "Polygon") in {(s, t) for s, t, _k, _a in rows}
     finally:
         mode.set_advanced(False)
 

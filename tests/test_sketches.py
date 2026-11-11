@@ -147,7 +147,10 @@ def test_load_and_remove_a_sketch(qapp, fake_project, tmp_path, monkeypatch):
         assert copy.is_file() and sv.sketch_path == copy and sv.sketch_card.isVisible()
         assert not sv.sketch.pixmap().isNull() and sv.remove_sketch_btn.isEnabled()
         assert ".aurora/sketches" in sv.sketch.toolTip() and "300 × 200" in sv.sketch.toolTip()
-        assert sv.zones_card.height() < zones_h                            # the card takes its share of the column
+        # the card takes its share of the column: the column scrolls (Survey's ColumnScroll) rather than squeeze the
+        # sketch, the zones table or the Zone preview below their minimum
+        assert sv.zones_card.height() <= zones_h and sv.sketch.height() >= sv.sketch.minimumHeight()
+        assert sv.zone_preview.height() >= sv.zone_preview.minimumSizeHint().height()
         QTest.mouseClick(sv.remove_sketch_btn, Qt.LeftButton)              # Remove the sketch
         pump(qapp, 10)
         assert not copy.exists() and photo.is_file() and not sv.sketch_card.isVisible()

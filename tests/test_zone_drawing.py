@@ -410,7 +410,8 @@ def test_trace_cache_shared(qapp, win, monkeypatch):
     n_calls = len(calls)
     win.show_perspective("check"); pump(qapp)
     assert sdd and len(calls) == n_calls                    # drawn from the cache, with the zone as it is now
-    assert ck.sdd_note.text().startswith(f"{z.label} · {testdata.STACK} · {len(z.members[win.sid])} px")
+    note = ck.sdd_note.text().replace("\u200b", "")       # the scan name may wrap at its underscores (breakable)
+    assert note.startswith(f"{z.label} · {testdata.STACK} · {len(z.members[win.sid])} px")
     win.show_perspective("survey"); pump(qapp)
     assert maps == [1] and sv.zone_table.rowCount() == 1
     # a reloaded stack is a new object: the cache misses
