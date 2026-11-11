@@ -467,6 +467,8 @@ MSG_TEY_NAN = "the electron yield (TEY) has no valid values"
 MSG_NO_BAD = "no bad energies"
 MSG_MANY_BAD = "{p:.0f} % of the energies are bad ({nb} of {nE}{low})"
 MSG_SOME_BAD = "{nb} of {nE} energies repaired (spikes replaced by the value of their neighbours)"
+MSG_END_SPIKE = ("{which} ({e:.0f} eV) was replaced by the value of its one neighbour: a spike there is judged on "
+                 "fewer energies, so look at the curve's {end} before trusting it")
 MSG_SOME_LOW = "{nb} of {nE} energies bad ({nlow} with the beam intensity below {frac:.0%} of its median, left out)"
 MSG_LOW_PART = "; {nlow} with the beam intensity below {frac:.0%} of its median"
 MSG_SAT_IN_SUM = "{det} saturated (too many X-rays) and still in the sum: {its} fluorescence is not usable"
@@ -484,12 +486,29 @@ MSG_IPFY_RESONANT = ("inverse yield (IPFY) on the edge element's own line ({line
                      "inverse yield; choose the line of another element in step 2 (O Kα across the F K-edge)")
 MSG_PRE_SHORT = ("the range before the edge used to scale the spectrum was fitted to this scan (it starts close to the "
                  "edge)")
-MSG_STEP_NEGATIVE = "the signal falls across the edge instead of rising: kept as measured, worth a look"
-NOTE_PREFIXES = ("inverse yield",)            # ok messages that head a row (Check's Messages column)
+MSG_STEP_NEGATIVE = ("the fluorescence signal falls across the edge instead of rising: kept as measured, worth a "
+                     "look")
+# the electron yield (TEY) of an insulating sample often shows no edge, or falls: a calm note, not a check (S-11, M18)
+MSG_TEY_NO_EDGE = ("the electron-yield (TEY) signal shows no clear edge on this sample (common on insulating samples "
+                   "such as glasses): the fluorescence spectrum is the one to use")
+NOTE_PREFIXES = ("inverse yield", "the electron-yield (TEY) signal")   # ok messages that head a row (Messages)
 TEMPLATES = (MSG_NO_PIXEL, MSG_FEW, MSG_PIXELS, MSG_NO_DET_DATA, MSG_DET_NAN, MSG_DET_ZERO, MSG_NO_DET, MSG_MISSING,
              MSG_I0_ZERO, MSG_I0_VARIES, MSG_TEY_NAN, MSG_NO_BAD, MSG_MANY_BAD, MSG_SOME_BAD, MSG_SOME_LOW,
              MSG_LOW_PART, MSG_SAT_IN_SUM, MSG_SAT_OUT, MSG_HIGH, MSG_I0_GOOD, MSG_I0_BAD, MSG_IPFY, MSG_IPFY_OTHER,
-             MSG_IPFY_LEFT, MSG_IPFY_RESONANT, MSG_PRE_SHORT, MSG_STEP_NEGATIVE)
+             MSG_IPFY_LEFT, MSG_IPFY_RESONANT, MSG_PRE_SHORT, MSG_STEP_NEGATIVE, MSG_TEY_NO_EDGE, MSG_END_SPIKE)
+
+
+def _indices(v) -> list[int]:
+    """Spike indices from what a trace keeps: a list of indices, a boolean mask, or nothing (None, a bool)."""
+    if v is None or isinstance(v, (bool, np.bool_)):
+        return []
+    a = np.atleast_1d(np.asarray(v))
+    if a.dtype == bool:
+        return [int(i) for i in np.where(a)[0]]
+    try:
+        return [int(i) for i in a.ravel()]
+    except (TypeError, ValueError):
+        return []
 
 
 def det_phrase(dets) -> str:
@@ -616,6 +635,14 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
         msgs.append(("ok", Msg(MSG_SOME_LOW.format(nb=nb, nE=nE, nlow=nlow, frac=I0_LOW_FRAC))))
     else:
         msgs.append(("ok", Msg(MSG_SOME_BAD.format(nb=nb, nE=nE))))
+    # a spike at the first or last energy: its window has one neighbour only, so say which energy it was (M26)
+    E = np.asarray(getattr(traces, "E", []), float)
+    ends = sorted({i for v in (getattr(traces, "spikes", {}) or {}).values() for i in _indices(v) if i in (0, nE - 1)})
+    for i in ends:
+        if 0 <= i < E.size:
+            first = i == 0
+            msgs.append(("ok", Msg(MSG_END_SPIKE.format(which="the first energy" if first else "the last energy",
+                                                        e=float(E[i]), end="start" if first else "end"))))
     for note in traces.notes:
         if "near the edge" in note:
             msgs.append(("warn", Msg(note)))
@@ -625,6 +652,8 @@ def check_zone(traces: ZoneTraces | None, stack=None, flags=(), n_total: int | N
             msgs.append(("ok", Msg(MSG_IPFY_LEFT.format(rest=note[len("IPFY:"):].strip()))))
         elif note.startswith("pre-edge window"):
             msgs.append(("ok", Msg(MSG_PRE_SHORT, note)))
+        elif ("step negative" in note or "area negative" in note) and note.startswith("TEY"):
+            msgs.append(("ok", Msg(MSG_TEY_NO_EDGE, note)))        # the TEY falls: named, the fluorescence is fine
         elif "step negative" in note or "area negative" in note:     # kept as measured: worth a look
             msgs.append(("warn", Msg(MSG_STEP_NEGATIVE, note)))
     return msgs

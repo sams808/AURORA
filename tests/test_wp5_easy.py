@@ -187,8 +187,9 @@ def test_easy_states_johns_defaults_and_says_why_a_row_failed(qapp, demo, tmp_pa
     # Easy draws the row 0 to 1 and says why in plain words (plain spec 5.6); Advanced names the windows below
     assert "1 spectrum plotted" in st and "S could not be scaled the standard way" in st and "680–692 eV" in st
     assert "In Advanced mode, Pre / Post set the ranges by hand" in st and "untick Show" in st
-    assert not cmp_.easy_note.isHidden() and "the earlier SGM XAS GUI used −10…−5 and +10…+34 eV" in cmp_.easy_note.text()
-    assert "the earlier SGM XAS GUI: sum free, negatives allowed, 685–705 eV" in win.fit.lcf_fixed.text()
+    assert not cmp_.easy_note.isHidden() and "earlier" not in cmp_.easy_note.text()         # plain words (M20)
+    assert "5–20 eV below and 15–35 eV above its edge position (E0)" in cmp_.easy_note.text()
+    assert "earlier" not in win.fit.lcf_fixed.text() and "sum" in win.fit.lcf_fixed.text()
     mode.set_advanced(True)
     pump(qapp)
     assert "set Pre / Post (eV from E0) on these rows" in cmp_.status.text() and cmp_.easy_note.isHidden()

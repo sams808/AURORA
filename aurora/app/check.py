@@ -15,6 +15,7 @@ the project opens, are re-checked when a scan changes, and reach new zones' defa
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import html
 import json
 import logging
@@ -61,11 +62,12 @@ Q_MSG = QCOLS.index("Messages")
 VIEWS = (("signals", "the four detectors (spikes repaired)"), ("sum", "sum of the detectors, bad energies marked"),
          ("i0tey", "beam intensity (I0) and electron yield (TEY)"),
          ("ratio", "fluorescence and TEY divided by the beam (I0)"), ("minmax", "the same, scaled 0 to 1"))
-GUIDE = ("AURORA ticked {{looks-ok|Looks OK}} where its own checks found no problem; untick any spectrum that looks "
-         "wrong to you.")
-LOOK_FOR = ("What to look for: one rise at the edge, then a roughly level curve · the four detectors with the same shape "
-            "(their heights may differ) · no single point far off the curve · a flat or very noisy curve means the "
-            "outline missed the sample.")
+GUIDE = ("AURORA ticked {{looks-ok|Looks OK}} where its own checks found no ✗ bad problem (a ! check row is worth a "
+         "look before you save); untick any spectrum that looks wrong to you.")
+LOOK_FOR = ("What to look for: one rise at the edge, then a roughly level curve (a peak right after the rise is normal) · "
+            "the four detectors with the same shape (their heights may differ) · no single point far off the curve · "
+            "a smooth beam intensity (I0), without steps · a flat or very noisy curve means the outline missed the "
+            "sample.")
 READ_ONLY_NOTE = ("Not saved: {why}. Choose a working folder (the note at the top of the window) to keep your "
                   "spectra, or press Show in Compare without saving.")
 def source_words(source: str) -> str:
@@ -200,6 +202,8 @@ class CheckPerspective(QWidget):
         self.queue_note.setOpenExternalLinks(False)
         self.queue_note.linkActivated.connect(self._note_link)
         qcard.body.addWidget(self.queue_note)
+        self._note_links: tuple[str, str] | None = None     # (message, folder URL) of the last save note
+        on_theme_changed(self.queue_note, lambda _s: self._paint_note())   # its links follow the scheme (M02)
         top.addWidget(qcard)
         self.preview_card = pcard = Card("Preview of the selected spectrum", help_anchor="51-spectra-to-check")
         vrow = QHBoxLayout()
@@ -929,9 +933,45 @@ class CheckPerspective(QWidget):
             self._probe([key], f"check:{key}", load=False)
 
     def _scan_text(self, sid: str) -> str:
+        """'09:27 alpha_beta'; in Easy mode the sample part of the scan name ('02:11 quartz_grains', without the
+        holder tag and the edge and lab suffix: the Messages column keeps its width, M01)."""
         scan = self.session.scan_of(sid)
         t = short_time(sid)
-        return f"{t} {scan.label}" if scan is not None else (t or split_stack_id(sid)[1])
+        if scan is None:
+            return t or split_stack_id(sid)[1]
+        if is_advanced():
+            return f"{t} {scan.label}"
+        from aurora.core.names import sample_part
+        return f"{t} {sample_part(scan.name, scan.holder or None)}"
+
+    def saved_file(self, item: CheckItem) -> Path | None:
+        """The _full_reduced.csv Save ticked wrote for this row (the name it gives: the sample's label, with the holder
+        and time when two rows share a label), when it exists: the row was saved, also in an earlier session (M05)."""
+        ses = self.session
+        if ses.project is None:
+            return None
+        z = ses.zone_of(item.holder, item.zone_id) if hasattr(ses, "zone_of") else None
+        if z is None:
+            hz = ses.zones.holders.get(item.holder)
+            z = next((zz for zz in (hz.zones if hz else []) if zz.id == item.zone_id), None)
+        if z is None:
+            return None
+        key = export.safe_label(z.label).casefold()
+        same = 0
+        for it in ses.check_queue:
+            hz = ses.zones.holders.get(it.holder)
+            other = next((zz for zz in (hz.zones if hz else []) if zz.id == it.zone_id), None)
+            same += other is not None and export.safe_label(other.label).casefold() == key
+        label = z.label if same <= 1 else f"{z.label}_{item.holder}_{(short_time(item.sid) or '').replace(':', '')}"
+        try:
+            p = export.default_folder(ses.project, label) / f"{export.safe_label(label)}_full_reduced.csv"
+            return p if p.is_file() else None
+        except (OSError, ValueError):
+            return None
+
+    def saved_count(self) -> int:
+        """Rows of the queue whose spectrum is saved (on disk, whichever session saved it)."""
+        return sum(1 for it in self.session.check_queue if self.saved_file(it) is not None)
 
     def _messages_widget(self, row: QueueRow) -> QWidget:
         w = QWidget()
@@ -994,17 +1034,43 @@ class CheckPerspective(QWidget):
                 if c == Q_OK:
                     cell.setFlags((cell.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
                     cell.setCheckState(Qt.Checked if st.include else Qt.Unchecked)
-                    cell.setText("looks OK" if st.include else "")
-                    cell.setToolTip("Ticked: saved by Save ticked → Compare and kept for the report.")
+                    saved = self.saved_file(it)
+                    when = (dt.datetime.fromtimestamp(saved.stat().st_mtime) if saved is not None else None)
+                    # short: the tick says Looks OK; once saved the cell says when (the Messages column keeps its room)
+                    cell.setText(f"saved {when:%H:%M}" if when else ("looks OK" if st.include else ""))
+                    cell.setToolTip("Ticked: saved by Save ticked → Compare and kept for the report."
+                                    + (f"\nSaved {when:%Y-%m-%d %H:%M} in {saved.parent}" if when else ""))
                 self.queue.setItem(r, c, cell)
             self.queue.setCellWidget(r, Q_MSG, self._messages_widget(row))
         self.queue.blockSignals(False)
         for c in (0, 1, 2, 3, Q_OK):
             self.queue.resizeColumnToContents(c)
+        # the Messages column keeps room for its verdict: long sample and scan names elide first (M01)
+        self._fit_messages_column()
         if self._rows:
             idx = next((i for i, row in enumerate(self._rows) if row.item == sel), 0)
             self.queue.selectRow(idx)
         self._draw_preview()
+
+    def _fit_messages_column(self) -> None:
+        """The Messages column keeps the width of its chip and verdict: the Scan, then the Sample column give way
+        (their full text is the tooltip), never below 80 px (M01: 'ssag', 'no' on a real beamtime)."""
+        t = self.queue
+        room = t.viewport().width()
+        if room <= 0 or not self._rows:
+            return
+        need = max((t.cellWidget(r, Q_MSG).sizeHint().width() for r in range(t.rowCount())
+                    if t.cellWidget(r, Q_MSG) is not None), default=0)
+        need = max(need, t.horizontalHeader().sectionSizeHint(Q_MSG))
+        others = sum(t.columnWidth(c) for c in range(t.columnCount()) if c != Q_MSG)
+        short = others + need - room
+        for c in (1, 0):
+            if short <= 0:
+                break
+            give = min(short, max(0, t.columnWidth(c) - 80))
+            if give:
+                t.setColumnWidth(c, t.columnWidth(c) - give)
+                short -= give
 
     @staticmethod
     def _bad_tip(fr: export.JohnFrame) -> str:
@@ -1127,11 +1193,11 @@ class CheckPerspective(QWidget):
             elif view == "ratio":
                 line(_by_max(fr.total / fr.i0), pc("sum"), f"{fluo} ÷ I0", width=2.0)
                 line(_by_max(fr.tey / fr.i0), pc("tey"), "TEY ÷ I0", Qt.DashLine)
-                ylab = "÷ I0, scaled to maximum 1"
+                ylab = "signal ÷ I0, scaled to maximum 1"
             else:
                 line(_minmax(fr.total / fr.i0), pc("sum"), f"{fluo} ÷ I0", width=2.0)
                 line(_minmax(fr.tey / fr.i0), pc("tey"), "TEY ÷ I0", Qt.DashLine)
-                ylab = "÷ I0, scaled 0 to 1"
+                ylab = "signal ÷ I0, scaled 0 to 1"
         p.plotItem.setLabel("left", ylab)
         vals = np.concatenate([y[np.isfinite(y)] for y in ys]) if ys else np.array([])
         if vals.size:
@@ -1159,15 +1225,25 @@ class CheckPerspective(QWidget):
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._fit_messages()
+        self._fit_messages_column()
 
     # ------------------------------------------------------------------ save ticked -> Compare
+    @staticmethod
+    def overwrite_text(paths: list[Path]) -> str:
+        """'1 alpha and 2 beta were saved before (8 files). Replace them?' (S-28: no 'file(s)', no file names that
+        start with the sample's '1 ' and read like counts)."""
+        samples = list(dict.fromkeys(p.parent.name for p in paths))
+        who = (", ".join(samples[:-1]) + f" and {samples[-1]}" if len(samples) > 1 else samples[0]) if samples else ""
+        if len(samples) > 6:
+            who = ", ".join(samples[:5]) + f" and {len(samples) - 5} more"
+        verb = "were" if len(samples) > 1 else "was"
+        return (f"{who} {verb} saved before ({plural(len(paths), 'file')}). Replace them?\n"
+                "Yes replaces them; No keeps them and skips those spectra.")
+
     def ask_overwrite(self, paths: list[Path]) -> str:
         """'yes' (overwrite), 'no' (skip those spectra) or 'cancel'. Tests replace this method."""
-        names = ", ".join(p.name for p in paths[:4]) + (f" and {len(paths) - 4} more" if len(paths) > 4 else "")
-        b = QMessageBox.question(self, "Files already exist",
-                                 f"{len(paths)} file(s) already exist ({names}). Overwrite them?\n"
-                                 "No skips those spectra.", QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                                 QMessageBox.No)
+        b = QMessageBox.question(self, "Saved before", self.overwrite_text(paths),
+                                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.No)
         return {QMessageBox.Yes: "yes", QMessageBox.No: "no"}.get(b, "cancel")
 
     @staticmethod
@@ -1231,6 +1307,18 @@ class CheckPerspective(QWidget):
         self.queue_note.setText(f"{plural(n, 'spectrum')} shown in Compare, not saved (they are lost when AURORA "
                                 "closes).")
         return n
+
+    def _paint_note(self) -> None:
+        """The save note with its links (Open folder · Go to Compare) in the current scheme's link colour; again on
+        every theme change, so a switch to dark never leaves the light link colour on a dark card."""
+        if self._note_links is None or (self.queue_note.text() and "aurora:goto:compare" not in self.queue_note.text()):
+            return                                      # another note replaced it since
+        from aurora.app.theme import TOKENS
+        msg, url = self._note_links
+        a = f"style='color:{TOKENS['link']}'"
+        self.queue_note.setTextFormat(Qt.RichText)
+        self.queue_note.setText(f"{html.escape(msg)} · <a href='{url}' {a}>Open folder</a> · "
+                                f"<a href='aurora:goto:compare' {a}>Go to Compare</a>")
 
     def save_ticked(self) -> None:
         """John's 'Save ticked scans' then 'Add saved scans to the Compare tab': every ticked row without a problem is
@@ -1328,19 +1416,18 @@ class CheckPerspective(QWidget):
                 for f in folders:
                     n_added += len(self.library.add_folder(f))
             flat = [p for paths in written for p in paths]
-            parts = [f"{plural(len(written), 'spectrum')} saved in processed/reduced/ and added to Compare "
-                     f"({plural(n_added, 'row')})"] if written else []
+            work = getattr(ses.project, "work", None) if ses.project is not None else None
+            where = "the working folder (processed/reduced/)" if work else "processed/reduced/"
+            parts = [f"{plural(len(written), 'spectrum')} saved in {where} and added to Compare"
+                     + (f" (each with its electron-yield version: {plural(n_added, 'row')})" if n_added else "")
+                     ] if written else []
             if failed:
                 parts.append("not saved: " + ", ".join(f"'{lab}'" for lab, _err in failed))
             msg = "; ".join(parts + notes)
             if flat:
-                from aurora.app.theme import TOKENS
                 folder = flat[0].parent.parent if len(folders) > 1 else flat[0].parent
-                a = f"style='color:{TOKENS['link']}'"
-                url = QUrl.fromLocalFile(str(folder)).toString()
-                self.queue_note.setTextFormat(Qt.RichText)
-                self.queue_note.setText(f"{html.escape(msg)} · <a href='{url}' {a}>Open folder</a> · "
-                                        f"<a href='aurora:goto:compare' {a}>Go to Compare</a>")
+                self._note_links = (msg, QUrl.fromLocalFile(str(folder)).toString())
+                self._paint_note()
                 self.queue_note.setToolTip("\n".join(str(p) for p in flat))
                 win = self.window()
                 if hasattr(win, "statusBar"):

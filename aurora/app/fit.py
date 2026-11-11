@@ -171,9 +171,11 @@ class FitPerspective(QWidget):
                  f"± from {n} bootstrap draws" if n else "± from the covariance (no bootstrap)",
                  "fit range: the Compare x range when the boxes are blank"]
         j = JOHN_DEFAULTS["lcf"]
-        parts.append(f"the earlier SGM XAS GUI: {'sum to 1' if j['sum_to_one'] else 'sum free'}, "
-                     f"{'negatives allowed' if j['allow_negative'] else 'no negatives'}, "
-                     f"{j['fit_range'][0]:g}–{j['fit_range'][1]:g} eV")
+        from aurora.app.mode import is_advanced
+        if is_advanced():                       # Easy names no program a newcomer never used (M20)
+            parts.append(f"the earlier SGM XAS GUI: {'sum to 1' if j['sum_to_one'] else 'sum free'}, "
+                         f"{'negatives allowed' if j['allow_negative'] else 'no negatives'}, "
+                         f"{j['fit_range'][0]:g}–{j['fit_range'][1]:g} eV")
         self.lcf_fixed.setText(" · ".join(parts))
 
     def update_actions(self) -> None:

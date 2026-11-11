@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
                                QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
@@ -76,15 +76,14 @@ def colour_name(c: str) -> str:
 
 
 def easy_norm_text() -> str:
-    """Easy mode's read-only line under the table: the fixed normalisation, and where John Bussey's GUI differed."""
-    from aurora.app.mode import EASY_DEFAULTS, JOHN_DEFAULTS
-    d, j = EASY_DEFAULTS["compare"], JOHN_DEFAULTS["compare"]
-    w = lambda p: f"{p[0]:+g}…{p[1]:+g}".replace("-", "−")                # noqa: E731
-    # Easy-visible: plain words with the expert term in parentheses, no person name (plain spec R2, R5)
-    return (f"Each spectrum is scaled the standard way (normalisation, larch): its levels {w(d['pre'])} eV before and "
-            f"{w(d['post'])} eV after the edge position (E0)" + (", flattened" if d["flatten"] else "")
-            + f" (AURORA's defaults; the earlier SGM XAS GUI used {w(j['pre'])} and {w(j['post'])} eV) · a file's "
-            "electron-yield (TEY) row starts hidden, as in the earlier GUI")
+    """Easy mode's read-only line under the table: how every spectrum is scaled, in plain words (no library or
+    earlier-program names: M20, S-18; the manual compares with John Bussey's GUI)."""
+    from aurora.app.mode import EASY_DEFAULTS
+    d = EASY_DEFAULTS["compare"]
+    below = f"{abs(d['pre'][1]):g}–{abs(d['pre'][0]):g} eV below"
+    above = f"{d['post'][0]:g}–{d['post'][1]:g} eV above"
+    return (f"Each spectrum is scaled so that the part before the edge is 0 and the rise at the edge is 1, using the "
+            f"ranges {below} and {above} its edge position (E0). Electron-yield (TEY) rows start hidden.")
 
 
 def failed_text(failed) -> str:
@@ -326,6 +325,8 @@ class ComparePerspective(QWidget):
         right.addWidget(pc)
         self.diag_card = dc = Card(say("compare.diag_title"), help_anchor="64-diagnostics-and-export")
         self.diag = make_plot(x="incident energy (eV)", y="raw signal", legend="inside")
+        if self.diag.plotItem.legend is not None:      # top right: the pre-edge part of the signal stays in view
+            self.diag.plotItem.legend.anchor(itemPos=(1, 0), parentPos=(1, 0), offset=(-10, 10))
         self.diag.getViewBox().disableAutoRange()
         dc.body.addWidget(self.diag, 1)
         min_height(self.diag, 175)                      # a title, a legend and the axes over a readable data area
@@ -555,8 +556,8 @@ class ComparePerspective(QWidget):
                 it.setText(signal_label(str(v), mode.is_advanced()) if key == "signal" else str(v))
                 if key == "signal":
                     it.setData(Qt.UserRole, str(v))
-            if c == COL["label"]:                      # ink text plus the series swatch (never coloured text)
-                it.setIcon(swatch_icon(r.colour or curve(i), dash(i)))
+            if c == COL["label"]:                      # ink text; the series swatch is the Colour column's (M27)
+                it.setIcon(QIcon())
             if c == COL["e0"]:
                 how = E0_MODE_TEXT.get(r.e0_mode, f"same as row {r.e0_mode[4:]}" if r.e0_mode.startswith("row:") else r.e0_mode)
                 tip = (f"E0 found: {how}." + (f"\n{nr.e0_note}" if nr is not None and nr.e0_note else "")
@@ -913,6 +914,26 @@ class ComparePerspective(QWidget):
         if g.ok:
             self.notify(out)
 
+    def report_snapshot(self) -> dict | None:
+        """The plot as shown, for the report's Compare page (aurora.core.report: traces, x range, y label, caption);
+        None when no spectrum is drawn."""
+        from aurora.app.figure_export import export_colour
+        from aurora.core.figures import FigureTrace
+        traces = [t for t in self.plot_traces() if np.isfinite(np.asarray(t.y, float)).any()]
+        if not traces:
+            return None
+        fts = []
+        for t in traces:
+            c, lab, dname = export_colour(t.i, t.colour)
+            fts.append(FigureTrace(t.text, np.asarray(t.E, float), np.asarray(t.y, float), c, lab, dname))
+        offset = self.offset_text(traces)
+        caption = (("The spectra shown in Compare when the report was built. " if not self.deriv.isChecked() else
+                    "The slopes shown in Compare when the report was built. ") + easy_norm_text()
+                   + (f" {offset}" if offset else ""))
+        xr = self._xrange()
+        return {"traces": fts, "x_range": tuple(xr) if xr else None, "ylabel": self._ylabel(units=True),
+                "caption": caption}
+
     def export(self, path: Path, opts=None) -> list[Path]:
         """The wide CSV of the shown traces as processed (the quantity the figure shows: the first derivative when it
         is ticked, '<label>-d/dE <signal>' columns; without the offsets and without Scale, which is plot only as in
@@ -960,8 +981,8 @@ class ComparePerspective(QWidget):
         is in sight, and the subtitle says how they are scaled), complete in the exported figures (units=True)."""
         if not mode.is_advanced() and not units:
             if self.deriv.isChecked():
-                return "slope of the absorption (per eV)"
-            return "absorption (edge step = 1)"
+                return "slope (per eV)"
+            return "absorption (step = 1)"           # short: 'absorption (edge step' was cut at 760 px (M12)
         if self.deriv.isChecked():
             return "d/dE of the normalised signal (1/eV), offset" if units else "d/dE of the normalised signal"
         return "normalised signal (edge step = 1), offset" if units else "normalised signal (step = 1)"
@@ -1056,7 +1077,7 @@ class ComparePerspective(QWidget):
                 f"{plural(n_ok, 'spectrum')} plotted.", self.unscaled_text(unscaled, traces),
                 (f"{', '.join(t.r.label for t in failed)}: no values to draw." if failed else ""),
                 (f"The signal falls across the edge on {', '.join(falling)} instead of rising: kept as measured."
-                 if falling else "")) if x))
+                 if falling else ""), self.offset_text(drawn)) if x))
         else:
             self.status.setText(f"{plural(n_ok, 'trace')} plotted"
                                 + (f"; {failed_text(failed)}" if failed else "")
@@ -1104,10 +1125,22 @@ class ComparePerspective(QWidget):
                 f"{'They are' if many else 'It is'} drawn scaled 0 to 1 instead (dashed). In Advanced mode, Pre / Post "
                 "set the ranges by hand; untick Show to leave a row out.")
 
+    @staticmethod
+    def offset_text(drawn) -> str:
+        """Easy: 'Curves offset by 0.6 for clarity (each one above the one before).' when the drawn curves are moved
+        up (S-21, M12); '' for one curve or none moved."""
+        offs = sorted({round(float(t.off), 6) for t in drawn})
+        if len(drawn) < 2 or len(offs) < 2:
+            return ""
+        steps = sorted({round(b - a, 6) for a, b in zip(offs, offs[1:])})
+        by = f"by {steps[0]:g}" if len(steps) == 1 else "one above the other"
+        return f"Curves offset {by} for clarity (each one above the one before)."
+
     def _spread_labels(self, *_a) -> None:
         """Trace labels never print over each other: a label that would cover the one below (two traces close
-        together at the right edge, a short plot) moves up by at most one line; when that is not enough it is left
-        out until the plot is taller or zoomed in. Each label starts again from its trace's value on every zoom or
+        together at the right edge, a short plot) moves up by at most one line, else goes below its trace (two
+        samples at 1200 x 760 both keep their names: S-06); when neither has room it is left out until the plot is
+        taller or zoomed in. Each label starts again from its trace's value on every zoom or
         resize."""
         vb = self.plot.getViewBox()
         items = [(ti, x, y) for ti, x, y in self._trace_labels if ti.scene() is not None]
@@ -1129,6 +1162,14 @@ class ComparePerspective(QWidget):
                     if q.left() < p.x() and p.x() - w < q.right() and q.top() < bottom and bottom - h < q.bottom():
                         bottom, moved = q.top(), True
             fits = p.y() - bottom <= h and bottom - h >= top - 1
+            if not fits:                                # below the trace instead (S-06, M12: '2 beta' had no name
+                bottom = p.y() + h                      # at 1200 x 760); left out only when that has no room either
+                for q in sorted(placed, key=lambda r: r.top()):     # one pass downwards: always ends
+                    if q.left() < p.x() and p.x() - w < q.right() and q.top() < bottom and bottom - h < q.bottom():
+                        bottom = q.bottom() + max(h, 1.0)
+                fits = bottom <= vb.sceneBoundingRect().bottom() + 1 and not any(
+                    q.left() < p.x() and p.x() - w < q.right() and q.top() < bottom and bottom - h < q.bottom()
+                    for q in placed)
             ti.setVisible(fits)
             if fits:
                 placed.append(QRectF(p.x() - w, bottom - h, w, h))
@@ -1229,10 +1270,10 @@ class ComparePerspective(QWidget):
                          "below and 15 to 35 eV above the edge position)." if side else
                          "Edge step: not measured on these energies.")
         elif r.norm in ("larch", "tey_line"):
-            parts.append("Scaled so that the part before the edge is 0 and the step at the edge is 1 (grey lines: the "
-                         "levels fitted before and after the edge).")
+            parts.append("Scaled so that the part before the edge is 0 and the step at the edge is 1 (dashed lines: "
+                         "the levels fitted before and after the edge).")
         elif r.norm == "legacy":
-            parts.append("Scaled with constant levels before and after the edge (grey lines), set in Advanced mode.")
+            parts.append("Scaled with constant levels before and after the edge (dashed lines), set in Advanced mode.")
         else:
             parts.append("Shown as it was saved, without further scaling.")
         return " ".join(parts)
