@@ -52,7 +52,21 @@ terminal (cmd or PowerShell), which prints its output and returns an exit code.
 
 ## 3. macOS
 
-Download the disk image for your Mac: `AURORA-<version>-macos-arm64.dmg` for Apple silicon (M1 and later),
+**The one-line install** (recommended): open *Terminal* (Applications > Utilities, or Spotlight: *Terminal*), paste
+this line and press Return:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sams808/AURORA/main/packaging/install_mac.sh | bash
+```
+
+It checks the macOS version and the processor, downloads the matching disk image of the latest release, compares it
+with the release's `SHA256SUMS.txt`, verifies the app's signature, installs AURORA in `/Applications` (in
+`~/Applications` for an account that cannot write there) and opens it. A file that `curl` downloads carries no
+quarantine flag, so macOS does not stop AURORA at its first launch, and the steps below are not needed. Running the
+same line again updates AURORA (quit it first). The script is `packaging/install_mac.sh`; CI runs it on Apple silicon
+and Intel runners after every release.
+
+**From the disk image.** Download the disk image for your Mac: `AURORA-<version>-macos-arm64.dmg` for Apple silicon (M1 and later),
 `AURORA-<version>-macos-x86_64.dmg` for an Intel Mac (Apple menu > *About This Mac* names the chip). AURORA needs macOS
 15 Sequoia or later.
 

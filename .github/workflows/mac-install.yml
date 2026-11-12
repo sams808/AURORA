@@ -1,0 +1,86 @@
+# The one-line macOS install (packaging/install_mac.sh), run the way a user runs it (curl ... | bash, here pinned to
+# this commit) on fresh GitHub macOS runners: Apple silicon (macOS 15 and 26) and Intel (macOS 15). It installs the
+# latest published release, then checks the installed app: signature, no quarantine flag, the version, a launch the
+# Finder way (open, LaunchServices) with the native self-test, an update over the installed copy, and the per-user
+# folder. Runs when the script or this workflow changes, after every published release, and by hand.
+name: mac-install
+
+on:
+  push:
+    branches: [main]
+    paths: [packaging/install_mac.sh, .github/workflows/mac-install.yml]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-26, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      LINE_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/packaging/install_mac.sh
+    steps:
+      - name: The one line, as typed in Terminal (no AURORA on this Mac yet)
+        timeout-minutes: 10
+        run: |
+          sw_vers; uname -m
+          test ! -e /Applications/AURORA.app
+          curl -fsSL "$LINE_URL" | AURORA_NO_OPEN=1 AURORA_SELFTEST=1 bash
+      - name: Installed, signed, not quarantined, the latest release, on this architecture
+        run: |
+          APP=/Applications/AURORA.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          if xattr -p com.apple.quarantine "$APP" 2>/dev/null; then echo "the installed app is quarantined"; exit 1; fi
+          LATEST="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/${{ github.repository }}/releases/latest)"
+          LATEST="${LATEST##*/tag/v}"
+          GOT="$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString)"
+          echo "latest release $LATEST, installed $GOT"
+          test "$GOT" = "$LATEST"
+          "$APP/Contents/MacOS/AURORA" --version
+          lipo -archs "$APP/Contents/MacOS/AURORA" | grep -qw ${{ matrix.arch }}
+      - name: Opens the Finder way (LaunchServices), native self-test
+        timeout-minutes: 5
+        run: |
+          open -W -n /Applications/AURORA.app --args --selftest --platform native --out "$PWD/selftest-open.json"
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); n=sum(c['ok'] for c in d['checks']); print(d['platform'], d['machine'], d['qt_platform'], n, '/', len(d['checks'])); sys.exit(0 if d['ok'] and d['machine'] == sys.argv[2] else 1)" selftest-open.json ${{ matrix.arch }}
+      - name: The same line again updates the installed copy
+        timeout-minutes: 10
+        run: |
+          BEFORE="$(stat -f %m /Applications/AURORA.app)"
+          sleep 2
+          curl -fsSL "$LINE_URL" | AURORA_NO_OPEN=1 bash
+          AFTER="$(stat -f %m /Applications/AURORA.app)"
+          test "$AFTER" != "$BEFORE"
+          ls -la /Applications | grep -v -- '-installing.app'
+          test -z "$(ls -d /Applications/.AURORA-*-installing.app 2>/dev/null)"
+          codesign --verify --deep --strict /Applications/AURORA.app
+      - name: A folder of one's own (an account that cannot write /Applications)
+        timeout-minutes: 10
+        run: |
+          curl -fsSL "$LINE_URL" | AURORA_NO_OPEN=1 AURORA_INSTALL_DIR="$HOME/Applications" bash
+          codesign --verify --deep --strict "$HOME/Applications/AURORA.app"
+          "$HOME/Applications/AURORA.app/Contents/MacOS/AURORA" --version
+      - name: A running AURORA is never closed by force
+        timeout-minutes: 5
+        run: |
+          open -n /Applications/AURORA.app
+          for i in $(seq 1 30); do pgrep -x AURORA >/dev/null && break; sleep 1; done
+          pgrep -x AURORA
+          if curl -fsSL "$LINE_URL" | AURORA_NO_OPEN=1 bash; then echo "installed over a running AURORA"; exit 1; fi
+          pkill -x AURORA || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mac-install-${{ matrix.runner }}
+          path: selftest-*.json
+          if-no-files-found: ignore

@@ -424,7 +424,7 @@ class ComparePerspective(QWidget):
             set_enabled(self.op_buttons[text], bool(sel), "select a row first" if has else "the library is empty")
         for text in ("Show all", "Hide all"):
             set_enabled(self.op_buttons[text], has, "the library is empty")
-        set_enabled(self.diff_btn, len(sel) == 2, "select exactly two rows (Ctrl-click)")
+        set_enabled(self.diff_btn, len(sel) == 2, native_text("select exactly two rows (Ctrl-click)"))
         set_enabled(self.apply_btn, has, "the library is empty")
         self.empty_state.set_shown(not has)
 
@@ -1178,7 +1178,7 @@ class ComparePerspective(QWidget):
     def _difference(self) -> None:
         rows = self.selected_rows()
         if len(rows) != 2:
-            self.status.setText("select exactly two rows (Ctrl-click) for a difference"); return
+            self.status.setText(native_text("select exactly two rows (Ctrl-click) for a difference")); return
         ra, rb = self.lib.requests[rows[0]], self.lib.requests[rows[1]]
         sa, sb = self.lib.spectrum_of(ra), self.lib.spectrum_of(rb)
         if sa is None or sb is None:

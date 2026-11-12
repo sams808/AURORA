@@ -101,7 +101,8 @@ def test_a_grain_beside_the_selected_one_starts_a_new_sample(qapp, demo):
     assert [z.id for z in _zones(ses)] == [1] and ses.current_zone == 1
     qdrag(qapp, sv.map, right, release=False); _feedback(qapp)
     assert sv.map.hint_text().startswith("new sample 2: ") and "pixel" in sv.map.hint_text()      # S-13: Easy words
-    assert "(hold Ctrl to add it to sample 1)" in sv.map.hint_text()
+    from aurora.app.shortcuts import native_text
+    assert native_text("(hold Ctrl to add it to sample 1)") in sv.map.hint_text()
     qrelease(qapp, sv.map, right[-1]); pump(qapp)
     assert [z.id for z in _zones(ses)] == [1, 2] and ses.current_zone == 2                     # not added to 1
     assert [sv.zone_table.item(r, 1).text() for r in range(2)] == ["sample 1", "sample 2"]      # M10

@@ -31,13 +31,23 @@ _CHORD = re.compile(r"\b((?:(?:Ctrl|Shift|Alt|Meta)\+)+(?:F\d{1,2}\b|PgUp\b|PgDo
                     r"Right\b|Del\b|Delete\b|Esc\b|Tab\b|Space\b|[A-Z0-9](?![A-Za-z])|[/\[\]+\-](?!\w)))")
 
 
+# Ctrl written as a word, not in a chord: 'hold Ctrl', 'Ctrl-click', 'Ctrl+click' (a click, not a key)
+_CTRL_CLICK = re.compile(r"\bCtrl\+(?=(?:click|drag)\b)")
+_CTRL_WORD = re.compile(r"\bCtrl\b(?!\+)")
+
+
 def native_text(text: str) -> str:
     """The shortcuts named in a user-visible text, written the way this platform writes them. Unchanged on Windows and
     Linux; on macOS, where Qt maps Ctrl to Command, 'Ctrl+Shift+A' reads '⇧⌘A' and 'Alt+Up' reads '⌥↑', as in the
-    menus. Texts and manuals are written with the Windows names; every place that shows one passes it through here."""
-    if sys.platform != "darwin" or not text or "+" not in text:
+    menus, and Ctrl written as a word reads ⌘ ('hold ⌘', '⌘-click': a Control-click is a right-click on a Mac, which
+    erases on the maps). Texts and manuals are written with the Windows names; every place that shows one passes it
+    through here."""
+    if sys.platform != "darwin" or not text or "Ctrl" not in text and "+" not in text:
         return text
-    return _CHORD.sub(lambda m: _native_chord(m.group(1)) or m.group(1), text)
+    if "+" in text:
+        text = _CTRL_CLICK.sub("⌘-", text)
+        text = _CHORD.sub(lambda m: _native_chord(m.group(1)) or m.group(1), text)
+    return _CTRL_WORD.sub("⌘", text)
 
 
 def _native_chord(chord: str) -> str:

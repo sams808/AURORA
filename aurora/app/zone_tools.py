@@ -394,7 +394,8 @@ class ZoneEditor(QObject):
             elif new:
                 hint = f"{new_who(self._next_id())}: {points_word(covered.size)}"
                 if sel is not None and not self.new_each():
-                    hint += f" (hold Ctrl to add it to {who(sel)})"
+                    from aurora.app.shortcuts import native_text
+                    hint += native_text(f" (hold Ctrl to add it to {who(sel)})")     # ⌘ on a Mac
             else:
                 n = int(after.size - before.size)
                 hint = (f"adds {points_word(n)} to {who(target)}" if n else

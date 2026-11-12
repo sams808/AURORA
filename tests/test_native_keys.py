@@ -43,10 +43,27 @@ def test_the_chords_found_in_a_text(monkeypatch, text, expected):
     assert native_text(text) == expected
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("a stroke beside it starts a new sample (hold Ctrl to add it anyway)",
+     "a stroke beside it starts a new sample (hold ⌘ to add it anyway)"),
+    ("select exactly two rows (Ctrl-click)", "select exactly two rows (⌘-click)"),
+    ("Ctrl+click a row", "⌘-click a row"),
+    ("Ctrl+drag", "⌘-drag"),
+    ("Ctrl+Zoom", "Ctrl+Zoom"),                                          # neither a key nor a click
+    ("hold Ctrl, then Ctrl+Z", "hold ⌘, then <Ctrl+Z>"),
+])
+def test_ctrl_as_a_word_reads_command_on_a_mac(monkeypatch, text, expected):
+    """A Control-click is a right-click on a Mac (it erases on the maps): 'hold Ctrl' must read 'hold ⌘' there."""
+    monkeypatch.setattr(shortcuts.sys, "platform", "darwin")
+    monkeypatch.setattr(shortcuts, "_native_chord", _marked)
+    assert native_text(text) == expected
+
+
 def test_windows_and_linux_keep_the_text(monkeypatch):
     for plat in ("win32", "linux"):
         monkeypatch.setattr(shortcuts.sys, "platform", plat)
         assert native_text("Undo (Ctrl+Z), Ctrl+Shift+A, Alt+Up") == "Undo (Ctrl+Z), Ctrl+Shift+A, Alt+Up"
+        assert native_text("hold Ctrl to add it, Ctrl-click") == "hold Ctrl to add it, Ctrl-click"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Qt writes ⌘ only on macOS")

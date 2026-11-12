@@ -314,7 +314,8 @@ def test_target_zone_rules(qapp, wide):
     # a rectangle beside zone 1 (touching, not over it) starts a new sample: neighbouring grains always touch
     # (persona S-01); Easy names samples and pixels
     qdrag(qapp, rd.map, _around(sd, col(3, 4)), release=False)
-    assert rd.map.hint_text() == "new sample 2: 8 pixels (hold Ctrl to add it to sample 1)"
+    from aurora.app.shortcuts import native_text
+    assert rd.map.hint_text() == native_text("new sample 2: 8 pixels (hold Ctrl to add it to sample 1)")
     qrelease(qapp, rd.map, _around(sd, col(3, 4))[-1])
     pump(qapp)
     assert [z.id for z in _zones(ses)] == [1, 2] and ses.current_zone == 2
@@ -331,7 +332,7 @@ def test_target_zone_rules(qapp, wide):
     # a stroke apart starts zone 2 ...
     apart = _around(sd, col(8, 10))
     qdrag(qapp, rd.map, apart, release=False)
-    assert rd.map.hint_text() == "new sample 2: 12 pixels (hold Ctrl to add it to sample 1)"
+    assert rd.map.hint_text() == native_text("new sample 2: 12 pixels (hold Ctrl to add it to sample 1)")
     qrelease(qapp, rd.map, apart[-1])
     pump(qapp)
     assert [z.id for z in _zones(ses)] == [1, 2] and ses.current_zone == 2
