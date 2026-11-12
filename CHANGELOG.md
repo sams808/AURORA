@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 (2026-11-12)
+- The copyright of AURORA is John Bussey's and Sami Soudani's, under the MIT licence: LICENSE, About, the version
+  information of the Windows programs and of the macOS application, and the package metadata name both.
+- Otherwise the same application as 0.4.0: its notes below list everything that version brought.
+
 ## 0.4.0 (2026-11-11)
 Easy mode follows John Bussey's GUI step by step and speaks plain words, Advanced mode keeps every option, zones are
 drawn and erased on the Survey and in Reduce with a live preview, a beamtime of any lab opens with only its scan
