@@ -95,6 +95,6 @@ class AboutDialog(QDialog):
         """Texts whose colours come from the theme: the muted version line and the link in the palette Link colour."""
         self.title.setText(f"<b style='font-size:22px;letter-spacing:3px'>{APP_NAME}</b><br>"
                            "Soft X-ray XAS and XRF stacks from the SGM beamline, Canadian Light Source<br>"
-                           f"<span style='color:{TOKENS['muted']}'>version {__version__} · Sami Soudani · MIT licence</span>")
+                           f"<span style='color:{TOKENS['muted']}'>version {__version__} · John Bussey and Sami Soudani · MIT licence</span>")
         link = QApplication.palette().color(QPalette.Link).name()
         self.link.setText(f'<a href="{REPO_URL}" style="color:{link}">github.com/sams808/AURORA</a>')

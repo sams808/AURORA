@@ -49,7 +49,7 @@ def test_plist():
     pl = specutil.plist()
     assert pl["CFBundleShortVersionString"] == aurora.__version__ == pl["CFBundleVersion"]
     assert pl["LSMinimumSystemVersion"] == (PKG / "min_macos.txt").read_text(encoding="utf-8").strip() == "15.0"
-    assert pl["NSHumanReadableCopyright"] == "© 2026 Sami Soudani, MIT licence"
+    assert pl["NSHumanReadableCopyright"] == "© 2026 John Bussey and Sami Soudani, MIT licence"
     assert pl["LSApplicationCategoryType"] == "public.app-category.education" and pl["NSHighResolutionCapable"] is True
     doc = pl["CFBundleDocumentTypes"][0]
     assert doc["LSItemContentTypes"] == ["public.folder"] and doc["LSHandlerRank"] == "Alternate"
@@ -61,7 +61,7 @@ def test_windows_version_strings():
     s = specutil.version_strings("aurora-cli.exe")
     assert s["FileVersion"] == s["ProductVersion"] == aurora.__version__ + ".0"
     assert s["CompanyName"] == "Washington State University" and s["ProductName"] == "AURORA"
-    assert s["LegalCopyright"] == "© 2026 Sami Soudani, MIT licence"
+    assert s["LegalCopyright"] == "© 2026 John Bussey and Sami Soudani, MIT licence"
     assert s["OriginalFilename"] == "aurora-cli.exe" and s["FileDescription"]
 
 

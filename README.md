@@ -100,7 +100,7 @@ AURORA is version 2 of John Bussey's SGM XAS GUI (Washington State University), 
 Edge and emission-line energies come from xraydb. Data acquired at the SGM beamline of the Canadian Light Source.
 The full credits text is in `CREDITS.md`.
 
-Licence: MIT (`LICENSE`). The installers carry `THIRD_PARTY_LICENSES.txt` for the bundled packages; Qt for Python is
+Licence: MIT (`LICENSE`), copyright 2026 John Bussey and Sami Soudani. The installers carry `THIRD_PARTY_LICENSES.txt` for the bundled packages; Qt for Python is
 used under the LGPL-3.0. Help > Licences shows all of them.
 
 ## Layout
@@ -123,4 +123,4 @@ branding/           logo (SVG, PNG 16-1024, .ico, .icns), wordmark
 docs/               DEVELOPER, DESIGN, make_screenshots.py
 ```
 
-Author: Sami Soudani.
+Authors: John Bussey and Sami Soudani.

@@ -111,10 +111,13 @@ def test_the_pattern_catches_a_beamtime_folder_name():
 
 
 def test_the_author_appears_only_by_full_name(published):
-    """The credits keep the author's full name; no text calls the author by first name ('<first>'s rule', ...)."""
-    author = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["authors"][0]["name"]
-    first = author.split()[0]
-    bare = re.compile(rf"(?<![A-Za-z0-9]){re.escape(first)}(?![A-Za-z0-9])(?!\s+{re.escape(author.split()[-1])})")
+    """The credits keep Sami Soudani's full name; no text uses the first name alone ('<first>'s rule', ...). The other
+    author, John Bussey, is named in full in the credits; 'John-format' is the established name of his file format."""
+    authors = [a["name"] for a in tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["authors"]]
+    assert authors == ["John Bussey", "Sami Soudani"], authors
+    author = next(a for a in authors if a.endswith("Soudani"))           # read, so this file does not trip its own scan
+    first, last = author.split()[0], author.split()[-1]
+    bare = re.compile(rf"(?<![A-Za-z0-9]){re.escape(first)}(?![A-Za-z0-9])(?!\s+{re.escape(last)})")
     hits = [f"{rel}:{i}" for rel, text in _texts(published).items()
             for i, line in enumerate(text.splitlines(), 1) if bare.search(line)]
     assert not hits, f"the author's first name outside the full credit name: {hits[:20]}"

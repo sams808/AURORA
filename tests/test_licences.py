@@ -12,7 +12,7 @@ import third_party_licenses as tpl  # noqa: E402
 
 def test_licence_file():
     text = (ROOT / "LICENSE").read_text(encoding="utf-8")
-    assert text.startswith("MIT License") and "Copyright (c) 2026 Sami Soudani" in text and "Sam " not in text
+    assert text.startswith("MIT License") and "Copyright (c) 2026 John Bussey and Sami Soudani" in text and "Sam " not in text
 
 
 def test_pyproject_licence_is_spdx():
@@ -92,7 +92,7 @@ def test_help_licences_reads_the_bundled_folder(monkeypatch, tmp_path):
     from aurora.app import diagnostics
     lic = tmp_path / "licenses"
     lic.mkdir()
-    for name, body in (("LICENSE", "MIT License\nCopyright (c) 2026 Sami Soudani\n"), ("CREDITS.md", "credits"),
+    for name, body in (("LICENSE", "MIT License\nCopyright (c) 2026 John Bussey and Sami Soudani\n"), ("CREDITS.md", "credits"),
                        ("THIRD_PARTY_LICENSES.txt", "THIRD-PARTY LICENCES -- AURORA test\nnumpy\n")):
         (lic / name).write_text(body, encoding="utf-8")
     monkeypatch.setattr(diagnostics, "_licence_dirs", lambda: [lic])

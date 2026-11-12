@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{name = "Sami Soudani"}]
+authors = [{name = "John Bussey"}, {name = "Sami Soudani"}]
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",

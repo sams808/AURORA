@@ -315,7 +315,8 @@ and Report show its full path. The committed images are 1656 × 1038: offscreen,
 
 ## 8. Conventions
 
-- Author "Sami Soudani". Code, comments and commits in English. Neutral voice in the public docs.
+- Copyright holders: John Bussey and Sami Soudani (LICENSE). The author is named "Sami Soudani" in full. Code,
+  comments and commits in English. Neutral voice in the public docs.
 - `pathlib` everywhere, raw data read-only, units in names (`fwhm_um`, `pitch_mm`, `pre_ev`), no invented values,
   print what you drop, say "not verified" when it is not.
 - The public repository excludes `legacy/` (the two parent code bases and the beamtime scripts), `docs/HANDOFF.md`,

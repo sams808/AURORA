@@ -27,7 +27,7 @@ ROOT = HERE.parent
 PRODUCT = "AURORA"
 COMPANY = "Washington State University"
 DESCRIPTION = "AURORA - soft X-ray XAS and XRF stacks from the SGM beamline, Canadian Light Source"
-COPYRIGHT = "© 2026 Sami Soudani, MIT licence"
+COPYRIGHT = "© 2026 John Bussey and Sami Soudani, MIT licence"
 BUNDLE_ID = "edu.wsu.aurora"
 PYTHON = (3, 12)                         # the Python of every frozen build (build scripts, CI)
 
