@@ -311,13 +311,18 @@ def test_a_second_open_supersedes_one_in_progress(qapp, tmp_path, monkeypatch, f
     """While a share that does not answer is being read, opening another project (recent list, drop, the demo) opens
     that one: the first discovery is cancelled and its late failure dropped (it was silently ignored, threads-8)."""
     import pathlib
+    import threading
     win = _window(qapp)
     home = win.home
     target = tmp_path / "share" / "unreachable beamtime"
     real_is_dir = pathlib.Path.is_dir
+    gate = threading.Event()        # the second discovery waits until its 'reading' state was checked (a fast runner,
+                                    # macOS Intel, had finished it before the check)
 
     def slow_is_dir(self, *a, **k):
         if "unreachable beamtime" not in str(self):
+            if self.name == fake_project.name and threading.current_thread() is not threading.main_thread():
+                gate.wait(30)
             return real_is_dir(self, *a, **k)
         time.sleep(2)                                            # the share answers after 2 s, then fails
         raise OSError(f"{self}: the network share does not answer")
@@ -327,9 +332,12 @@ def test_a_second_open_supersedes_one_in_progress(qapp, tmp_path, monkeypatch, f
         home.open_path(target)
         pump(qapp)
         assert not win.jobs.idle() and not home.open_btn.isEnabled()
-        home.open_path(fake_project)                             # the second request, while the first still waits
-        pump(qapp)
-        assert "reading" in home.path_label.text() and str(fake_project.name) in home.path_label.text()
+        try:
+            home.open_path(fake_project)                         # the second request, while the first still waits
+            pump(qapp)
+            assert "reading" in home.path_label.text() and str(fake_project.name) in home.path_label.text()
+        finally:
+            gate.set()
         wait(qapp, win, 30000)
     assert home.project is not None and home.project.root == fake_project.resolve()
     assert not home.failure_state.isVisible() and home.path_label.text().startswith(str(home.project.root))
