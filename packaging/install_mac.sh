@@ -130,5 +130,5 @@ if [ "${AURORA_NO_OPEN:-0}" != "1" ]; then
     open "$APP" || fail "AURORA is installed in $DEST but did not open: open it from there."
 fi
 say ""
-say "Done. AURORA $VERSION is in $DEST: open it from there, from Launchpad, or with Spotlight (Command-Space, AURORA)."
+say "Done. AURORA $VERSION is in $DEST: open it from there, or with Spotlight (Command-Space, AURORA)."
 say "To update later, run the same line again."
