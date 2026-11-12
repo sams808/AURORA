@@ -11,7 +11,7 @@
 #
 # What it does: checks macOS (15 Sequoia or later) and the processor (Apple silicon or Intel), downloads the matching
 # disk image and SHA256SUMS.txt of the release, compares the checksum, mounts the image read-only, verifies the app's
-# signature, closes a running AURORA, copies the app next to the old one and swaps it in (/Applications, or
+# signature, refuses while AURORA runs, copies the app next to the old one and swaps it in (/Applications, or
 # ~/Applications when /Applications cannot be written), verifies the installed copy, and opens AURORA.
 #
 # Options (environment variables):

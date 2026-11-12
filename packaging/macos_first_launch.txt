@@ -4,6 +4,12 @@ AURORA on macOS: the first launch
 AURORA needs macOS @MIN_MACOS@ or later. Use the arm64 disk image on a Mac with Apple silicon (M1 and later) and the
 x86_64 disk image on an Intel Mac.
 
+The simplest way, with no security message at all: open Terminal and run this one line, which installs AURORA
+from its GitHub page (after checking it) and opens it:
+  curl -fsSL https://raw.githubusercontent.com/sams808/AURORA/main/packaging/install_mac.sh | bash
+
+From this disk image instead:
+
 1. Drag AURORA into the Applications folder (the shortcut next to it in this window).
 
 2. Open AURORA from Applications. AURORA is free software that is not notarised by Apple, so the first time
