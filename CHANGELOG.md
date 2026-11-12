@@ -14,11 +14,12 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
   getting-started guide (Easy mode)". F1 in Easy mode opens the user guide's quick start at the page, with a
   screenshot of that page in Easy mode.
 - Easy mode speaks plain words everywhere, the expert term in parentheses; Advanced mode keeps the precise terms.
-  Reduce step 4 says in one sentence how the spectrum is made (the exact settings in its tooltip); maps say what their
-  colour shows and their colour scale reads low to high; Check says what to look for and its messages are plain;
-  Compare names signals in words and draws a spectrum it cannot scale dashed, with the reason; Fit says what a
-  coefficient means; the report has one plain row per kind of finding and "How to read the figures". Errors read in
-  plain words (a protected or read-only folder, a file open in another program, a missing share, a full disk).
+  Reduce step 4 says in one sentence how the spectrum is made (the exact settings in its tooltip); the step-2 card
+  says what its plot is; maps say what their colour shows and their colour scale reads low to high; Check says what
+  to look for and its messages are plain (their source in Advanced mode); Compare names signals in words and draws a
+  spectrum it cannot scale dashed, with the reason; Fit says what a coefficient means; the report has one plain row
+  per kind of finding and "How to read the figures". Errors read in plain words (a protected or read-only folder, a
+  file open in another program, a missing share, a full disk).
 - A beamtime AURORA may not write into (a locked drive, a read-only share, a protected folder) gets a banner with
   **Choose a working folder…**: the outlines, the checks, the Compare library, the caches, the saved spectra and the
   reports then go to a folder of your own, remembered for that beamtime, and nothing is written into the beamtime.
@@ -33,8 +34,10 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
   deselect, and a stroke that grew a sample says how to start the next one; each sample is drawn as the pixels it
   holds, so an erase shows; Easy says sample and pixels everywhere; footprint labels stay inside their footprints;
   a click on a sample-sheet row (now with its notes) names the next sample, and Rename offers the sheet's names;
-  Reduce's stack map colours from 0, its scan list leads with the sample's name; a sample on a stack that stopped
-  early gets one sentence everywhere; the top bar's Next link reads on the navy bar and links follow a theme switch;
+  Reduce's stack map colours from 0, its scan list leads with the sample's name; an XRF window reads "60–73" in
+  every text, both channels counted (the files keep John Bussey's end-excluded `[60, 74]`); a sample on a stack that
+  stopped early gets one sentence everywhere; Home's day and holder rows span the tree and its Edge and Status
+  columns are never cut; the top bar's Next link reads on the navy bar and links follow a theme switch;
   a read-only beamtime opens without a box; a working folder asks before it adopts outlines saved earlier and keeps
   the holder; Check marks rows already saved, names the electron yield when it falls, and the guide counts saved
   spectra from the files; Compare names every curve and says they are offset; the report can start with the
@@ -43,7 +46,8 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
 - A beamtime with only `raw/<day>/<scan>` opens and works: every configuration file is optional, and a file of the
   wrong shape never stops a project; Home and `aurora project` say what was left out and why. The project's own
   `config/sdd_calibration.json` is used before the CLS toolkit's file next to the beamtime (named when used); File >
-  Import SDD calibration… adds one.
+  Import SDD calibration… adds one. The calibration reads in words everywhere, and a calibration file that cannot be
+  used is named with its problem in Easy mode too.
 - Sample sheets of any lab: other encodings, separators, title lines and column names; File > Choose sample sheet…
   and New sample sheet…; the summary names the columns read and every CSV not used.
 - Holders keep their numbers; day folders under other names, scan folders without _survey / _stack and scans one
@@ -53,7 +57,8 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
 - Without a fixed line for the edge's own line, a new sample starts on the window of that line: the calibrated line
   of the edge, else John Bussey's 60:83 for F K (his GUI's default, so the saved files equal his), else the line of
   the edge on the nominal 10 eV per channel. Save as a fixed line… writes `config/roi_bins.json`; a zone on a line the
-  beamtime does not define is flagged in Reduce and before building.
+  beamtime does not define is flagged in Reduce and before building, and its fluorescence is left out of the report
+  instead of becoming empty columns.
 - The hand-drawn holder sketch is optional: the Survey shows a Sketch card only when the holder has one; **Load a
   sketch…** (next to the holder, and in the map's right-click menu) and **Remove the sketch** manage AURORA's copy in
   `.aurora/sketches/`, and `sketches/` and `zones_html/sketches/` are read too. The sample card is one line when there
@@ -93,8 +98,9 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
 - Long tasks run in the background on one progress strip with the elapsed time and Cancel (Esc); Cancel of "Read every
   scan of the holder" and of "Run the checks" stops within one energy. A failure opens one error dialog with Copy
   details and Open log folder, an error in a page's update after a task is reported instead of being swallowed, and
-  finished tasks no longer stay in memory over a long session. The window closes within seconds even while a task
-  runs or the project sits on a share that cannot be reached.
+  finished tasks no longer stay in memory over a long session, nor do edits merged into the undo step before them
+  or a page closed while a refit was pending. The window closes within seconds even while a task runs or the project
+  sits on a share that cannot be reached.
 - Every control has a tooltip and an accessible name in one vocabulary (normalisations read "/ I0, edge jump = 1"
   and so on; spin boxes carry their units). An empty perspective says what to do next, its buttons say what they do,
   and a button that cannot act says why.
@@ -212,7 +218,9 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
 - Survey: a **Zone preview** shows the zone's XRF emission from its survey points (counts per point; the window of the
   map's channel shaded and named, the other lines ticked; the curves named under the plot) and its XAS on a stack it
   covers, live while drawing; a stack not loaded is read once the stroke is written, with Cancel. Its empty states
-  say what to do.
+  say what to do; in Easy mode they and Reduce's empty preview name the sample, and the curves under the emission
+  say what SDD1 to SDD4 are. The preview's panel titles fit their panels (the full title in the plot's tooltip), and
+  the Survey's note on the grey bands is in its tooltip, so the card fits the column at 1200 × 760.
 - Reduce: the preview follows the stroke while it is drawn (at most every 0.15 s; on a scan where that is slow,
   without the de-spike, then at the release), and the region caption counts the change (*(+12 while drawing)*). An
   empty preview says why: no scan, no zone, an empty zone, a zone outside this scan (naming the scans it covers). The
@@ -240,7 +248,8 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
   and his polygon) is reproduced at all 311 energies.
 - Changing lo / hi or dragging a window in Easy mode (or in Advanced mode with "same range" ticked) moves all four
   windows by as many channels, so each detector keeps its own offsets. Without `roi_bins.json`, step 2 offers John
-  Bussey's default window 60:83 for an F K stack and says that the total XRF holds every emission line.
+  Bussey's default window 60:83 for an F K stack and says that the total XRF holds every emission line. The step-2
+  card forgets the region of the previous stack (a switch to a smaller stack raised an error).
 - Map clicks: a click selects a zone (the smallest one wins), Shift+click applies the tool to one pixel, stray drags
   are ignored; the **Lasso** and the **Polygon** take the pixels whose centre is inside (John Bussey's rule);
   right-click menus on zones and on the map; **Load polygon…** (in Easy mode too) / **Save polygon…** read and write
@@ -392,7 +401,8 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
 - The cover lists what changed since the previous build (zones added, removed or renamed, settings changed, new
   scans).
 - The report author is the person who builds it: the Settings value, else the system account's full name, else a
-  one-time prompt. No report names Sami Soudani by default any more, and Settings > report author starts blank.
+  one-time prompt. No report names the author of AURORA by default any more, and Settings > report author starts
+  blank.
 - A build works on a snapshot of the zones, so editing zones during a build cannot change the report.
 
 ### Installation, command line and self-test
@@ -441,7 +451,8 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
   internal planning document, and a test keeps private files and home-folder paths out of what git tracks. Tests
   that need real data (a beamtime, John Bussey's GUI) read their folders from `AURORA_REAL_PROJECT`,
   `AURORA_LEGACY` and `AURORA_JOHN_GUI`, or from an untracked `tests/local_paths.json` (template
-  `tests/local_paths.example.json`).
+  `tests/local_paths.example.json`), and the facts they check from `aurora_expectations.json` kept with the beamtime
+  (or `AURORA_REAL_EXPECTATIONS`).
 
 ### Manuals
 - The user guide starts with a quick start for non-specialists (the first spectrum in five steps, what each page

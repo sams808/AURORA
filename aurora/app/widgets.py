@@ -12,6 +12,8 @@
 - page_scroll(widget): a page that scrolls vertically instead of squeezing its cards; fit_height(panel): a panel
   never lower than its word-wrapped rows need at its width; size_to_current_tab(tabs); fit_screen(dialog, w, h).
 - set_enabled(widget, on, reason): disabled actions say why in their tooltip.
+- call_later(context, fn, ms): QTimer.singleShot(ms, context, fn) without PySide's leak of fn when the context dies
+  first.
 - default_dir / remember_dir / notify_saved / guarded_write: file dialogs that start in a sensible folder, exports that
   say what they wrote, and write errors shown as one calm dialog.
 """
@@ -35,6 +37,26 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QFrame, QHBoxLayout, QLabel,
 from aurora.core.cancel import CancelToken, Cancelled, cancellable
 
 log = logging.getLogger("aurora.app")
+
+
+# ----------------------------------------------------------------------------- deferred calls
+def call_later(context: QObject, fn, ms: int = 0) -> None:
+    """Run fn once, after `ms` milliseconds, unless `context` is destroyed first: QTimer.singleShot(ms, context, fn)
+    without its leak. PySide6 6.12 keeps the callable of a context single-shot for ever when the context is destroyed
+    before the timer fires, and with a bound method or a closure over a widget, the whole Python side of its window
+    (every child's wrapper, pyqtgraph's parentless menus) stays alive: each later style-sheet change re-polishes those
+    widgets too, which made the test suite's theme changes take minutes. A single-shot QTimer child of `context` dies
+    with it and takes its connection along. From another thread than the context's, the plain single-shot is kept
+    (a child cannot be created across threads)."""
+    if QThread.currentThread() is not context.thread():
+        QTimer.singleShot(ms, context, fn)
+        return
+    t = QTimer(context)
+    t.setSingleShot(True)
+    t.setInterval(int(ms))
+    t.timeout.connect(fn)
+    t.timeout.connect(t.deleteLater)
+    t.start()
 
 
 # ----------------------------------------------------------------------------- cards

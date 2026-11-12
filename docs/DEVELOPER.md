@@ -267,6 +267,14 @@ comparison or a physical invariant is.
   pipelines, not the exit code of `tail`.
 - **Workers.** `Worker` is a QThread; signals connected to plain functions run on the worker thread. Build dialogs
   and touch widgets only in slots of QObjects living on the GUI thread, and `wait()` the worker before dropping it.
+- **No `QTimer.singleShot(ms, context, fn)`.** PySide6 6.12 keeps `fn` alive for ever when the context is destroyed
+  before the timer fires; with a bound method or a closure over a widget, the Python side of the whole window
+  (pyqtgraph's parentless menus included) stays alive, and every later style-sheet change re-polishes it. Use
+  `widgets.call_later(context, fn, ms)`, a single-shot QTimer child of the context that dies with it.
+- **No strong reference from a C++-owned Python object back into the window.** A QUndoCommand pushed on a
+  QUndoStack is owned by the stack, and PySide keeps one reference to its Python side that the garbage collector
+  cannot see: a `self.session` on it made the session and its window uncollectable. `SnapshotCommand` holds the
+  session through a weak reference.
 - **pyqtgraph auto-range before the view has geometry is garbage.** Every plot sets its range from the data.
   `enableAutoSIPrefix(False)` on axes with mm or eV.
 - **Categorical colour maps** for cluster maps, continuous ones for everything else; the colour map name comes from

@@ -30,8 +30,8 @@ from aurora.app.help_text import explain, explain_all, header_tips, labelled, sa
 from aurora.app.mode import is_advanced, mark_advanced, mark_advanced_tab, mark_easy, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.vocab import plural
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, default_dir, fit_height,
-                                overlay_host, page_scroll, pair, remember_dir, set_enabled)
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, call_later, default_dir,
+                                fit_height, overlay_host, page_scroll, pair, remember_dir, set_enabled)
 from aurora.core import report as core_report
 from aurora.core.io.config import ZonesFile
 from aurora.core.io.textio import read_json
@@ -104,7 +104,7 @@ class _ShowDelegate(QStyledItemDelegate):
             self._pressed = None
             if hit:                                       # after the click: the jump may refill the list
                 fid = index.siblingAtColumn(0).data(Qt.UserRole)
-                QTimer.singleShot(0, self, lambda: self.on_click(fid))
+                call_later(self, lambda: self.on_click(fid))
         self.view.viewport().update(option.rect)
         return inside                                     # a press on the button neither selects nor jumps twice
 
@@ -504,7 +504,7 @@ class ReportPerspective(QWidget):
         self.scope_line.setText(f"The report will hold {first}one page per sample group ({groups}, {holders}) with the "
                                 f"spectra ticked Looks OK, then {then}. Figures at {quality} ({self.dpi.value()} dpi). "
                                 + tail)
-        QTimer.singleShot(0, self, self.fit_options)
+        call_later(self, self.fit_options)
 
     def compare_window(self):
         from aurora.app import nav
@@ -540,7 +540,7 @@ class ReportPerspective(QWidget):
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
-        QTimer.singleShot(0, self, self.fit_options)
+        call_later(self, self.fit_options)
 
     def _project_changed(self, project) -> None:
         self.out_dir.setText(str(project.output_root / "reports" / "aurora"))
@@ -915,7 +915,7 @@ class ReportPerspective(QWidget):
         else:
             ign.discard(fid)
         self.session.set_ui_value(IGNORED_KEY, sorted(ign))
-        QTimer.singleShot(0, self, lambda: self._ignore_applied(fid))      # after the click is handled
+        call_later(self, lambda: self._ignore_applied(fid))                 # after the click is handled
 
     def _ignore_applied(self, fid: str) -> None:
         """One tick: dim or restore that row, move it to its sorted place and recount. Only a list that is not in

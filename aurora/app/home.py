@@ -16,7 +16,7 @@ import os
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QMenu, QPushButton, QSplitter, QStyledItemDelegate, QTextBrowser,
@@ -30,8 +30,8 @@ from aurora.app.settings import recent_projects, remember_project, settings, wor
 from aurora.app.theme import MONO_FONT, TOKENS, on_theme_changed, refill_tones, set_item_tone, tone_of
 from aurora.app import guide
 from aurora.app.vocab import edge_words, flag_words, plural
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, default_dir,
-                                fit_columns, remember_dir, set_enabled)
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, call_later,
+                                default_dir, fit_columns, remember_dir, set_enabled)
 from aurora.core import overview
 from aurora.core.constants import sdd_geometry
 from aurora.core.model import Project, ScanInfo
@@ -431,7 +431,7 @@ class HomePerspective(QWidget):
         self.fill_recent()
         self.fill_recent_menu()
         self.update_actions()
-        QTimer.singleShot(0, self, self.refresh_recent)          # once the window is up: which recent ones exist
+        call_later(self, self.refresh_recent)                    # once the window is up: which recent ones exist
 
     def reading(self) -> bool:
         """An open (a discovery job) is in progress."""

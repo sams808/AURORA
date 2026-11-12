@@ -31,6 +31,7 @@ from aurora.app.icons import app_icon, mark_pixmap, two_state_icon
 from aurora.app.jobs import JobManager, all_managers
 from aurora.app.theme import TOKENS, apply_theme, follow_system, on_theme_changed
 from aurora.app.vocab import plural
+from aurora.app.widgets import call_later
 from aurora.app import guide
 from aurora.app import mode as ui_mode
 from aurora.app import shortcuts
@@ -1135,8 +1136,8 @@ def open_at_start(win: MainWindow, project: Path | None = None) -> None:
         rec = recent_projects()
         if rec:
             last = Path(rec[0])
-            QTimer.singleShot(0, win, lambda: None if getattr(app, "sent", 0) != sent
-                              else win.home.open_path(last, quiet=True))
+            call_later(win, lambda: None if getattr(app, "sent", 0) != sent
+                       else win.home.open_path(last, quiet=True))
     pending.clear()
 
 
@@ -1150,7 +1151,7 @@ def run(project: Path | None = None) -> int:
     win = MainWindow()
     win.show()
     open_at_start(win, project)
-    QTimer.singleShot(1500, win, lambda: updates.maybe_check_at_start(win))     # opt-in, once a day
+    call_later(win, lambda: updates.maybe_check_at_start(win), 1500)          # opt-in, once a day
     code = app.exec()
     if not shutdown_app(app, win, wait_s=EXIT_WAIT_S):
         # a job stuck in one call (a share that does not answer): deleting the application under its running thread

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QPoint, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QPoint, Qt, QUrl, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -36,8 +36,8 @@ from aurora.app.session import ALL_HOLDERS, DEFAULT_LABEL, CheckItem, Session
 from aurora.app.theme import (curve, dash, make_plot, on_theme_changed, pc, refill_tones, restyle_plot, role_pen,
                               set_item_tone, status_text)
 from aurora.app.vocab import DET_LABELS, plural
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, TermLabel, breakable, fit_height,
-                                overlay_host, page_scroll, set_enabled, held_file, set_plot_hint,
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, TaskBar, TermLabel, breakable, call_later,
+                                fit_height, overlay_host, page_scroll, set_enabled, held_file, set_plot_hint,
                                 write_error_text)
 from aurora.core import export, qc
 from aurora.core.constants import DETS
@@ -1110,7 +1110,7 @@ class CheckPerspective(QWidget):
             finally:
                 self._defer = False
             self._queue_dirty = True
-            QTimer.singleShot(0, self, self._refresh_if_dirty)
+            call_later(self, self._refresh_if_dirty)
         self.update_actions()
 
     def set_all_ok(self, on: bool) -> None:

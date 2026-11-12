@@ -33,8 +33,8 @@ from aurora.app.zone_tools import (PreviewThrottle, ZoneEditor, ZoneToolBar, fas
                                    shown_label, zone_drawn)
 from aurora.app.vocab import (DET_LABELS, ELEMENT_NAMES, NORM_LABELS, channel_words, det_items, det_words, edge_words,
                               flag_words, plural, unit_suffix)
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, fit_height,
-                                overlay_host, page_scroll, pair, say_failure, set_enabled)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, TaskBar, TermLabel, call_later,
+                                fit_height, overlay_host, page_scroll, pair, say_failure, set_enabled)
 from aurora.core import rules as rl
 from aurora.core import xrf_windows as xw
 from aurora.core.io.config import ScanSettings, Zone
@@ -687,7 +687,7 @@ class ReducePerspective(QWidget):
         super().resizeEvent(ev)
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self.fit_cards)
-        QTimer.singleShot(0, self, self._relabel_scans)
+        call_later(self, self._relabel_scans)
 
     def step_titles(self) -> list[str]:
         """The titles of the numbered step cards as shown ('1 · Scans of holder holderA', ...), Easy mode."""

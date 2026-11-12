@@ -18,13 +18,14 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QMenu, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout,
                                QWidget)
 
 from aurora.app.theme import (DASH, PAL, curve, dash, min_height, on_theme_changed, pc, role_pen,  # noqa: F401
                               style_plot, with_alpha)                     # PAL / DASH re-exported
+from aurora.app.widgets import call_later
 from aurora.core.spectra import ZoneTraces
 
 THREE_PANELS_PX = 300           # the three panels with readable ticks (g09; a page scrolls rather than squeeze them)
@@ -288,7 +289,7 @@ class PreviewPlot(QWidget):
             self._fit_legend()
             # the view seats its plots at their minimum width before the narrower titles and legend take effect (a
             # 1500 to 1200 px resize left the plots 80 px wider than the view, cut at the right): seat them again
-            QTimer.singleShot(0, self, self._reseat)
+            call_later(self, self._reseat)
         return False
 
     def _reseat(self) -> None:

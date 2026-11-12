@@ -11,6 +11,7 @@ step. Attaching scans and loading stacks are not edits and are never recorded.
 from __future__ import annotations
 
 import json
+import weakref
 
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
@@ -41,12 +42,20 @@ class SnapshotCommand(QUndoCommand):
     def __init__(self, session, text: str, before: Snapshot, after: Snapshot, place_before: tuple, place_after: tuple,
                  when: float, merge: bool = True):
         super().__init__(text)
-        self.session = session
+        # A weak reference: the QUndoStack (a child of the session) owns the command in C++, so its Python side holds
+        # one reference PySide never gives back; a strong one here would keep the session, and through it the whole
+        # window, alive after the window is destroyed (a cycle the garbage collector cannot see is garbage).
+        self._session = weakref.ref(session)
         self.before, self.after = before, after
         self.place_before, self.place_after = place_before, place_after       # (holder key, zone id)
         self.when = when
         self.merge = bool(merge)        # False: a step of its own (a stroke), never merged by time or description
         self._pushed = False            # QUndoStack.push calls redo() once: the edit is already in place then
+
+    @property
+    def session(self):
+        """The Session the edit belongs to, or None once it is gone."""
+        return self._session()
 
     def id(self) -> int:                # noqa: A003 (Qt's name)
         return MERGE_ID
@@ -89,16 +98,22 @@ class SnapshotCommand(QUndoCommand):
         self.when = other.when
         if self.after == self.before:
             self.setObsolete(True)      # the edits cancelled each other out: no step at all
+        # the stack deletes `other` now, but PySide6 keeps its Python side: let go of its snapshots at least
+        other.before = other.after = Snapshot(holders={})
         return True
 
     def undo(self) -> None:
-        self.session._apply_snapshot(self.before, self.place_before, f"undone: {self.text()}")
+        ses = self.session
+        if ses is not None:
+            ses._apply_snapshot(self.before, self.place_before, f"undone: {self.text()}")
 
     def redo(self) -> None:
         if not self._pushed:
             self._pushed = True
             return
-        self.session._apply_snapshot(self.after, self.place_after, f"redone: {self.text()}")
+        ses = self.session
+        if ses is not None:
+            ses._apply_snapshot(self.after, self.place_after, f"redone: {self.text()}")
 
 
 def make_stack(parent) -> QUndoStack:

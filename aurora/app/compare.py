@@ -25,9 +25,9 @@ from aurora.app.shortcuts import native_text
 from aurora.app.theme import (CURVE_NAMES, CURVES, curve, dash, label_for, make_plot, min_height, on_theme_changed,
                               role_pen, set_tone, swatch_icon)
 from aurora.app.vocab import edge_words, plural, signal_label, unit_suffix
-from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path,
-                                fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair, remember_dir,
-                                set_enabled, set_plot_hint)
+from aurora.app.widgets import (Card, Chip, ElidedLabel, EmptyState, FlowLayout, call_later, default_dir,
+                                default_path, fit_height, guarded_write, notify_saved, overlay_host, page_scroll, pair,
+                                remember_dir, set_enabled, set_plot_hint)
 from aurora.core.compare import (E0_MODE_TEXT, E0_MODES, NORMS, derivative, difference, export_wide_csv,
                                  legacy_auto_windows, local_peaks, sidecar_path, stack_offsets)
 
@@ -1218,8 +1218,7 @@ class ComparePerspective(QWidget):
                                             yRange=(float(s.y[fin].min()), float(s.y[fin].max())), padding=0.05, disableAutoRange=True)
         how = {"deriv": "derivative", "half": "half step", "table": "tabulated", "fixed": "fixed"}.get(
             r.e0_mode, f"as {r.e0_mode[4:]}" if r.e0_mode.startswith("row:") else r.e0_mode)
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self, self._fit_diag)
+        call_later(self, self._fit_diag)
         if not mode.is_advanced():
             self.diag.setTitle(self.diag_title_easy(r, nr))
             self.diag_note.setText(self.diag_note_easy(r, nr, s, edge_ev))
@@ -1237,8 +1236,7 @@ class ComparePerspective(QWidget):
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self, self._fit_diag)
+        call_later(self, self._fit_diag)
 
     @staticmethod
     def diag_title_easy(r, nr) -> str:
