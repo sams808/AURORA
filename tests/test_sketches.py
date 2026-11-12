@@ -211,7 +211,8 @@ def test_the_sample_card_collapses_to_one_line(qapp, fake_project):
         assert section_of(SHEET_ANCHOR) == "2.4"                           # the link opens the sample-sheet section
         card = sv.samples_card                                             # the line and the two buttons only
         assert card.height() <= card.minimumSizeHint().height() + 1 and card.height() < 200
-        assert card.height() < sv.zones_card.height()
+        note = sv.sheet_note                                               # the line wraps at most once (DejaVu Sans)
+        assert note.height() <= 2 * note.fontMetrics().lineSpacing() + 4, (note.height(), note.text())
     finally:
         _close(win)
     (fake_project / "samples.csv").write_text("Sample ID,Holder,Group\nq1,holderZ,G\nq2,holderY,G\n", encoding="utf-8")

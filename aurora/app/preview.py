@@ -28,7 +28,7 @@ from aurora.app.theme import (DASH, PAL, curve, dash, min_height, on_theme_chang
 from aurora.app.widgets import call_later
 from aurora.core.spectra import ZoneTraces
 
-THREE_PANELS_PX = 300           # the three panels with readable ticks (g09; a page scrolls rather than squeeze them)
+THREE_PANELS_PX = 316           # the three panels with readable ticks (g09; a page scrolls rather than squeeze them)
 MIN_PLOT_PX = 180               # the compact fluorescence panel never gets less (min_plot_px: the Survey's 120)
 MIN_TOP_PX = 110                # the fluorescence panel never gets less
 COMPACT_BELOW_PX = 260          # below this plot height, the TEY and I0 panels hide (compact)

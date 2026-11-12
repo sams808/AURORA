@@ -429,7 +429,7 @@ class ReducePerspective(QWidget):
         self.del_zone_btn = QPushButton("Delete sample"); self.del_zone_btn.clicked.connect(self._delete_zone)
         self.z_label = QComboBox(); self.z_label.setEditable(True); self.z_label.setMinimumWidth(150)
         self.z_label.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.z_label.setMinimumContentsLength(12)
+        self.z_label.setMinimumContentsLength(9)       # editable: a longer name scrolls (the centre column fits)
         zr.addWidget(self.new_zone_btn); zr.addWidget(self.del_zone_btn)
         zr.addWidget(pair(labelled("sample name", self.z_label, "reduce.label"), self.z_label))
         centre.body.addWidget(zone_row)

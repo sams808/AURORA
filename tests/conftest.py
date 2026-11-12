@@ -8,6 +8,17 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# module- and session-scoped fixtures (the QApplication, the demo windows) run before the per-test
+# _isolated_settings below: without this they read the user's own settings, and a Larger text size or Advanced mode
+# saved there changed their results (the Survey map 180 px high, a scan card 493 px wide)
+if not os.environ.get("AURORA_SETTINGS_DIR"):
+    import atexit
+    import shutil
+    import tempfile
+    _SESSION_SETTINGS = tempfile.mkdtemp(prefix="aurora-test-settings-")
+    os.environ["AURORA_SETTINGS_DIR"] = _SESSION_SETTINGS
+    atexit.register(shutil.rmtree, _SESSION_SETTINGS, True)
+
 
 def system_font_dir() -> str | None:
     """The folder of the system fonts, flat enough for Qt's offscreen font database (None when there is none)."""

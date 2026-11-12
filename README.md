@@ -5,7 +5,7 @@ application for Windows and macOS.
 
 AURORA is version 2 of John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_Beamline_Analysis notebooks.
 
-Status 0.4.0 (2026-11-08): every perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps, Report).
+Status 0.4.0 (2026-11-11): every perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps, Report).
 AURORA starts in **Easy mode**, the basic path of John Bussey's GUI (open the beamtime, draw the samples, check the
 spectra, compare, fit with LCF, build the report) in plain words, for people new to X-ray absorption: a glossary
 (Help > Glossary), a *Getting started* row on Home and a quick start in the user guide. **Advanced mode** (View >
@@ -36,8 +36,8 @@ The installers are not code-signed: Windows SmartScreen asks once (*More info* >
 The macOS builds are tested on GitHub's macOS runners, not on a physical Mac. The installation guide covers both
 systems, the command line (`aurora-cli.exe` on Windows) and where settings, logs and caches are stored.
 
-Measured on the last local Windows x64 build (2026-11-08, PyInstaller 6.22.3, PySide6 6.11.3): the setup is 104 MiB,
-the zip 143 MiB, and the installed application folder 307 MiB.
+Measured on the last local Windows x64 build (2026-11-11, PyInstaller 6.22.3, PySide6 6.11.3): the setup is 107 MiB,
+the zip 146 MiB, and the installed application folder 308 MiB.
 
 ## Documentation
 

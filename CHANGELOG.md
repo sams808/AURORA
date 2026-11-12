@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (2026-11-08)
+## 0.4.0 (2026-11-11)
 Easy mode follows John Bussey's GUI step by step and speaks plain words, Advanced mode keeps every option, zones are
 drawn and erased on the Survey and in Reduce with a live preview, a beamtime of any lab opens with only its scan
 folders, zones are never lost, and AURORA installs on Windows and macOS.
@@ -95,6 +95,9 @@ folders, zones are never lost, and AURORA installs on Windows and macOS.
   Enter closes About, and the first Tab on the welcome page reaches Open project….
 - macOS: Full screen is Control-Command-F, Option-Command-Up / Down also step the holders, and the interface uses the
   system font (no missing font is looked up at start).
+- At the Larger text size in the smallest window, with a wide system font (DejaVu Sans on Linux, the macOS system
+  font): the Survey's header controls move to a second line instead of squeezing the holder box, the Reduce columns
+  fit without sideways scrolling, and the Reduce preview's TEY and I0 panels keep room for their ticks.
 - Long tasks run in the background on one progress strip with the elapsed time and Cancel (Esc); Cancel of "Read every
   scan of the holder" and of "Run the checks" stops within one energy. A failure opens one error dialog with Copy
   details and Open log folder, an error in a page's update after a task is reported instead of being swallowed, and

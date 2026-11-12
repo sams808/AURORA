@@ -1195,13 +1195,15 @@ def test_undo_names_the_step_it_undoes(qapp, swin):
     """The tool bar's Undo undoes the last edit of the one history (a setting edited on a card is a step too): its
     tooltip names that step, as Edit > Undo does."""
     from aurora.app.help_text import HELP
+    from aurora.app.shortcuts import native_text
+    idle_tip = native_text(HELP["zones.undo"][0])                    # ⌘Z on macOS
     win, ses, sv = swin, swin.session, swin.survey
     bar = sv.toolbar
-    assert bar.undo_btn.toolTip() == HELP["zones.undo"][0] and not bar.undo_btn.isEnabled()
+    assert bar.undo_btn.toolTip() == idle_tip and not bar.undo_btn.isEnabled()
     sd = ses.stack_loaded(win.sid)
     sv.set_tool("rect+")
     qdrag(qapp, sv.map, _footprint_box(sd))
-    want = "Undo: add a rectangle to a new zone (Ctrl+Z). One stroke is one step."
+    want = native_text("Undo: add a rectangle to a new zone (Ctrl+Z). One stroke is one step.")
     assert bar.undo_btn.toolTip() == want == win.reduce.toolbar.undo_btn.toolTip()
     z = ses.zone()
     with ses.edit(f"rename zone {z.id}"):
@@ -1210,7 +1212,7 @@ def test_undo_names_the_step_it_undoes(qapp, swin):
     bar.undo_btn.click(); pump(qapp)
     assert ses.zone(z.id).label != "sample A" and bar.undo_btn.toolTip() == want
     bar.undo_btn.click(); pump(qapp)
-    assert not _zones(ses) and bar.undo_btn.toolTip() == HELP["zones.undo"][0]
+    assert not _zones(ses) and bar.undo_btn.toolTip() == idle_tip
 
 
 def test_polygon_draw_and_erase_on_the_survey_in_advanced(qapp, swin):

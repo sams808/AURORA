@@ -35,7 +35,7 @@ from aurora.app.mode import is_advanced, mark_advanced, on_mode_changed
 from aurora.app.session import Session
 from aurora.app.theme import FOOTPRINTS, MAP_OVERLAY, curve, on_theme_changed, swatch_icon
 from aurora.app.vocab import channel_words, det_items, plural, unit_suffix
-from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, default_dir, default_path, guarded_write,
+from aurora.app.widgets import (Card, ElidedLabel, EmptyState, FlowLayout, HeaderRow, default_dir, default_path, guarded_write,
                                 notify_saved, overlay_host, pair, remember_dir, set_enabled)
 from aurora.app.zone_preview import ZonePreviewCard
 from aurora.app.zone_tools import (FEEDBACK_MS, PreviewThrottle, ZoneEditor, ZoneToolBar, clear_zone, register_shortcuts,
@@ -195,30 +195,31 @@ class SurveyPerspective(QWidget):
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
 
-        head = QHBoxLayout()
+        # the header: the controls go to a second line rather than squeeze the holder box (Larger text, 1200 px)
+        self.head = head = HeaderRow()
         h1 = QLabel("Survey"); h1.setObjectName("h1")
         self.subtitle = sub = ElidedLabel(say("survey.subtitle"), Qt.ElideRight); sub.setObjectName("muted")
-        head.addWidget(h1); head.addWidget(sub, 1)
+        head.add_lead(h1); head.add_lead(sub, 1)
         self.holder_combo = QComboBox()
         self.holder_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.holder_combo.setMinimumContentsLength(18)
         self.holder_combo.currentIndexChanged.connect(self._holder_picked)
-        head.addWidget(labelled("Holder", self.holder_combo, "survey.holder"))
-        head.addWidget(self.holder_combo)
+        head.add_control(labelled("Holder", self.holder_combo, "survey.holder"))
+        head.add_control(self.holder_combo)
         self.sketch_btn = QPushButton("Load a sketch…")        # optional: a drawing or photo of the holder
         self.sketch_btn.setFlat(True)
         self.sketch_btn.clicked.connect(lambda: self.load_sketch())
-        head.addWidget(self.sketch_btn)
+        head.add_control(self.sketch_btn)
         self.import_btn = QPushButton("Import zones…")
         self.import_btn.clicked.connect(self._import)
         self.export_btn = QPushButton("Export zones…")
         self.export_btn.clicked.connect(self._export)
-        head.addWidget(self.import_btn); head.addWidget(self.export_btn)
+        head.add_control(self.import_btn); head.add_control(self.export_btn)
         self.grid_btn = QPushButton("Grid of zones…")       # Advanced: rect+ over a block of pads, then the dialog
         self.grid_btn.setCheckable(True)
         self.grid_btn.toggled.connect(self._grid_armed)
-        head.addWidget(self.grid_btn)
-        root.addLayout(head)
+        head.add_control(self.grid_btn)
+        root.addWidget(head)
 
         self.split = split = QSplitter(Qt.Horizontal)
         left = Card("Survey map", help_anchor="3-survey")

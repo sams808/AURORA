@@ -161,7 +161,10 @@ class XrfWindowCard(Card):
         self.source.setMinimumContentsLength(12)
         for k, text in SOURCES:
             self.source.addItem(text, k)
-        al.addWidget(pair(labelled("spectrum of", self.source, "reduce.window.source"), self.source))
+        # the label and its box are two items of the row: the box keeps its width, the label may end the line above it
+        # (one pair held the column 30 px wider than Reduce has at Larger text)
+        al.addWidget(labelled("spectrum of", self.source, "reduce.window.source"))
+        al.addWidget(self.source)
         self.same_range = QCheckBox("same range for all detectors")
         self.same_range.setChecked(True)
         al.addWidget(self.same_range)

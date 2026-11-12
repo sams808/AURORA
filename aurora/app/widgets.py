@@ -551,6 +551,67 @@ class FlowLayout(QLayout):
         return max(0, y - self._space) - rect.y() + m.bottom()
 
 
+class HeaderRow(QWidget):
+    """A page's header: the title and its subtitle on the left, the page's controls on the right; the controls move
+    to a second line, right-aligned, when one line would squeeze them below their width (Larger text with a wide font
+    at the smallest window: the Survey's holder box was cut to 175 of its 290 px with DejaVu Sans)."""
+
+    def __init__(self, spacing: int = 6, parent: QWidget | None = None):
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(spacing)
+        self.lead = QHBoxLayout()
+        self.lead.setContentsMargins(0, 0, 0, 0)
+        self.lead.setSpacing(spacing)
+        self.second = QHBoxLayout()
+        self.second.setContentsMargins(0, 0, 0, 0)
+        self.second.setSpacing(spacing)
+        self.second.addStretch(1)
+        outer.addLayout(self.lead)
+        outer.addLayout(self.second)
+        self.controls = QWidget()
+        self.tail = QHBoxLayout(self.controls)
+        self.tail.setContentsMargins(0, 0, 0, 0)
+        self.tail.setSpacing(spacing)
+        self.lead.addWidget(self.controls)
+        self.wrapped = False
+
+    def add_lead(self, w: QWidget, stretch: int = 0) -> None:
+        self.lead.insertWidget(self.lead.indexOf(self.controls) if not self.wrapped else self.lead.count(), w, stretch)
+
+    def add_control(self, w: QWidget) -> None:
+        self.tail.addWidget(w)
+
+    def _lead_min(self) -> int:
+        widths = [self.lead.itemAt(i).minimumSize().width() for i in range(self.lead.count())
+                  if self.lead.itemAt(i).widget() is not self.controls and not self.lead.itemAt(i).isEmpty()]
+        return sum(widths) + self.lead.spacing() * max(0, len(widths) - 1)
+
+    def place(self) -> None:
+        """One line when the title's minimum and the controls' full width fit, else the controls on a second line."""
+        need = self._lead_min() + self.lead.spacing() + self.controls.sizeHint().width()
+        wrap = self.width() < need
+        if wrap == self.wrapped:
+            return
+        self.wrapped = wrap
+        if wrap:
+            self.lead.removeWidget(self.controls)
+            self.second.addWidget(self.controls)
+        else:
+            self.second.removeWidget(self.controls)
+            self.lead.addWidget(self.controls)
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self.place()
+
+    def event(self, ev) -> bool:
+        if ev.type() in (QEvent.LayoutRequest, QEvent.Show):       # a control shown or hidden, a Text size change
+            self.place()
+        return super().event(ev)
+
+
 def pair(*widgets: QWidget, spacing: int = 6) -> QWidget:
     """A label and its field (or fields) kept together on one line of a wrapping row."""
     w = QWidget()

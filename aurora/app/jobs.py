@@ -218,9 +218,15 @@ class JobManager(QObject):
     def wait_idle(self, timeout_ms: int = 5000) -> bool:
         """Process events until every job has ended (its callbacks ran) or the timeout passed. True when idle."""
         deadline = time.monotonic() + timeout_ms / 1000.0
-        while not self.idle() and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
             QCoreApplication.processEvents(QEventLoop.AllEvents, 20)
-            if not self.idle():
+            if self.idle():
+                # the last job's callbacks and a timer due in this pass may start another job (the Report's debounced
+                # check before building did, after a build): idle only when one more pass started nothing
+                QCoreApplication.processEvents()
+                if self.idle():
+                    return True
+            else:
                 time.sleep(0.005)
         QCoreApplication.processEvents()
         return self.idle()

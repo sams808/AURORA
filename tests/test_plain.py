@@ -314,8 +314,9 @@ def test_rail_tooltips_say_what_each_page_is_for(qapp):
     from aurora.app.main import MainWindow
     win = MainWindow()
     try:
+        from aurora.app.shortcuts import native_text
         tip = win.rail_buttons["survey"].toolTip()
-        assert tip.startswith("Survey (Ctrl+2)") and "where the samples and the measured areas are" in tip
+        assert tip.startswith(native_text("Survey (Ctrl+2)")) and "where the samples and the measured areas are" in tip
         assert "Advanced mode" in win.rail_buttons["maps"].toolTip()
     finally:
         close(win)
