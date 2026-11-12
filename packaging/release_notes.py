@@ -44,9 +44,13 @@ def notes(version: str, changelog: str, min_macos: str) -> str:
 ### First launch
 - Windows: SmartScreen may say "Windows protected your PC" because the installer is not code-signed. Click
   More info > Run anyway.
-- macOS: AURORA is not notarised by Apple. After the first attempt to open it, go to System Settings >
-  Privacy & Security and click Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/AURORA.app` in
-  Terminal. The note "If macOS blocks AURORA.txt" inside the disk image explains both.
+- macOS, the simplest: in Terminal, run
+  `curl -fsSL https://raw.githubusercontent.com/sams808/AURORA/main/packaging/install_mac.sh | bash`. It installs the
+  disk image for the Mac's chip after checking its checksum and signature, and AURORA opens the first time.
+- macOS, from a downloaded disk image: AURORA is not notarised by Apple. After the first attempt to open it, go to
+  System Settings > Privacy & Security and click Open Anyway, or run
+  `xattr -dr com.apple.quarantine /Applications/AURORA.app` in Terminal. The note "If macOS blocks AURORA.txt" inside
+  the disk image explains both.
 """
 
 

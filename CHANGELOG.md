@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 (2026-11-12)
+- macOS: the one-line install. In Terminal, `curl -fsSL https://raw.githubusercontent.com/sams808/AURORA/main/packaging/install_mac.sh | bash`
+  downloads the latest release for the Mac's chip, checks its checksum and signature, installs AURORA in Applications
+  and opens it, with no security stop at the first launch (INSTALL section 3). The same line updates AURORA.
+- macOS: the drawing hint and Help say "hold ⌘" where they said "hold Ctrl" (a Control-click is a right-click on a
+  Mac, which erases), and Compare says "⌘-click" to select two rows.
+
 ## 0.4.1 (2026-11-12)
 - The copyright of AURORA is John Bussey's and Sami Soudani's, under the MIT licence: LICENSE, About, the version
   information of the Windows programs and of the macOS application, and the package metadata name both.

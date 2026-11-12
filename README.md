@@ -5,7 +5,7 @@ application for Windows and macOS.
 
 AURORA is version 2 of John Bussey's SGM XAS GUI, based on James J. Dynes' SGM_Beamline_Analysis notebooks.
 
-Status 0.4.1 (2026-11-12): every perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps, Report).
+Status 0.4.2 (2026-11-12): every perspective is in place (Home, Survey, Reduce, Check, Compare, Fit, Maps, Report).
 AURORA starts in **Easy mode**, the basic path of John Bussey's GUI (open the beamtime, draw the samples, check the
 spectra, compare, fit with LCF, build the report) in plain words, for people new to X-ray absorption: a glossary
 (Help > Glossary), a *Getting started* row on Home and a quick start in the user guide. **Advanced mode** (View >
