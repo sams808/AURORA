@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash        # bash -eo pipefail: a failed curl in 'curl ... | bash' fails the step
+
 jobs:
   install:
     strategy:
@@ -56,10 +60,9 @@ jobs:
       - name: The same line again updates the installed copy
         timeout-minutes: 10
         run: |
-          BEFORE="$(stat -f %m /Applications/AURORA.app)"
-          sleep 2
+          BEFORE="$(stat -f %i /Applications/AURORA.app)"        # inode: ditto keeps the image's times
           curl -fsSL "$LINE_URL" | AURORA_NO_OPEN=1 bash
-          AFTER="$(stat -f %m /Applications/AURORA.app)"
+          AFTER="$(stat -f %i /Applications/AURORA.app)"
           test "$AFTER" != "$BEFORE"
           ls -la /Applications | grep -v -- '-installing.app'
           test -z "$(ls -d /Applications/.AURORA-*-installing.app 2>/dev/null)"
